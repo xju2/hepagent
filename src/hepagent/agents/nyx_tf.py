@@ -1,5 +1,6 @@
 from agents import Agent, Runner
 from hepagent.model_providers import get_cborg_model_provider
+from hepagent.agent_helps import print_usage
 
 
 agent = Agent(
@@ -21,6 +22,7 @@ async def main():
 """
     result = await Runner.run(agent, task_prompt)
     print(result.final_output)
+    print_usage(result.context_wrapper.usage)
 
 
 if __name__ == "__main__":

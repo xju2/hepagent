@@ -10,6 +10,7 @@ authors = [
   {name = "X. Ju", email = "xju@lbl.gov" }
 ]
 dependencies = [
+    "camb>=1.6.5",
     "matplotlib>=3.10.8",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",
