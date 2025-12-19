@@ -5,7 +5,8 @@ from hepagent.model_providers import get_cborg_model_provider
 agent = Agent(
     name="Cosmic Transfer Function Creator",
     instructions=("You write python code to create cosmic transfer functions."
-    "The code should be efficient and well-documented."),
+    "The code should be efficient and well-documented."
+    "Use the Python package: CAMB, CosmicIC transfer function generator."),
     model=get_cborg_model_provider()
 )
 
