@@ -1,7 +1,7 @@
 from agents import Agent, Runner
 from hepagent.model_providers import get_cborg_model_provider
 from hepagent.agent_helpers import print_usage
-from hepagent.tools.nyx.transfer_function import create_transfer_function_tool
+from hepagent.tools.nyx.transfer_function import create_transfer_function
 
 
 agent = Agent(
@@ -12,7 +12,7 @@ agent = Agent(
         "Use the Python package: CAMB, CosmicIC transfer function generator."
     ),
     model=get_cborg_model_provider(),
-    tools=[create_transfer_function_tool],
+    tools=[create_transfer_function],
 )
 
 
@@ -21,8 +21,8 @@ async def main():
     - h = 0.675
     - Omega_m = 0.31
     - Omega_b = 0.0487
-    - sigma_8 = 0.83
-    - n_s = 0.96.
+    - n_s = 0.96
+    - z_ic = 200
     And save the output to /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0/cmb.tf"
 """
     result = await Runner.run(agent, task_prompt)
