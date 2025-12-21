@@ -32,4 +32,4 @@ repos:
     rev: v0.1.6
     hooks:
       - id: detect-missing-init
-        args: ["--create", "--python-folders", "src/fundra"] # See the arguments section
+        args: ["--create", "--python-folders", "src/hepagent"] # See the arguments section
