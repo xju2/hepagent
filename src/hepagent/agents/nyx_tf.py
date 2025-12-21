@@ -2,18 +2,20 @@ from agents import Agent, Runner
 from hepagent.model_providers import get_cborg_model_provider
 from hepagent.agent_helpers import print_usage
 from hepagent.tools.nyx.transfer_function import create_transfer_function
+from hepagent.agents.nyx_context import NyxContext
 
 
-agent = Agent(
-    name="Cosmic Transfer Function Creator",
-    instructions=(
-        "You write python code to create cosmic transfer functions."
-        "The code should be efficient and well-documented."
-        "Use the Python package: CAMB, CosmicIC transfer function generator."
-    ),
-    model=get_cborg_model_provider(),
-    tools=[create_transfer_function],
-)
+def create() -> Agent[NyxContext]:
+    agent = Agent[NyxContext](
+        name="Cosmic Transfer Function Creator",
+        instructions=(
+            "Create a cosmic transfer function for a given set of cosmological parameters."
+            "And save the output to the agent working directory, if not specified."
+        ),
+        model=get_cborg_model_provider(),
+        tools=[create_transfer_function],
+    )
+    return agent
 
 
 async def main():
@@ -25,6 +27,7 @@ async def main():
     - z_ic = 200
     And save the output to /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0/cmb.tf"
 """
+    agent = create()
     result = await Runner.run(agent, task_prompt)
     print(result.final_output)
     print_usage(result.context_wrapper.usage)
