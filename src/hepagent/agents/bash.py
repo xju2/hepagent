@@ -3,6 +3,7 @@ Adapted from min-swe-agent:
 https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/default.py
 """
 
+import os
 from pydantic import BaseModel
 from agents import Agent
 from agents import function_tool
@@ -16,7 +17,6 @@ class LocalEnvironmentConfig(BaseModel):
     timeout: int = 30
 
 
-@function_tool
 def execute_bash_command(cmd: str) -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
@@ -25,11 +25,29 @@ def execute_bash_command(cmd: str) -> dict:
         cmd,
         shell=True,
         text=True,
+        env=os.environ | config.env,
+        timeout=config.timeout,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=config.timeout,
     )
     return {"output": result.stdout, "returncode": result.returncode}
+
+
+@function_tool
+def execute_bash_command_with_confirmation(cmd: str) -> dict:
+    """Only execute a bash command with user's confirmation and return the output."""
+
+    # print the command and ask for confirmation.
+    print(f"About to execute command:\n{cmd}")
+    confirmation = input("Do you want to proceed? (y/n): ")
+    if confirmation.lower() != "y":
+        return {"output": "Command execution cancelled by user.", "returncode": 1}
+
+    results = execute_bash_command(cmd)
+    print(f"Command return code:\t{results['returncode']}")
+    return results
 
 
 def create() -> Agent:
@@ -49,7 +67,7 @@ def create() -> Agent:
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_cborg_model_provider(),
-        tools=[execute_bash_command],
+        tools=[execute_bash_command_with_confirmation],
     )
     return agent
 
