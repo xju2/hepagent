@@ -4,11 +4,13 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 """
 
 import os
-from pydantic import BaseModel
-from agents import Agent
-from agents import function_tool
-from hepagent.model_providers import get_cborg_model_provider
 import subprocess
+from pathlib import Path
+
+from agents import Agent, function_tool
+from pydantic import BaseModel
+
+from hepagent.model_providers import get_cborg_model_provider
 
 
 class LocalEnvironmentConfig(BaseModel):
@@ -17,14 +19,16 @@ class LocalEnvironmentConfig(BaseModel):
     timeout: int = 30
 
 
-def execute_bash_command(cmd: str) -> dict:
+def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
+    cwd = cwd or config.cwd or str(Path.cwd())
 
     result = subprocess.run(
         cmd,
         shell=True,
         text=True,
+        cwd=cwd,
         env=os.environ | config.env,
         timeout=config.timeout,
         encoding="utf-8",
@@ -35,17 +39,22 @@ def execute_bash_command(cmd: str) -> dict:
     return {"output": result.stdout, "returncode": result.returncode}
 
 
+error_msg = """Tool calling is cancelled by user. Stop thinking!
+Tell users what was your plan to justify the tool calling
+and suggest user running the request again if needed."""
+
+
 @function_tool
-def execute_bash_command_with_confirmation(cmd: str) -> dict:
+def execute_bash_command_with_confirmation(cmd: str, cwd: str = "") -> dict:
     """Only execute a bash command with user's confirmation and return the output."""
 
     # print the command and ask for confirmation.
-    print(f"About to execute command:\n{cmd}")
+    print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}")
     confirmation = input("Do you want to proceed? (y/n): ")
     if confirmation.lower() != "y":
-        return {"output": "Command execution cancelled by user.", "returncode": 1}
+        return {"output": error_msg, "returncode": 1}
 
-    results = execute_bash_command(cmd)
+    results = execute_bash_command(cmd, cwd=cwd)
     print(f"Command return code:\t{results['returncode']}")
     return results
 
