@@ -6,6 +6,7 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 import os
 import subprocess
 from pathlib import Path
+import shlex
 
 from agents import Agent, function_tool
 from pydantic import BaseModel
@@ -23,10 +24,11 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
     cwd = cwd or config.cwd or str(Path.cwd())
+    commands = shlex.split(cmd)
 
     result = subprocess.run(
-        cmd,
-        shell=True,
+        commands,
+        shell=False,
         text=True,
         cwd=cwd,
         env=os.environ | config.env,
@@ -45,10 +47,11 @@ and suggest user running the request again if needed."""
 
 
 @function_tool
-def execute_bash_command_with_confirmation(cmd: str, cwd: str = "") -> dict:
+def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
     """Only execute a bash command with user's confirmation and return the output."""
 
     # print the command and ask for confirmation.
+    print(f"THOUGHT:{thought}")
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}")
     confirmation = input("Do you want to proceed? (y/n): ")
     if confirmation.lower() != "y":
