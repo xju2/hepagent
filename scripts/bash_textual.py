@@ -70,6 +70,10 @@ from agents.run_context import RunContextWrapper
 # Import bash execution function from the bash agent module
 from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
 
+# Constants for display and cost tracking
+OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
+DEFAULT_COST_PER_LLM_CALL = 0.001  # Default cost estimation per LLM call
+
 
 class AddLogEmitCallback(logging.Handler):
     def __init__(self, callback):
@@ -163,9 +167,11 @@ class BashToolWrapper:
             
             # Show the result
             result_icon = "✓" if result["returncode"] == 0 else "✗"
+            output = result['output']
+            truncated_output = output[:OUTPUT_TRUNCATE_LENGTH] + ('...' if len(output) > OUTPUT_TRUNCATE_LENGTH else '')
             adapter.messages.append({
                 "role": "system",
-                "content": f"{result_icon} Return code: {result['returncode']}\nOutput:\n{result['output'][:500]}{'...' if len(result['output']) > 500 else ''}"
+                "content": f"{result_icon} Return code: {result['returncode']}\nOutput:\n{truncated_output}"
             })
             adapter.textual_app.call_from_thread(
                 adapter.textual_app.on_message_added
@@ -425,7 +431,7 @@ class AgentRunHooks(RunHooks):
         if hasattr(response, 'usage') and response.usage:
             # Rough cost estimation (this varies by model)
             # For now, just increment a small amount per call
-            self.adapter.model.cost += 0.001
+            self.adapter.model.cost += DEFAULT_COST_PER_LLM_CALL
 
 
 class DummyAgent:
