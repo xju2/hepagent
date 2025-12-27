@@ -20,5 +20,9 @@ def test_create_uses_execute_bash_tool(monkeypatch):
     assert isinstance(agent, StubAgent)
     assert captured["name"] == "Bash Agent"
     assert captured["model"] is sentinel_model
-    assert bash.execute_bash_command in captured["tools"]
+    # Check that we have a bash command execution tool
+    assert len(captured["tools"]) == 1
+    tool = captured["tools"][0]
+    assert hasattr(tool, 'name')
+    assert 'execute_bash_command' in tool.name
     assert "THOUGHT" in captured["instructions"]
