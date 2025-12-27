@@ -1,8 +1,5 @@
 """Test TextualAgent integration with bash agent adapter."""
 
-import sys
-sys.path.insert(0, '/home/runner/work/hepagent/hepagent')
-
 from scripts.bash_textual import TextualAgent, AgentAdapter
 from agents import Agent
 

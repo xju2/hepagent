@@ -47,13 +47,9 @@ Integration Example:
 
 import asyncio
 import logging
-import os
-import shlex
-import subprocess
 import threading
 import time
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from rich.spinner import Spinner
@@ -71,6 +67,9 @@ from importlib.resources import files
 from agents import Agent, Runner, RunHooks, function_tool
 from agents.run_context import RunContextWrapper
 
+# Import bash execution function from the bash agent module
+from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
+
 
 class AddLogEmitCallback(logging.Handler):
     def __init__(self, callback):
@@ -82,34 +81,22 @@ class AddLogEmitCallback(logging.Handler):
         self.callback(record)  # type: ignore[attr-defined]
 
 
-def _execute_bash_command(cmd: str, cwd: str = "") -> dict:
-    """Execute a bash command and return the output and return code."""
-    cwd = cwd or str(Path.cwd())
-    commands = shlex.split(cmd)
-    
-    try:
-        result = subprocess.run(
-            commands,
-            shell=False,
-            text=True,
-            cwd=cwd,
-            env=os.environ,
-            timeout=30,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        return {"output": result.stdout, "returncode": result.returncode}
-    except Exception as e:
-        return {"output": f"Error: {str(e)}", "returncode": 1}
-
-
 class BashToolWrapper:
     """Wrapper for bash tool that is mode-aware."""
     
     def __init__(self, adapter: "AgentAdapter"):
         self.adapter = adapter
+    
+    def _handle_rejection(self, reason: str) -> dict:
+        """Handle user rejection of a command."""
+        self.adapter.messages.append({
+            "role": "user",
+            "content": f"❌ Rejected: {reason}"
+        })
+        self.adapter.textual_app.call_from_thread(
+            self.adapter.textual_app.on_message_added
+        )
+        return {"output": TOOL_CANCEL_MESSAGE, "returncode": 1}
         
     def create_tool(self):
         """Create a function tool that wraps bash execution."""
@@ -154,17 +141,7 @@ class BashToolWrapper:
                 
                 if response.strip():
                     # User provided a reason to reject
-                    error_msg = """Tool calling is cancelled by user. Stop thinking!
-Tell users what was your plan to justify the tool calling
-and suggest user running the request again if needed."""
-                    adapter.messages.append({
-                        "role": "user",
-                        "content": f"❌ Rejected: {response}"
-                    })
-                    adapter.textual_app.call_from_thread(
-                        adapter.textual_app.on_message_added
-                    )
-                    return {"output": error_msg, "returncode": 1}
+                    return self._handle_rejection(response)
                 else:
                     adapter.messages.append({
                         "role": "user",
@@ -179,20 +156,10 @@ and suggest user running the request again if needed."""
                 prompt = f"⚠️ Agent called tool in HUMAN mode. Allow? (Enter to allow, type reason to reject)"
                 response = adapter.textual_app.input_container.request_input(prompt)
                 if response.strip():
-                    error_msg = """Tool calling is cancelled by user. Stop thinking!
-Tell users what was your plan to justify the tool calling
-and suggest user running the request again if needed."""
-                    adapter.messages.append({
-                        "role": "user",
-                        "content": f"❌ Rejected: {response}"
-                    })
-                    adapter.textual_app.call_from_thread(
-                        adapter.textual_app.on_message_added
-                    )
-                    return {"output": error_msg, "returncode": 1}
+                    return self._handle_rejection(response)
             
-            # Execute the command
-            result = _execute_bash_command(cmd, cwd=cwd)
+            # Execute the command using the imported function from bash.py
+            result = execute_bash_command(cmd, cwd=cwd)
             
             # Show the result
             result_icon = "✓" if result["returncode"] == 0 else "✗"
