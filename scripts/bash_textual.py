@@ -1,8 +1,48 @@
-"""Use the Textual terminal to interact with users for Bash Agent."""
+"""Use the Textual terminal to interact with users for Bash Agent.
 
-"""
-Extension of the `default.py` agent that uses Textual for an interactive TUI.
-For a simpler version of an interactive UI that does not require threading and more, see `interactive.py`.
+This module provides TextualAgent, an interactive TUI for running AI agents with real-time
+display of thinking processes and bash command execution.
+
+Features:
+    - Interactive display of agent thinking and command execution
+    - Three execution modes:
+        * YOLO mode (y): Auto-approve all commands
+        * CONFIRM mode (c): Ask for confirmation before each command (default)
+        * HUMAN mode (u): Disable automatic command execution
+    - Step-by-step navigation through agent execution
+    - Real-time cost tracking
+    - Support for both DummyAgent (testing) and real agents from bash.py
+
+Usage:
+    # Run with DummyAgent (default):
+    python scripts/bash_textual.py
+    
+    # Run with real bash agent:
+    python scripts/bash_textual.py --real
+    # (Requires CBORG_API_KEY environment variable to be set)
+    
+    # In the UI:
+    - Press 'y' or Ctrl+Y to switch to YOLO mode
+    - Press 'c' to switch to CONFIRM mode
+    - Press 'u' or Ctrl+U to switch to HUMAN mode
+    - Press 'left'/'h' or 'right'/'l' to navigate steps
+    - Press 'q' or Ctrl+Q to quit
+
+Integration Example:
+    from hepagent.agents.bash import create as create_bash_agent
+    from scripts.bash_textual import TextualAgent, AgentAdapter
+    
+    # Create bash agent
+    bash_agent = create_bash_agent()
+    
+    # Create TextualAgent app
+    app = TextualAgent(model="gpt-4", env={})
+    
+    # Wrap bash agent with adapter
+    app.agent = AgentAdapter(bash_agent, app)
+    
+    # Run with a task
+    exit_status, result = app.run(task="List files in current directory")
 """
 
 import asyncio
@@ -315,7 +355,27 @@ class AgentModel:
 
 
 class AgentAdapter:
-    """Adapter that wraps a real Agent to work with TextualAgent."""
+    """Adapter that wraps a real Agent to work with TextualAgent.
+    
+    This adapter bridges the gap between the openai-agents framework and TextualAgent's
+    expected interface. It:
+    
+    1. Provides the attributes TextualAgent expects (messages, config, model, env)
+    2. Wraps the agent's bash tool to make it mode-aware (YOLO/confirm/human)
+    3. Uses RunHooks to capture and display agent thinking and tool execution
+    4. Manages the async event loop for running the agent
+    
+    Args:
+        agent: The original Agent instance (e.g., from bash.create())
+        textual_app: The TextualAgent instance that will display the agent's execution
+    
+    Attributes:
+        messages: List of message dictionaries for display in the UI
+        config: AgentConfig with mode ("yolo", "confirm", or "human")
+        model: AgentModel for tracking costs
+        env: Dictionary for environment variables
+        agent: The wrapped Agent with mode-aware tools
+    """
     
     def __init__(self, agent: Agent, textual_app: "TextualAgent"):
         self.original_agent = agent
