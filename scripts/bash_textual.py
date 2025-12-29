@@ -16,11 +16,11 @@ Features:
 Usage:
     # Run with DummyAgent (default):
     python scripts/bash_textual.py
-    
+
     # Run with real bash agent:
     python scripts/bash_textual.py --real
     # (Requires CBORG_API_KEY environment variable to be set)
-    
+
     # In the UI:
     - Press 'y' or Ctrl+Y to switch to YOLO mode
     - Press 'c' to switch to CONFIRM mode
@@ -31,16 +31,16 @@ Usage:
 Integration Example:
     from hepagent.agents.bash import create as create_bash_agent
     from scripts.bash_textual import TextualAgent, AgentAdapter
-    
+
     # Create bash agent
     bash_agent = create_bash_agent()
-    
+
     # Create TextualAgent app
     app = TextualAgent(model="gpt-4", env={})
-    
+
     # Wrap bash agent with adapter
     app.agent = AgentAdapter(bash_agent, app)
-    
+
     # Run with a task
     exit_status, result = app.run(task="List files in current directory")
 """
@@ -51,6 +51,7 @@ import threading
 import time
 from collections.abc import Iterable
 from typing import Any
+from dataclasses import dataclass
 
 from rich.spinner import Spinner
 from rich.text import Text
@@ -64,11 +65,12 @@ from textual.widgets import Footer, Header, Input, Static, TextArea
 
 from importlib.resources import files
 
-from agents import Agent, Runner, RunHooks, function_tool
+from agents import Agent, Runner, function_tool, AgentHooks
 from agents.run_context import RunContextWrapper
 
 # Import bash execution function from the bash agent module
 from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
+from hepagent.agents.bash import get_cborg_model_provider
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
@@ -87,98 +89,83 @@ class AddLogEmitCallback(logging.Handler):
 
 class BashToolWrapper:
     """Wrapper for bash tool that is mode-aware."""
-    
+
     def __init__(self, adapter: "AgentAdapter"):
         self.adapter = adapter
-    
+
     def _handle_rejection(self, reason: str) -> dict:
         """Handle user rejection of a command."""
-        self.adapter.messages.append({
-            "role": "user",
-            "content": f"❌ Rejected: {reason}"
-        })
-        self.adapter.textual_app.call_from_thread(
-            self.adapter.textual_app.on_message_added
-        )
+        self.adapter.messages.append({"role": "user", "content": f"❌ Rejected: {reason}"})
+        self.adapter.textual_app.call_from_thread(self.adapter.textual_app.on_message_added)
         return {"output": TOOL_CANCEL_MESSAGE, "returncode": 1}
-        
+
     def create_tool(self):
         """Create a function tool that wraps bash execution."""
         adapter = self.adapter  # Capture in closure
-        
+
         @function_tool
-        def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
+        def execute_bash_command_with_confirmation(
+            cmd: str, cwd: str = "", thought: str = ""
+        ) -> dict:
             """Execute a bash command with user's confirmation and return the output."""
             # Add the thought to messages
             if thought:
-                adapter.messages.append({
-                    "role": "assistant",
-                    "content": f"💭 THOUGHT: {thought}"
-                })
-                adapter.textual_app.call_from_thread(
-                    adapter.textual_app.on_message_added
-                )
-            
+                adapter.messages.append({"role": "assistant", "content": f"💭 THOUGHT: {thought}"})
+                adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
+
             # Show the command that's about to be executed
             adapter.messages.append({
-                "role": "assistant", 
-                "content": f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}"
+                "role": "assistant",
+                "content": f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}",
             })
-            adapter.textual_app.call_from_thread(
-                adapter.textual_app.on_message_added
-            )
-            
+            adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
+
             # Handle based on mode
             if adapter.config.mode == "yolo":
                 # Auto-approve in YOLO mode
                 adapter.messages.append({
                     "role": "system",
-                    "content": "✓ Auto-approved (YOLO mode)"
+                    "content": "✓ Auto-approved (YOLO mode)",
                 })
-                adapter.textual_app.call_from_thread(
-                    adapter.textual_app.on_message_added
-                )
+                adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "confirm":
                 # Ask for confirmation
-                prompt = f"Confirm execution? (press Enter to accept, or type your reason to reject)"
+                prompt = (
+                    "Confirm execution? (press Enter to accept, or type your reason to reject)"
+                )
                 response = adapter.textual_app.input_container.request_input(prompt)
-                
+
                 if response.strip():
                     # User provided a reason to reject
                     return self._handle_rejection(response)
                 else:
-                    adapter.messages.append({
-                        "role": "user",
-                        "content": "✓ Approved"
-                    })
-                    adapter.textual_app.call_from_thread(
-                        adapter.textual_app.on_message_added
-                    )
+                    adapter.messages.append({"role": "user", "content": "✓ Approved"})
+                    adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "human":
                 # In human mode, we should not auto-execute agent commands
                 # Ask for confirmation anyway
-                prompt = f"⚠️ Agent called tool in HUMAN mode. Allow? (Enter to allow, type reason to reject)"
+                prompt = "⚠️ Agent called tool in HUMAN mode. Allow? (Enter to allow, type reason to reject)"
                 response = adapter.textual_app.input_container.request_input(prompt)
                 if response.strip():
                     return self._handle_rejection(response)
-            
+
             # Execute the command using the imported function from bash.py
             result = execute_bash_command(cmd, cwd=cwd)
-            
+
             # Show the result
             result_icon = "✓" if result["returncode"] == 0 else "✗"
-            output = result['output']
-            truncated_output = output[:OUTPUT_TRUNCATE_LENGTH] + ('...' if len(output) > OUTPUT_TRUNCATE_LENGTH else '')
+            output = result["output"]
+            truncated_output = output[:OUTPUT_TRUNCATE_LENGTH] + (
+                "..." if len(output) > OUTPUT_TRUNCATE_LENGTH else ""
+            )
             adapter.messages.append({
                 "role": "system",
-                "content": f"{result_icon} Return code: {result['returncode']}\nOutput:\n{truncated_output}"
+                "content": f"{result_icon} Return code: {result['returncode']}\nOutput:\n{truncated_output}",
             })
-            adapter.textual_app.call_from_thread(
-                adapter.textual_app.on_message_added
-            )
-            
+            adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
+
             return result
-        
+
         return execute_bash_command_with_confirmation
 
 
@@ -315,33 +302,35 @@ class SmartInputContainer(Container):
             return
 
 
+@dataclass
 class AgentConfig:
     """Configuration for agent execution mode."""
-    def __init__(self, mode: str = "confirm"):
-        self.mode = mode  # "yolo", "human", "confirm"
+
+    mode: str = "confirm"  # "yolo", "human", "confirm"
 
 
+@dataclass
 class AgentModel:
     """Model wrapper to track costs."""
-    def __init__(self):
-        self.cost = 0.0
+
+    cost: float = 0.0
 
 
 class AgentAdapter:
     """Adapter that wraps a real Agent to work with TextualAgent.
-    
+
     This adapter bridges the gap between the openai-agents framework and TextualAgent's
     expected interface. It:
-    
+
     1. Provides the attributes TextualAgent expects (messages, config, model, env)
     2. Wraps the agent's bash tool to make it mode-aware (YOLO/confirm/human)
     3. Uses RunHooks to capture and display agent thinking and tool execution
     4. Manages the async event loop for running the agent
-    
+
     Args:
         agent: The original Agent instance (e.g., from bash.create())
         textual_app: The TextualAgent instance that will display the agent's execution
-    
+
     Attributes:
         messages: List of message dictionaries for display in the UI
         config: AgentConfig with mode ("yolo", "confirm", or "human")
@@ -349,7 +338,7 @@ class AgentAdapter:
         env: Dictionary for environment variables
         agent: The wrapped Agent with mode-aware tools
     """
-    
+
     def __init__(self, agent: Agent, textual_app: "TextualAgent"):
         self.original_agent = agent
         self.textual_app = textual_app
@@ -357,78 +346,93 @@ class AgentAdapter:
         self.model = AgentModel()
         self.env = {}
         self.config = AgentConfig()
-        
+
         # Create a custom tool that's mode-aware
         bash_tool_wrapper = BashToolWrapper(self)
         custom_bash_tool = bash_tool_wrapper.create_tool()
-        
+
         # Create a new agent with our custom tool
         self.agent = Agent(
             name=agent.name,
             instructions=agent.instructions,
-            model=agent.model,
-            tools=[custom_bash_tool]
+            model=get_cborg_model_provider(),
+            tools=[custom_bash_tool],
+            hooks=LogBashCallAgentHooks(self),
         )
-        
+
+    def add_message(self, role: str, content: str, **kwargs):
+        """Add a message to the messages list."""
+        self.messages.append({
+            "role": role,
+            "content": content,
+            "timestamp": time.time(),
+            **kwargs,
+        })
+        if self.textual_app.agent_state != "UNINITIALIZED":
+            self.textual_app.call_from_thread(self.textual_app.on_message_added)
+
     def run(self, task: str, **kwargs):
         """Run the agent with the given task."""
-        self.messages.append({"role": "system", "content": f"Starting task: {task}"})
-        self.textual_app.call_from_thread(self.textual_app.on_message_added)
-        
-        # Create hooks to capture agent behavior
-        hooks = AgentRunHooks(self)
-        
+        self.messages = []
+        self.add_message("system", self.original_agent.instructions)
+        self.add_message("user", task)
+
         # Run the agent asynchronously
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(
-                Runner.run(self.agent, task, hooks=hooks, max_turns=20)
-            )
-            self.messages.append({"role": "system", "content": f"✓ Task completed: {result.final_output}"})
+            result = loop.run_until_complete(Runner.run(self.agent, task, max_turns=20))
+            self.add_message("system", f"✓ Task completed: {result.final_output}")
             self.textual_app.call_from_thread(
                 self.textual_app.on_agent_finished, "success", result.final_output
             )
         except Exception as e:
-            self.messages.append({"role": "system", "content": f"✗ Error: {str(e)}"})
-            self.textual_app.call_from_thread(
-                self.textual_app.on_agent_finished, "error", str(e)
-            )
+            self.add_message("system", f"✗ Error: {str(e)}")
+            self.textual_app.call_from_thread(self.textual_app.on_agent_finished, "error", str(e))
+            import traceback
+
+            traceback.print_exc()
+            raise e
         finally:
             loop.close()
-            self.textual_app.call_from_thread(self.textual_app.on_message_added)
+            print("Agent run complete.")
 
 
-class AgentRunHooks(RunHooks):
+class LogBashCallAgentHooks(AgentHooks):
     """Hooks to capture agent execution events and display them in TextualAgent."""
-    
+
     def __init__(self, adapter: AgentAdapter):
         super().__init__()
         self.adapter = adapter
-        
-    def on_llm_start(self, context: RunContextWrapper, agent: Agent, system_prompt: str | None, input_items: list) -> None:
+
+    async def on_llm_start(
+        self,
+        context: RunContextWrapper,
+        agent: Agent,
+        system_prompt: str | None,
+        input_items: list,
+    ) -> None:
         """Called when the LLM starts processing."""
         # We could show a "thinking" message here
-        pass
-    
-    def on_llm_end(self, context: RunContextWrapper, agent: Agent, response: Any) -> None:
+
+    async def on_llm_end(self, context: RunContextWrapper, agent: Agent, response: Any) -> None:
         """Called when the LLM finishes processing."""
         # Extract assistant's response
-        if hasattr(response, 'output_items'):
+        if hasattr(response, "output_items"):
             for item in response.output_items:
-                if hasattr(item, 'text') and item.text:
+                if hasattr(item, "text") and item.text:
                     # Don't add if it's a duplicate of the last message
-                    if not self.adapter.messages or self.adapter.messages[-1].get("content") != item.text:
-                        self.adapter.messages.append({
-                            "role": "assistant",
-                            "content": item.text
-                        })
+                    if (
+                        not self.adapter.messages
+                        or self.adapter.messages[-1].get("content") != item.text
+                    ):
+                        self.adapter.add_message("assistant", item.text)
                         self.adapter.textual_app.call_from_thread(
                             self.adapter.textual_app.on_message_added
                         )
-        
+
         # Track costs if available
-        if hasattr(response, 'usage') and response.usage:
+        if hasattr(response, "usage") and response.usage:
             # Rough cost estimation (this varies by model)
             # For now, just increment a small amount per call
             self.adapter.model.cost += DEFAULT_COST_PER_LLM_CALL
@@ -506,6 +510,19 @@ class TextualAgent(App):
 
         self._vscroll = VerticalScroll()
 
+        self._task: str | None = None
+        self._task_kwargs: dict[str, Any] = {}
+        self._agent_thread: threading.Thread | None = None
+        self._ui_ready = False
+
+    def run_task(self, task: str, **kwargs) -> tuple[str, str]:
+        """Run the agent with the given task in a separate thread."""
+        self._task = task
+        self._task_kwargs = kwargs
+
+        super().run()
+        return self.exit_status, self.result
+
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         threading.Thread(target=lambda: self.agent.run(task, **kwargs), daemon=True).start()
         super().run()
@@ -540,9 +557,25 @@ class TextualAgent(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._ui_ready = True
         self.agent_state = "RUNNING"
         self.update_content()
         self.set_interval(1 / 8, self._update_headers)
+        # Start agent ONLY after the app is running (safe to call_from_thread)
+        if self._task is not None and self._agent_thread is None:
+
+            def _runner():
+                try:
+                    self.agent.run(self._task, **self._task_kwargs)
+                except Exception as e:
+                    import traceback
+
+                    traceback.print_exc()
+                    # Ensure UI gets an error state even if agent crashes
+                    self.call_from_thread(self.on_agent_finished, "error", str(e))
+
+            self._agent_thread = threading.Thread(target=_runner, daemon=True)
+            self._agent_thread.start()
 
     @property
     def messages(self) -> list[dict]:
@@ -577,14 +610,18 @@ class TextualAgent(App):
 
     def on_agent_finished(self, exit_status: str, result: str):
         self.agent_state = "STOPPED"
-        self.notify(f"Agent finished with status: {exit_status}")
+
         self.exit_status = exit_status
         self.result = result
-        self.update_content()
+        if self._ui_ready:
+            self.update_content()
+            self.notify(f"Agent finished with status: {exit_status}")
 
     # --- UI update logic ---
 
     def update_content(self) -> None:
+        if not self._ui_ready:
+            return
         container = self.query_one("#content", Vertical)
         container.remove_children()
         items = _messages_to_steps(self.agent.messages)
@@ -600,7 +637,7 @@ class TextualAgent(App):
                 content_str = str(message["content"])
             message_container = Vertical(classes="message-container")
             container.mount(message_container)
-            role = message["role"].replace("assistant", "mini-swe-agent")
+            role = message["role"].replace("assistant", "bash-agent")
             message_container.mount(Static(role.upper(), classes="message-header"))
             message_container.mount(
                 Static(Text(content_str, no_wrap=False), classes="message-content")
@@ -689,30 +726,32 @@ class TextualAgent(App):
 
 if __name__ == "__main__":
     import sys
-    
+
     # Check if we should use the real bash agent or the dummy agent
     use_real_agent = "--real" in sys.argv or "-r" in sys.argv
-    
+
     if use_real_agent:
         from hepagent.agents.bash import create as create_bash_agent
-        
+
         # Create the bash agent
         try:
             bash_agent = create_bash_agent()
             app = TextualAgent(model="gpt-4", env={})
             # Wrap the bash agent with our adapter
             app.agent = AgentAdapter(bash_agent, app)
-            exit_status, result = app.run(task="List the files in the current directory and tell me how many there are.")
+            exit_status, result = app.run_task(
+                task="List the files in the current directory and tell me how many there are."
+            )
             print(f"Agent exited with status: {exit_status}, result: {result}")
         except Exception as e:
             print(f"Error: {e}")
             print("Make sure you have set the CBORG_API_KEY environment variable")
             print("Falling back to DummyAgent...")
             app = TextualAgent(model="gpt-4", env={})
-            exit_status, result = app.run(task="Demonstrate the Textual Bash Agent UI")
+            exit_status, result = app.run_task(task="Demonstrate the Textual Bash Agent UI")
             print(f"Agent exited with status: {exit_status}, result: {result}")
     else:
         print("Using DummyAgent. Use --real or -r to use the actual bash agent.")
         app = TextualAgent(model="gpt-4", env={})
-        exit_status, result = app.run(task="Demonstrate the Textual Bash Agent UI")
+        exit_status, result = app.run_task(task="Demonstrate the Textual Bash Agent UI")
         print(f"Agent exited with status: {exit_status}, result: {result}")

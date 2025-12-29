@@ -6,7 +6,6 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 import os
 import subprocess
 from pathlib import Path
-import shlex
 
 from agents import Agent, function_tool
 from pydantic import BaseModel
@@ -24,11 +23,10 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
     cwd = cwd or config.cwd or str(Path.cwd())
-    commands = shlex.split(cmd)
 
     result = subprocess.run(
-        commands,
-        shell=False,
+        cmd,
+        shell=True,
         text=True,
         cwd=cwd,
         env=os.environ | config.env,
