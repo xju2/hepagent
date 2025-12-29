@@ -55,15 +55,20 @@ def calculate_cost(usage: Usage, model_name: str = "") -> float:
         >>> cost = calculate_cost(usage, "gpt-5.2")
         >>> print(f"Cost: ${cost:.4f}")
     """
-    # Try to find the cost for the specific model
+    # Try to find the cost for the specific model (exact match first)
     cost_info = TOKEN_COSTS_PER_MILLION.get(model_name.lower())
 
     if cost_info is None:
-        # Try to match partial model names
+        # Try to match partial model names, prioritize longer matches
+        matches = []
         for key in TOKEN_COSTS_PER_MILLION:
             if key in model_name.lower() or model_name.lower() in key:
-                cost_info = TOKEN_COSTS_PER_MILLION[key]
-                break
+                matches.append(key)
+        
+        # If we have matches, use the longest one (most specific)
+        if matches:
+            best_match = max(matches, key=len)
+            cost_info = TOKEN_COSTS_PER_MILLION[best_match]
 
     if cost_info is None:
         # Default to a conservative estimate if model not found
