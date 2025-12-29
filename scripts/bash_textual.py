@@ -71,10 +71,11 @@ from agents.run_context import RunContextWrapper
 # Import bash execution function from the bash agent module
 from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
 from hepagent.agents.bash import get_cborg_model_provider
+from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
-DEFAULT_COST_PER_LLM_CALL = 0.001  # Default cost estimation per LLM call
+DEFAULT_COST_PER_LLM_CALL = 0.001  # Default cost estimation per LLM call (deprecated)
 
 
 class AddLogEmitCallback(logging.Handler):
@@ -343,6 +344,7 @@ class AgentModel:
     """Model wrapper to track costs."""
 
     cost: float = 0.0
+    name: str = ""
 
 
 class AgentAdapter:
@@ -372,7 +374,6 @@ class AgentAdapter:
         self.original_agent = agent
         self.textual_app = textual_app
         self.messages = []
-        self.model = AgentModel()
         self.env = {}
         self.config = AgentConfig()
 
@@ -380,11 +381,17 @@ class AgentAdapter:
         bash_tool_wrapper = BashToolWrapper(self)
         custom_bash_tool = bash_tool_wrapper.create_tool()
 
+        # Get the model provider
+        model_provider = get_cborg_model_provider()
+
+        # Initialize model with the model name
+        self.model = AgentModel(name=model_provider.model)
+
         # Create a new agent with our custom tool
         self.agent = Agent(
             name=agent.name,
             instructions=agent.instructions,
-            model=get_cborg_model_provider(),
+            model=model_provider,
             tools=[custom_bash_tool],
             hooks=LogBashCallAgentHooks(self),
         )
@@ -460,11 +467,11 @@ class LogBashCallAgentHooks(AgentHooks):
                             self.adapter.textual_app.on_message_added
                         )
 
-        # Track costs if available
-        if hasattr(response, "usage") and response.usage:
-            # Rough cost estimation (this varies by model)
-            # For now, just increment a small amount per call
-            self.adapter.model.cost += DEFAULT_COST_PER_LLM_CALL
+        # Track costs using actual token usage from context
+        if hasattr(context, "usage") and context.usage:
+            # Calculate cost based on actual token usage and model name
+            cost = calculate_cost(context.usage, self.adapter.model.name)
+            self.adapter.model.cost += cost
 
 
 class DummyAgent:
@@ -472,7 +479,7 @@ class DummyAgent:
 
     def __init__(self):
         self.messages = []
-        self.model = type("Model", (), {"cost": 0.0})()
+        self.model = type("Model", (), {"cost": 0.0, "name": "dummy"})()
         self.env = {}
         self.config = type("Config", (), {"mode": "human"})()
 
