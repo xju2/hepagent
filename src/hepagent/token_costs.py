@@ -54,12 +54,21 @@ def calculate_cost(usage: Usage, model_name: str = "") -> float:
         >>> usage = Usage(input_tokens=1000, output_tokens=500, total_tokens=1500)
         >>> cost = calculate_cost(usage, "gpt-5.2")
         >>> print(f"Cost: ${cost:.4f}")
+    
+    Note:
+        The matching logic uses substring matching and prioritizes longer matches.
+        This works well for model names from known providers but could produce
+        false positives for unusual model names. Consider updating the dictionary
+        with exact model names as they become available.
     """
     # Try to find the cost for the specific model (exact match first)
     cost_info = TOKEN_COSTS_PER_MILLION.get(model_name.lower())
 
     if cost_info is None:
         # Try to match partial model names, prioritize longer matches
+        # Note: This uses substring matching which works for most cases but
+        # could produce false positives. The longest match is selected to
+        # minimize ambiguity.
         matches = []
         for key in TOKEN_COSTS_PER_MILLION:
             if key in model_name.lower() or model_name.lower() in key:
