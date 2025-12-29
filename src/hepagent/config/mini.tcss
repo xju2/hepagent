@@ -84,3 +84,14 @@ Header.running {
     margin: 0 1;
     min-width: 10;
 }
+
+.final-message {
+    border: solid $accent;
+    background: $panel;
+    padding: 1 2;
+    margin-top: 1;
+}
+
+.final-content {
+    color: $text;
+}

@@ -166,6 +166,23 @@ class BashToolWrapper:
         return execute_bash_command_with_confirmation
 
 
+def _message_header_label(self, message: dict) -> str:
+    kind = message.get("kind", "")
+    if kind == "final":
+        return "CONCLUSION"
+    if kind == "error":
+        return "ERROR"
+    if kind == "task":
+        return "TASK"
+    if message["role"] == "assistant":
+        return "AGENT"
+    if message["role"] == "user":
+        return "USER"
+    if message["role"] == "system":
+        return "SYSTEM"
+    return message["role"].upper()
+
+
 def _messages_to_steps(messages: list[dict]) -> list[list[dict]]:
     """Group messages into "pages" as shown by the UI."""
     steps: list[list[dict]] = []
@@ -387,7 +404,7 @@ class AgentAdapter:
         """Run the agent with the given task."""
         self.messages = []
         self.add_message("system", self.original_agent.instructions)
-        self.add_message("user", task)
+        self.add_message("user", task, kind="task")
 
         # Run the agent asynchronously
         loop = asyncio.new_event_loop()
@@ -653,8 +670,8 @@ class TextualAgent(App):
             if message.get("kind") == "final":
                 message_container.add_class("final-message")
             container.mount(message_container)
-            role = message["role"].replace("assistant", "bash-agent")
-            message_container.mount(Static(role.upper(), classes="message-header"))
+            header_label = _message_header_label(self, message)
+            message_container.mount(Static(header_label, classes="message-header"))
             content_widget = Static(Text(content_str, no_wrap=False), classes="message-content")
             if message.get("kind") == "final":
                 content_widget.add_class("final-content")
