@@ -5,11 +5,68 @@ The framework is based on the `openai-agent-framework` and `cborg` model provide
 ## Introduction
 
 
-
 ## Installation
 
 ```bash
 uv sync
+```
+
+## Usage
+
+### Interactive Bash Agent with TextualAgent
+
+The project includes `TextualAgent`, an interactive TUI (Terminal User Interface) for running AI agents with real-time display of thinking processes and bash command execution.
+
+#### Quick Start
+
+Run with DummyAgent (demo mode, no API key required):
+```bash
+python3 scripts/bash_textual.py
+```
+
+Run with real bash agent (requires `CBORG_API_KEY` environment variable):
+```bash
+export CBORG_API_KEY="your-api-key"
+python3 scripts/bash_textual.py --real
+```
+
+Or use the example script:
+```bash
+python3 scripts/example_bash_textual.py
+```
+
+#### Features
+
+- **Interactive Display**: Real-time visualization of agent thinking and command execution
+- **Three Execution Modes**:
+  - **YOLO mode** (Press `y` or `Ctrl+Y`): Auto-approve all commands
+  - **CONFIRM mode** (Press `c`): Ask for confirmation before each command (default)
+  - **HUMAN mode** (Press `u` or `Ctrl+U`): Disable automatic command execution
+- **Step Navigation**: Navigate through agent execution steps with `left`/`h` and `right`/`l`
+- **Cost Tracking**: Real-time display of API usage costs
+- **Keyboard Controls**:
+  - `q` or `Ctrl+Q`: Quit
+  - `j`/`k` or `↑`/`↓`: Scroll content
+  - `0`: Jump to first step
+  - `$`: Jump to last step
+
+#### Programmatic Usage
+
+```python
+from hepagent.agents.bash import create as create_bash_agent
+from scripts.bash_textual import TextualAgent, AgentAdapter
+
+# Create bash agent
+bash_agent = create_bash_agent()
+
+# Create TextualAgent app
+app = TextualAgent(model="gpt-4", env={})
+
+# Wrap bash agent with adapter
+app.agent = AgentAdapter(bash_agent, app)
+
+# Run with a task
+exit_status, result = app.run(task="List files in current directory")
 ```
 
 ### Notes
