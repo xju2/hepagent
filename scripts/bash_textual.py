@@ -95,7 +95,7 @@ class BashToolWrapper:
 
     def _handle_rejection(self, reason: str) -> dict:
         """Handle user rejection of a command."""
-        self.adapter.messages.append({"role": "user", "content": f"❌ Rejected: {reason}"})
+        self.adapter.add_message("user", f"❌ Rejected: {reason}")
         self.adapter.textual_app.call_from_thread(self.adapter.textual_app.on_message_added)
         return {"output": TOOL_CANCEL_MESSAGE, "returncode": 1}
 
@@ -110,23 +110,20 @@ class BashToolWrapper:
             """Execute a bash command with user's confirmation and return the output."""
             # Add the thought to messages
             if thought:
-                adapter.messages.append({"role": "assistant", "content": f"💭 THOUGHT: {thought}"})
+                adapter.add_message("assistant", f"💭 THOUGHT: {thought}")
                 adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
             # Show the command that's about to be executed
-            adapter.messages.append({
-                "role": "assistant",
-                "content": f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}",
-            })
+            adapter.add_message(
+                "assistant",
+                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}",
+            )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
             # Handle based on mode
             if adapter.config.mode == "yolo":
                 # Auto-approve in YOLO mode
-                adapter.messages.append({
-                    "role": "system",
-                    "content": "✓ Auto-approved (YOLO mode)",
-                })
+                adapter.add_message("system", "✓ Auto-approved (YOLO mode)")
                 adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "confirm":
                 # Ask for confirmation
@@ -139,7 +136,7 @@ class BashToolWrapper:
                     # User provided a reason to reject
                     return self._handle_rejection(response)
                 else:
-                    adapter.messages.append({"role": "user", "content": "✓ Approved"})
+                    adapter.add_message("user", "✓ Approved")
                     adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "human":
                 # In human mode, we should not auto-execute agent commands
@@ -158,10 +155,10 @@ class BashToolWrapper:
             truncated_output = output[:OUTPUT_TRUNCATE_LENGTH] + (
                 "..." if len(output) > OUTPUT_TRUNCATE_LENGTH else ""
             )
-            adapter.messages.append({
-                "role": "system",
-                "content": f"{result_icon} Return code: {result['returncode']}\nOutput:\n{truncated_output}",
-            })
+            adapter.add_message(
+                "system",
+                f"{result_icon} Return code: {result['returncode']}\nTruncated Output:\n{truncated_output}",
+            )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
             return result
@@ -171,15 +168,30 @@ class BashToolWrapper:
 
 def _messages_to_steps(messages: list[dict]) -> list[list[dict]]:
     """Group messages into "pages" as shown by the UI."""
-    steps = []
-    current_step = []
-    for message in messages:
-        current_step.append(message)
-        if message["role"] == "user":
+    steps: list[list[dict]] = []
+    current_step: list[dict] = []
+
+    for msg in messages:
+        # Start a new step when a new agent thought appears
+        if (
+            msg["role"] == "assistant"
+            and isinstance(msg.get("content"), str)
+            and msg["content"].lstrip().startswith("💭")
+            and current_step
+        ):
             steps.append(current_step)
             current_step = []
+
+        # Start a new step for final output
+        if msg.get("kind") == "final" and current_step:
+            steps.append(current_step)
+            current_step = []
+
+        current_step.append(msg)
+
     if current_step:
         steps.append(current_step)
+
     return steps
 
 
@@ -324,7 +336,7 @@ class AgentAdapter:
 
     1. Provides the attributes TextualAgent expects (messages, config, model, env)
     2. Wraps the agent's bash tool to make it mode-aware (YOLO/confirm/human)
-    3. Uses RunHooks to capture and display agent thinking and tool execution
+    3. Uses AgentHooks to capture and display agent thinking and tool execution
     4. Manages the async event loop for running the agent
 
     Args:
@@ -382,7 +394,7 @@ class AgentAdapter:
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(Runner.run(self.agent, task, max_turns=20))
-            self.add_message("system", f"✓ Task completed: {result.final_output}")
+            self.add_message("system", f"✓ Task completed: {result.final_output}", kind="final")
             self.textual_app.call_from_thread(
                 self.textual_app.on_agent_finished, "success", result.final_output
             )
@@ -616,6 +628,8 @@ class TextualAgent(App):
         if self._ui_ready:
             self.update_content()
             self.notify(f"Agent finished with status: {exit_status}")
+            self.notify("Press q to quit, ←/→ to inspect steps")
+            self.refresh()
 
     # --- UI update logic ---
 
@@ -636,13 +650,15 @@ class TextualAgent(App):
             else:
                 content_str = str(message["content"])
             message_container = Vertical(classes="message-container")
+            if message.get("kind") == "final":
+                message_container.add_class("final-message")
             container.mount(message_container)
             role = message["role"].replace("assistant", "bash-agent")
             message_container.mount(Static(role.upper(), classes="message-header"))
-            message_container.mount(
-                Static(Text(content_str, no_wrap=False), classes="message-content")
-            )
-
+            content_widget = Static(Text(content_str, no_wrap=False), classes="message-content")
+            if message.get("kind") == "final":
+                content_widget.add_class("final-content")
+            message_container.mount(content_widget)
         if self.input_container.pending_prompt is not None:
             self.agent_state = "AWAITING_INPUT"
         self.input_container.display = (
