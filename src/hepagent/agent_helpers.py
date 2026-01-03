@@ -1,4 +1,3 @@
-
 from agents import Usage
 from hepagent.token_costs import calculate_cost
 
@@ -21,7 +20,7 @@ def print_usage(usage: Usage, model_name: str = "") -> None:
     # Calculate and print cost
     if model_name:
         cost = calculate_cost(usage, model_name)
-        print(f"\n=== Cost ===")
+        print("\n=== Cost ===")
         print(f"Model: {model_name}")
         print(f"Total cost: ${cost:.4f}")
     else:

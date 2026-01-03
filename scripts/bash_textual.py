@@ -75,7 +75,6 @@ from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
-DEFAULT_COST_PER_LLM_CALL = 0.001  # Default cost estimation per LLM call (deprecated)
 
 
 class AddLogEmitCallback(logging.Handler):
@@ -361,6 +360,7 @@ class AgentAdapter:
     Args:
         agent: The original Agent instance (e.g., from bash.create())
         textual_app: The TextualAgent instance that will display the agent's execution
+        model_name: Optional model name, "google/gemini-flash" if None
 
     Attributes:
         messages: List of message dictionaries for display in the UI
@@ -370,7 +370,7 @@ class AgentAdapter:
         agent: The wrapped Agent with mode-aware tools
     """
 
-    def __init__(self, agent: Agent, textual_app: "TextualAgent"):
+    def __init__(self, agent: Agent, textual_app: "TextualAgent", model_name: str | None = None):
         self.original_agent = agent
         self.textual_app = textual_app
         self.messages = []
@@ -382,7 +382,7 @@ class AgentAdapter:
         custom_bash_tool = bash_tool_wrapper.create_tool()
 
         # Get the model provider
-        model_provider = get_cborg_model_provider()
+        model_provider = get_cborg_model_provider(model_name)
 
         # Initialize model with the model name
         self.model = AgentModel(name=model_provider.model)
