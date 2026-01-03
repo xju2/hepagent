@@ -35,6 +35,10 @@ def test_agent_adapter_integration():
     assert hasattr(adapter.model, 'cost')
     assert isinstance(adapter.model.cost, (int, float))
     
+    # Verify model has name
+    assert hasattr(adapter.model, 'name')
+    assert isinstance(adapter.model.name, str)
+    
     # Verify the wrapped agent exists and has the right name
     assert adapter.agent.name == "Test Bash Agent"
     

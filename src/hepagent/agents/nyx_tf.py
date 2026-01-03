@@ -30,7 +30,7 @@ async def main():
     agent = create()
     result = await Runner.run(agent, task_prompt)
     print(result.final_output)
-    print_usage(result.context_wrapper.usage)
+    print_usage(result.context_wrapper.usage, agent.model.model)
 
 
 if __name__ == "__main__":

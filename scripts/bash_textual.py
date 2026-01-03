@@ -71,10 +71,10 @@ from agents.run_context import RunContextWrapper
 # Import bash execution function from the bash agent module
 from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
 from hepagent.agents.bash import get_cborg_model_provider
+from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
-DEFAULT_COST_PER_LLM_CALL = 0.001  # Default cost estimation per LLM call
 
 
 class AddLogEmitCallback(logging.Handler):
@@ -343,6 +343,7 @@ class AgentModel:
     """Model wrapper to track costs."""
 
     cost: float = 0.0
+    name: str = ""
 
 
 class AgentAdapter:
@@ -359,6 +360,7 @@ class AgentAdapter:
     Args:
         agent: The original Agent instance (e.g., from bash.create())
         textual_app: The TextualAgent instance that will display the agent's execution
+        model_name: Optional model name, "google/gemini-flash" if None
 
     Attributes:
         messages: List of message dictionaries for display in the UI
@@ -368,11 +370,10 @@ class AgentAdapter:
         agent: The wrapped Agent with mode-aware tools
     """
 
-    def __init__(self, agent: Agent, textual_app: "TextualAgent"):
+    def __init__(self, agent: Agent, textual_app: "TextualAgent", model_name: str | None = None):
         self.original_agent = agent
         self.textual_app = textual_app
         self.messages = []
-        self.model = AgentModel()
         self.env = {}
         self.config = AgentConfig()
 
@@ -380,11 +381,17 @@ class AgentAdapter:
         bash_tool_wrapper = BashToolWrapper(self)
         custom_bash_tool = bash_tool_wrapper.create_tool()
 
+        # Get the model provider
+        model_provider = get_cborg_model_provider(model_name)
+
+        # Initialize model with the model name
+        self.model = AgentModel(name=model_provider.model)
+
         # Create a new agent with our custom tool
         self.agent = Agent(
             name=agent.name,
             instructions=agent.instructions,
-            model=get_cborg_model_provider(),
+            model=model_provider,
             tools=[custom_bash_tool],
             hooks=LogBashCallAgentHooks(self),
         )
@@ -460,11 +467,11 @@ class LogBashCallAgentHooks(AgentHooks):
                             self.adapter.textual_app.on_message_added
                         )
 
-        # Track costs if available
-        if hasattr(response, "usage") and response.usage:
-            # Rough cost estimation (this varies by model)
-            # For now, just increment a small amount per call
-            self.adapter.model.cost += DEFAULT_COST_PER_LLM_CALL
+        # Track costs using actual token usage from context
+        if hasattr(context, "usage") and context.usage:
+            # Calculate cost based on actual token usage and model name
+            cost = calculate_cost(context.usage, self.adapter.model.name)
+            self.adapter.model.cost += cost
 
 
 class DummyAgent:
@@ -472,7 +479,7 @@ class DummyAgent:
 
     def __init__(self):
         self.messages = []
-        self.model = type("Model", (), {"cost": 0.0})()
+        self.model = type("Model", (), {"cost": 0.0, "name": "dummy"})()
         self.env = {}
         self.config = type("Config", (), {"mode": "human"})()
 
@@ -693,7 +700,7 @@ class TextualAgent(App):
         if self.agent_state == "RUNNING":
             spinner_frame = str(self._spinner.render(time.time())).strip()
             status_text = f"{self.agent_state} {spinner_frame}"
-        self.title = f"Step {self.i_step + 1}/{self.n_steps} - {status_text} - Cost: ${self.agent.model.cost:.2f}"
+        self.title = f"Step {self.i_step + 1}/{self.n_steps} - {status_text} - Cost: ${self.agent.model.cost:.6f}"
         self.sub_title = f"Mode: {self.agent.config.mode}"
         try:
             self.query_one("Header").set_class(self.agent_state == "RUNNING", "running")
@@ -758,13 +765,42 @@ class TextualAgent(App):
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    # Check if we should use the real bash agent or the dummy agent
-    use_real_agent = "--real" in sys.argv or "-r" in sys.argv
+    parser = argparse.ArgumentParser(description="Run the Textual Bash Agent")
+    parser.add_argument(
+        "-t",
+        "--task",
+        type=str,
+        choices=["dummy", "real", "cosmicic"],
+        default="dummy",
+        help="Type of agent to run: 'dummy' for DummyAgent, 'real' for real bash agent, 'cosmicic' for CosmicIC agent",
+    )
+    args = parser.parse_args()
+
+    task = args.task
+    use_real_agent = task in ("real", "cosmicic")
 
     if use_real_agent:
         from hepagent.agents.bash import create as create_bash_agent
+
+        cosmicic_prompt = (
+            "Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0. "
+            "The original cosmicic code is located at /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic. "
+            "1. Make a copy of cosmicic code to your working directory, compile it. "
+            "If the compilation is successful, copy the executable `init` to your working directory. "
+            "Note that if the platform is Perlmuttter, you need to load these module first: - cray-fftw - cray-hdf5-parallel. "
+            "2. Create a parameter file named `input.par` for a cosmological simulation with Nyx. "
+            "The cosmological parameters are: - hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. "
+            "And the runtime parameters are: - np = 265; - box_size = 80.0; - seed = 343240149; - z_in = 200.0; - output_file = output/ics_80mpc_256. "
+            "And the transfer_function is located at `cmb.tf`. "
+            "3. Create the cosmic initial conditions for Nyx simulation. "
+            "You may have to read the `cosmicic/README` file located at your working directory for more details."
+        )
+        simple_bash_prompt = (
+            "List the files in the current directory and tell me how many there are."
+        )
+        task_prompt = cosmicic_prompt if task == "cosmicic" else simple_bash_prompt
 
         # Create the bash agent
         try:
@@ -772,9 +808,7 @@ if __name__ == "__main__":
             app = TextualAgent(model="gpt-4", env={})
             # Wrap the bash agent with our adapter
             app.agent = AgentAdapter(bash_agent, app)
-            exit_status, result = app.run_task(
-                task="List the files in the current directory and tell me how many there are."
-            )
+            exit_status, result = app.run_task(task=task_prompt)
             print(f"Agent exited with status: {exit_status}, result: {result}")
         except Exception as e:
             print(f"Error: {e}")
