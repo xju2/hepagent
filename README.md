@@ -50,6 +50,29 @@ python3 scripts/example_bash_textual.py
   - `0`: Jump to first step
   - `$`: Jump to last step
 
+#### Session Recording
+
+All agent executions are automatically recorded to JSON files in the `sessions/` directory. Each session file contains:
+- Task description
+- Execution status (success/error)
+- Final result
+- Model information and cost
+- Execution mode (YOLO/CONFIRM/HUMAN)
+- Complete message history with timestamps
+
+Session files are named `session_YYYYMMDD_HHMMSS.json` and can be inspected after the agent completes:
+
+```bash
+# View the latest session
+cat sessions/session_*.json | jq .
+
+# Count messages in a session
+cat sessions/session_20260103_120000.json | jq '.messages | length'
+
+# Extract only the task and result
+cat sessions/session_20260103_120000.json | jq '{task, status, result, cost}'
+```
+
 #### Programmatic Usage
 
 ```python
@@ -67,6 +90,8 @@ app.agent = AgentAdapter(bash_agent, app)
 
 # Run with a task
 exit_status, result = app.run(task="List files in current directory")
+
+# Session is automatically saved to sessions/session_YYYYMMDD_HHMMSS.json
 ```
 
 ### Notes
