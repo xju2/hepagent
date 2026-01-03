@@ -12,6 +12,8 @@ Features:
     - Step-by-step navigation through agent execution
     - Real-time cost tracking
     - Support for both DummyAgent (testing) and real agents from bash.py
+    - Session recording: All messages, thoughts, and tool calls are automatically saved
+      to JSON files in the sessions/ directory for later inspection
 
 Usage:
     # Run with DummyAgent (default):
@@ -27,6 +29,10 @@ Usage:
     - Press 'u' or Ctrl+U to switch to HUMAN mode
     - Press 'left'/'h' or 'right'/'l' to navigate steps
     - Press 'q' or Ctrl+Q to quit
+
+    # Session files:
+    - Saved to sessions/session_YYYYMMDD_HHMMSS.json after each run
+    - Contains all messages, costs, model info, and execution metadata
 
 Integration Example:
     from hepagent.agents.bash import create as create_bash_agent
@@ -46,10 +52,13 @@ Integration Example:
 """
 
 import asyncio
+import json
 import logging
 import threading
 import time
 from collections.abc import Iterable
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
@@ -407,6 +416,43 @@ class AgentAdapter:
         if self.textual_app.agent_state != "UNINITIALIZED":
             self.textual_app.call_from_thread(self.textual_app.on_message_added)
 
+    def save_session(self, task: str, status: str, result: str) -> str:
+        """Save the session messages to a JSON file.
+        
+        Args:
+            task: The task that was executed
+            status: The exit status ("success" or "error")
+            result: The final result or error message
+            
+        Returns:
+            Path to the saved session file
+        """
+        # Create sessions directory if it doesn't exist
+        sessions_dir = Path("sessions")
+        sessions_dir.mkdir(exist_ok=True)
+        
+        # Generate timestamped filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_file = sessions_dir / f"session_{timestamp}.json"
+        
+        # Prepare session data
+        session_data = {
+            "task": task,
+            "status": status,
+            "result": result,
+            "model": self.model.name,
+            "cost": self.model.cost,
+            "mode": self.config.mode,
+            "timestamp": timestamp,
+            "messages": self.messages,
+        }
+        
+        # Save to file
+        with open(session_file, "w", encoding="utf-8") as f:
+            json.dump(session_data, f, indent=2, ensure_ascii=False)
+        
+        return str(session_file)
+
     def run(self, task: str, **kwargs):
         """Run the agent with the given task."""
         self.messages = []
@@ -419,11 +465,17 @@ class AgentAdapter:
         try:
             result = loop.run_until_complete(Runner.run(self.agent, task, max_turns=20))
             self.add_message("system", f"✓ Task completed: {result.final_output}", kind="final")
+            # Save session on successful completion
+            session_file = self.save_session(task, "success", result.final_output)
+            print(f"Session saved to: {session_file}")
             self.textual_app.call_from_thread(
                 self.textual_app.on_agent_finished, "success", result.final_output
             )
         except Exception as e:
             self.add_message("system", f"✗ Error: {str(e)}")
+            # Save session on error
+            session_file = self.save_session(task, "error", str(e))
+            print(f"Session saved to: {session_file}")
             self.textual_app.call_from_thread(self.textual_app.on_agent_finished, "error", str(e))
             import traceback
 
