@@ -8,12 +8,17 @@ The framework is based on the `openai-agent-framework` and `cborg` model provide
 ## Installation
 
 ```bash
-uv sync
+uv python install 3.14 (or higher)
+uv sync (it should use 3.14 or higher)
 source .venv/bin/activate
 uv pip install -e .
 ```
 
 ## Usage
+Start the Python environment with:
+```
+source .venv/bin/activate
+```
 
 ### Interactive Bash Agent with REPL
 ```
