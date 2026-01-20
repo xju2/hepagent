@@ -15,6 +15,11 @@ uv pip install -e .
 
 ## Usage
 
+### Interactive Bash Agent with REPL
+```
+python scripts/bash_repl.py
+```
+
 ### Interactive Bash Agent with TextualAgent
 
 The project includes `TextualAgent`, an interactive TUI (Terminal User Interface) for running AI agents with real-time display of thinking processes and bash command execution.
