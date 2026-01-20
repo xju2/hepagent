@@ -9,6 +9,7 @@ The framework is based on the `openai-agent-framework` and `cborg` model provide
 
 ```bash
 uv sync
+source .venv/bin/activate
 uv pip install -e .
 ```
 
