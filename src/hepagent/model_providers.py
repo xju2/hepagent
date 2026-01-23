@@ -3,6 +3,9 @@ from hepagent.helpers import get_cborg_api_key
 from agents import OpenAIChatCompletionsModel
 
 
+DEFAULT_CBORG_MODEL: str = "google/gemini-flash"
+
+
 def get_cborg_model_provider(
     model_name: str | None = None,
 ) -> OpenAIChatCompletionsModel:
@@ -14,5 +17,5 @@ def get_cborg_model_provider(
     """
     client = AsyncOpenAI(base_url="https://api.cborg.lbl.gov", api_key=get_cborg_api_key())
     if model_name is None:
-        model_name = "google/gemini-flash"
+        model_name = DEFAULT_CBORG_MODEL
     return OpenAIChatCompletionsModel(model=model_name, openai_client=client)

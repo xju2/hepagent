@@ -5,30 +5,30 @@
 ## 1. Environment Overview
 
 ### System description
-All setup and runs were carried out on **Perlmutter**, the CPU–GPU hybrid supercomputer hosted at NERSC.  
+All setup and runs were carried out on **Perlmutter**, the CPU–GPU hybrid supercomputer hosted at NERSC.
 For this task, only the **CPU nodes** were used, as *cosmicic* is a pure MPI code that performs FFT-based parallel domain decomposition to generate initial density and velocity fields.
 
 Each CPU node on Perlmutter provides:
-- 128 AMD Milan cores  
-- 512 GB of memory  
-- A high-speed interconnect optimized for MPI workloads  
+- 128 AMD Milan cores
+- 512 GB of memory
+- A high-speed interconnect optimized for MPI workloads
 
 All work is split between the **home directory**, used for source repositories and lightweight files, and the **scratch directory**, used for large outputs and batch runs.
 
-- Home: `/global/homes/d/diego-gh/`  
+- Home: `/global/homes/d/diego-gh/`
 - Scratch: `/pscratch/sd/d/diego-gh/`
 
 ---
 
 ## 2. Generating the Transfer Function with CLASS
 
-Before running *cosmicic*, we must provide a transfer-function file that defines the relative amplitude of density perturbations as a function of wavenumber \( k \).  
+Before running *cosmicic*, we must provide a transfer-function file that defines the relative amplitude of density perturbations as a function of wavenumber \( k \).
 This was generated using the **CLASS** Boltzmann code (via its Python interface, `classy`).
 
 ### Steps
 
 1. Loaded Python with the `classy` module available.
-2. Created a Python script that sets up a Planck-like cosmology and requests the transfer function and power spectrum at redshift \( z = 200 \).  
+2. Created a Python script that sets up a Planck-like cosmology and requests the transfer function and power spectrum at redshift \( z = 200 \).
 
    The key parameters include:
    - \( h = 0.675 \)
@@ -69,8 +69,123 @@ zeros = np.zeros_like(k_vals)
 cmb_tf = np.column_stack([k_vals, T_cdm, T_b, zeros, zeros, zeros, zeros])
 np.savetxt("cmb.tf", cmb_tf, fmt="%.10e")
 ```
+The above version is buggy because the cosmology units are not consistent with cosmicic's expectations. The new version is the following:
+```python
+# ==========================================
+# CAMB → CosmicIC transfer function generator
+# Includes CAMB δ_tot, BBKS, and CosmicIC-style T(k)
+# ==========================================
 
-3. The file `cmb.tf` was inspected visually to confirm smooth, monotonic behavior in the transfer functions for both CDM and baryons.  
+import numpy as np
+import matplotlib.pyplot as plt
+import camb
+from camb import model, initialpower
+
+# --------------------------------------------------
+# 1. Cosmological parameters
+# --------------------------------------------------
+h        = 0.675
+Omega_b  = 0.0487
+Omega_c  = 0.31 - Omega_b
+Omega_m  = Omega_b + Omega_c
+n_s      = 0.96
+z_ic     = 200.0
+
+# --------------------------------------------------
+# 2. Set CAMB parameters
+# --------------------------------------------------
+pars = camb.CAMBparams()
+
+pars.set_cosmology(
+    H0     = 100*h,
+    ombh2  = Omega_b*h*h,
+    omch2  = Omega_c*h*h,
+)
+
+# Primordial spectrum (σ8 is derived from As)
+pars.InitPower.set_params(ns=n_s)
+
+pars.set_matter_power(
+    redshifts=[z_ic],
+    kmax=300.0      # physical Mpc^-1
+)
+
+pars.WantTransfer = True
+pars.DoLensing = False
+
+pars.Transfer.k_per_logint = 300  # default is ~10
+
+# --------------------------------------------------
+# 3. Run CAMB
+# --------------------------------------------------
+results   = camb.get_results(pars)
+transfers = results.get_matter_transfer_data()
+
+# --------------------------------------------------
+# 4. Extract k and δ_i(k,z)
+# --------------------------------------------------
+k = transfers.q   # physical Mpc^-1 units
+
+delta_cdm = transfers.transfer_z('delta_cdm',    z_index=0)
+delta_b   = transfers.transfer_z('delta_baryon', z_index=0)
+delta_m   = transfers.transfer_z('delta_tot',    z_index=0)
+
+# CAMB already has δ(k→0)=1
+
+# --------------------------------------------------
+# 5. Generate CosmicIC 7-column format
+# --------------------------------------------------
+zeros = np.zeros_like(k)
+cmb_tf = np.column_stack([
+    k, delta_cdm, delta_b, zeros, zeros, zeros, zeros
+])
+
+np.savetxt("cmb_CAMB.tf", cmb_tf, fmt="%.10e")
+print(f"Saved cmb_CAMB.tf with {len(k)} rows.")
+
+# --------------------------------------------------
+# 6. BBKS transfer function
+# --------------------------------------------------
+def T_BBKS(k, Omega_m, h):
+    q = k / (Omega_m * h)
+    return (
+        np.log(1 + 2.34*q)/(2.34*q) *
+        (1 + 3.89*q + (16.1*q)**2 + (5.46*q)**3 + (6.71*q)**4)**(-0.25)
+    )
+
+T_bbks = T_BBKS(k, Omega_m, h)
+
+# --------------------------------------------------
+# 7. CosmicIC-style matter transfer
+# --------------------------------------------------
+f_b = Omega_b / Omega_m
+f_c = Omega_c / Omega_m
+
+T_cic = f_b * delta_b + f_c * delta_cdm     # unnormalized
+T_cic_norm = T_cic / T_cic[0]               # normalized like CosmicIC would do internally
+
+# --------------------------------------------------
+# 8. CAMB normalized
+# --------------------------------------------------
+T_camb_norm = delta_m / delta_m[0]
+
+# --------------------------------------------------
+# 9. Plot all comparisons
+# --------------------------------------------------
+plt.figure(figsize=(8,6))
+
+plt.loglog(k, T_camb_norm,     label="CAMB (Total) normalized")
+plt.loglog(k, T_cic_norm, '--',label="CAMB (Ω_b δ_b + Ω_c δ_cdm) normalized")
+plt.loglog(k, T_bbks,   ':',   label="BBKS (analytic)")
+
+plt.xlabel(r"$k\,[\mathrm{Mpc}^{-1}]$")
+plt.ylabel("Transfer function")
+plt.legend()
+plt.tight_layout()
+plt.savefig("CAMB_CIC_BBKS_comparison.png", dpi=300)
+plt.show()
+```
+3. The file `cmb.tf` was inspected visually to confirm smooth, monotonic behavior in the transfer functions for both CDM and baryons.
 4. The resulting `cmb.tf` file was then copied to the scratch directory where *cosmicic* will run:
 
 ```bash
@@ -89,7 +204,7 @@ git clone <repo_link> cosmicic
 cd cosmicic
 ```
 
-The code is a C/C++/MPI program that relies on FFTW3 and optionally HDF5 for I/O.  
+The code is a C/C++/MPI program that relies on FFTW3 and optionally HDF5 for I/O.
 Perlmutter provides optimized builds of both through the Cray programming environment.
 
 Before compilation, the following modules were loaded:
@@ -165,7 +280,7 @@ This ensures that log files and simulation outputs remain separated and easy to 
 
 ## 5. Input Parameter File
 
-The *cosmicic* code reads its configuration from `input.par`.  
+The *cosmicic* code reads its configuration from `input.par`.
 For this run, I prepared a version that generates a **1024³** test cube (a smaller version of the production 4096³ volume).
 
 **`input.par`**
@@ -195,8 +310,8 @@ PrintFormat=6
 ```
 
 Here:
-- `np=1024` sets the number of particles per side (the grid resolution).  
-- `TFFlag=0` specifies that an external transfer function (the `cmb.tf` file) should be used.  
+- `np=1024` sets the number of particles per side (the grid resolution).
+- `TFFlag=0` specifies that an external transfer function (the `cmb.tf` file) should be used.
 - `PrintFormat=6` instructs the code to output files in **Nyx-compatible parallel binary format**, which will later be used directly as Nyx initial conditions.
 
 ---
@@ -302,7 +417,7 @@ cd /pscratch/sd/d/diego-gh
 git clone https://github.com/AMReX-Astro/Nyx.git
 ```
 
-Now, the example that we are trying to execute is the "LyA" simulation, which was specifically designed to model the Lyman-alpha forest. Nyx's repository comes with a template that we can modify to run this specific simulation. 
+Now, the example that we are trying to execute is the "LyA" simulation, which was specifically designed to model the Lyman-alpha forest. Nyx's repository comes with a template that we can modify to run this specific simulation.
 
 To compile the code, we first need to navigate to the directory for this simulation and modify the GNUMakefile. Here is how the GNUMakefile looks like:
 
@@ -496,7 +611,7 @@ particles.nparts_per_read = 262144
 
 # TIME STEP CONTROL
 nyx.relative_max_change_a = 0.01    # max change in scale factor
-particles.cfl             = 0.5     # 'cfl' for particles 
+particles.cfl             = 0.5     # 'cfl' for particles
 nyx.cfl                   = 0.5     # cfl number for hyperbolic system
 nyx.init_shrink           = 1.0     # scale back initial timestep
 nyx.change_max            = 2.0     # factor by which timestep can change
@@ -594,16 +709,16 @@ Here are some important details:
 - Match the simulation box size and resolution to those used for the initial conditions
 - Match the cosmological parameters to those used for the initial conditions
 - Make sure that the initial conditions are correctly being set to 'BinaryMetaFile' type and is pointing to the FileList.txt generated by the cosmicic code
-  
+
   >[!warning] The FileList.txt contains the names of all the files created by cosmicic that are loaded as the initial conditions in Nyx. However, cosmicic adds an arbitrary relative path for this files, which might not be correct with however you decide to organize each run. Instead, I strongly suggest to modify FileList.txt to have the absolute path for all the files.
-  
+
 ---
 ## 3. Creating the Batch Job Script and Submitting the Job
 
 Now we need a job script for the simulation run. For this example, this is the job script that was used:
 
 ```bash
-diego-gh@perlmutter:login06:/pscratch/sd/d/diego-gh/Nyx/Exec/LyA> cat run_nyx_gpu_64_perlmutter_new.sbatch 
+diego-gh@perlmutter:login06:/pscratch/sd/d/diego-gh/Nyx/Exec/LyA> cat run_nyx_gpu_64_perlmutter_new.sbatch
 #!/bin/bash -l
 #SBATCH -N 2                       # 2 node
 #SBATCH -C gpu                     # A100 GPU nodes
