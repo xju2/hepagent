@@ -72,6 +72,7 @@ from agents.run_context import RunContextWrapper
 from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
 from hepagent.agents.bash import get_cborg_model_provider
 from hepagent.token_costs import calculate_cost
+from hepagent.model_providers import DEFAULT_CBORG_MODEL
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
@@ -776,9 +777,18 @@ if __name__ == "__main__":
         default="dummy",
         help="Type of agent to run: 'dummy' for DummyAgent, 'real' for real bash agent, 'cosmicic' for CosmicIC agent",
     )
+    # model name
+    parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        default=DEFAULT_CBORG_MODEL,
+        help="Model name to use for the real bash agent (if applicable)",
+    )
     args = parser.parse_args()
 
     task = args.task
+    model_name = args.model
     use_real_agent = task in ("real", "cosmicic")
 
     if use_real_agent:
