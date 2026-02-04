@@ -20,6 +20,10 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/xju2/hepagent"
 
+
+[project.scripts]
+hepagent = "hepagent.cli.main:main"
+
 [tool.ruff]
 line-length = 99
 target-version = "py39"

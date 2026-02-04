@@ -1,25 +1,13 @@
 # Cosmic Initial Conditions for Nyx
 
-Working directory: `/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0`
-The original cosmicic code is located at `/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic`.
+Run the cosmicic code to generate initial conditions for Nyx cosmological simulation in your working directory for the given cosmological and runtime parameters.
 
 ## Instructions
 
 1. If not already in your working directory, make a copy of the cosmicic code, and then compile it.
 2. If the compilation is successful, copy the executable `init` to your working directory.
-3. Finally, create a parameter file named `input.par` for a cosmological simulation with Nyx.
-The cosmological parameters are:
-- hubble = 0.675
-- Omega_m = 0.31
-- Omega_bar = 0.0487
-- n_s = 0.96
-And the runtime parameters are:
-- np = 265
-- box_size = 80.0
-- seed = 343240149
-- z_in = 200.0
-
-After that, feel free to run the command to create the cosmic initial conditions for Nyx simulation.
+3. Create a parameter file named `input.par` based on the default parameters from `cosmicic/input.par`. Modify the cosmological parameters (e.g., Omega_m, Omega_b, h, sigma_8, n_s) and runtime parameters (e.g., box size, number of particles, output redshifts) as needed for your simulation.
+4. After that, run the command `init` to create the cosmic initial conditions.
 
 ## Additional notes
 * Note that if the platform is Perlmuttter, you need to load these module first:

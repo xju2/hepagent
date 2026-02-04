@@ -20,10 +20,7 @@ You need to ask user's input on the following:
 Follow these steps closely. For each step, refer to corresponding markdown files in the `resources` directory for detailed information and guidance.
 
 1. Create the transfer function, see `resources/TF.md`.
-2. Generate initial conditions, see `resources/ICs.md`.
-3. Set up the Nyx simulation parameters, see `resources/NYX-SETUP.md`.
-4. Run the Nyx simulation, see `resources/NYX-RUN.md`.
-5. Analyze the simulation outputs, see `resources/NYX-ANALYSIS.md`
+2. Generate initial conditions, see `resources/IC.md`.
 
 
 ## Additional notes
