@@ -9,7 +9,7 @@ The framework is based on the `openai-agent-framework` and `cborg` model provide
 
 ```bash
 uv python install 3.14 (or higher)
-uv sync (it should use 3.14 or higher)
+make sync
 source .venv/bin/activate
 uv pip install -e .
 ```
@@ -39,12 +39,8 @@ python3 scripts/bash_textual.py
 Run with real bash agent (requires `CBORG_API_KEY` environment variable):
 ```bash
 export CBORG_API_KEY="your-api-key"
+export OPENAI_AGENTS_DISABLE_TRACING=1
 python3 scripts/bash_textual.py --real
-```
-
-Or use the example script:
-```bash
-python3 scripts/example_bash_textual.py
 ```
 
 #### Features
@@ -66,7 +62,7 @@ python3 scripts/example_bash_textual.py
 
 ```python
 from hepagent.agents.bash import create as create_bash_agent
-from scripts.bash_textual import TextualAgent, AgentAdapter
+from hepagent.agents.textual import TextualAgent, AgentAdapter
 
 # Create bash agent
 bash_agent = create_bash_agent()
