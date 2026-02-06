@@ -1,8 +1,9 @@
 """REPL for bash agent."""
 
 import asyncio
-from hepagent.agents.repl import run_demo_loop
+
 from hepagent.agents.bash import create
+from hepagent.agents.repl import run_demo_loop
 
 
 async def main() -> None:

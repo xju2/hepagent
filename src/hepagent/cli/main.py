@@ -22,7 +22,7 @@ def _register_commands():
         module = importlib.import_module(f"{package.__name__}.{module_name}")  # type: ignore
 
         # find all click commands in the module
-        for obj_name, obj in inspect.getmembers(module):
+        for _obj_name, obj in inspect.getmembers(module):
             if isinstance(obj, click.core.Command):
                 main.add_command(obj)
 

@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 
 def read_markdown(path: str) -> str:
@@ -9,18 +9,9 @@ def read_markdown(path: str) -> str:
 
 def run_shell_command(cmd: str) -> str:
     """Run a shell command and return stdout/stderr."""
-    proc = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True
-    )
+    proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"Command failed: {cmd}\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
+        raise RuntimeError(f"Command failed: {cmd}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
     return proc.stdout
 
 

@@ -1,5 +1,7 @@
 from pathlib import Path
+
 from pydantic import BaseModel, Field
+
 from agents import function_tool
 
 
@@ -23,8 +25,8 @@ def create_transfer_function(params: TransferFunctionInput) -> Path:
     Returns:
         Path: Path to the generated transfer function file.
     """
-    import numpy as np
     import camb
+    import numpy as np
 
     # cosmological parameters
     h = params.h

@@ -43,8 +43,9 @@ import logging
 import threading
 import time
 from collections.abc import Iterable
-from typing import Any
 from dataclasses import dataclass
+from importlib.resources import files
+from typing import Any
 
 from rich.spinner import Spinner
 from rich.text import Text
@@ -56,14 +57,15 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
-from importlib.resources import files
-
-from agents import Agent, Runner, function_tool, AgentHooks
+from agents import Agent, AgentHooks, Runner, function_tool
 from agents.run_context import RunContextWrapper
 
 # Import bash execution function from the bash agent module
-from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
-from hepagent.agents.bash import get_cborg_model_provider
+from hepagent.agents.bash import (
+    error_msg as TOOL_CANCEL_MESSAGE,
+    execute_bash_command,
+    get_cborg_model_provider,
+)
 from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
@@ -109,7 +111,8 @@ class BashToolWrapper:
             # Show the command that's about to be executed
             adapter.add_message(
                 "assistant",
-                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}",
+                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```"
+                f"\nWorking directory: {cwd or 'current'}",
             )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
@@ -120,9 +123,7 @@ class BashToolWrapper:
                 adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "confirm":
                 # Ask for confirmation
-                prompt = (
-                    "Confirm execution? (press Enter to accept, or type your reason to reject)"
-                )
+                prompt = "Confirm execution? (press Enter to accept, or type your reason to reject)"
                 response = adapter.textual_app.input_container.request_input(prompt)
 
                 if response.strip():
@@ -134,7 +135,10 @@ class BashToolWrapper:
             elif adapter.config.mode == "human":
                 # In human mode, we should not auto-execute agent commands
                 # Ask for confirmation anyway
-                prompt = "⚠️ Agent called tool in HUMAN mode. Allow? (Enter to allow, type reason to reject)"
+                prompt = (
+                    "⚠️ Agent called tool in HUMAN mode. Allow? "
+                    "(Enter to allow, type reason to reject)"
+                )
                 response = adapter.textual_app.input_container.request_input(prompt)
                 if response.strip():
                     return self._handle_rejection(response)
@@ -150,7 +154,8 @@ class BashToolWrapper:
             )
             adapter.add_message(
                 "system",
-                f"{result_icon} Return code: {result['returncode']}\nTruncated Output:\n{truncated_output}",
+                f"{result_icon} Return code: {result['returncode']}\n"
+                f"Truncated Output:\n{truncated_output}",
             )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
@@ -248,7 +253,7 @@ class SmartInputContainer(Container):
             self._single_input.focus()
 
     def request_input(self, prompt: str) -> str:
-        """Request input from user. Returns input text (empty string if confirmed without reason)."""
+        """Request input from user. Returns input text."""
         self._input_event.clear()
         self._input_result = None
         self.pending_prompt = prompt
@@ -290,11 +295,14 @@ class SmartInputContainer(Container):
             self._single_input.display = False
             self._multi_input.display = True
             self._hint_text.update(
-                "[reverse][bold][$accent] Ctrl+D [/][/][/] to submit, [reverse][bold][$accent] Tab [/][/][/] to switch focus with other controls"
+                "[reverse][bold][$accent] Ctrl+D [/][/][/] to submit, [reverse][bold][$accent] "
+                "Tab [/][/][/] to switch focus with other controls"
             )
         else:
             self._hint_text.update(
-                "[reverse][bold][$accent] Enter [/][/][/] to submit, [reverse][bold][$accent] Ctrl+T [/][/][/] to switch to multi-line input, [reverse][bold][$accent] Tab [/][/][/] to switch focus with other controls",
+                "[reverse][bold][$accent] Enter [/][/][/] to submit, [reverse][bold][$accent] "
+                "Ctrl+T [/][/][/] to switch to multi-line input, [reverse][bold][$accent] "
+                "Tab [/][/][/] to switch focus with other controls",
             )
             self._multi_input.display = False
             self._single_input.display = True
@@ -391,12 +399,14 @@ class AgentAdapter:
 
     def add_message(self, role: str, content: str, **kwargs):
         """Add a message to the messages list."""
-        self.messages.append({
-            "role": role,
-            "content": content,
-            "timestamp": time.time(),
-            **kwargs,
-        })
+        self.messages.append(
+            {
+                "role": role,
+                "content": content,
+                "timestamp": time.time(),
+                **kwargs,
+            }
+        )
         if self.textual_app.agent_state != "UNINITIALIZED":
             self.textual_app.call_from_thread(self.textual_app.on_message_added)
 
@@ -693,7 +703,10 @@ class TextualAgent(App):
         if self.agent_state == "RUNNING":
             spinner_frame = str(self._spinner.render(time.time())).strip()
             status_text = f"{self.agent_state} {spinner_frame}"
-        self.title = f"Step {self.i_step + 1}/{self.n_steps} - {status_text} - Cost: ${self.agent.model.cost:.6f}"
+        self.title = (
+            f"Step {self.i_step + 1}/{self.n_steps} - {status_text} "
+            f"- Cost: ${self.agent.model.cost:.6f}"
+        )
         self.sub_title = f"Mode: {self.agent.config.mode}"
         try:
             self.query_one("Header").set_class(self.agent_state == "RUNNING", "running")

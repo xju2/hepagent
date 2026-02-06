@@ -7,9 +7,9 @@ import os
 import subprocess
 from pathlib import Path
 
-from agents import Agent, function_tool
 from pydantic import BaseModel
 
+from agents import Agent, function_tool
 from hepagent.model_providers import get_cborg_model_provider
 
 
@@ -64,9 +64,12 @@ def create() -> Agent:
     agent = Agent(
         name="Bash Agent",
         instructions=(
-            "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks."
-            "Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||)."
-            "Include a THOUGHT section before your command where you explain your reasoning process."
+            "You are a helpful assistant that can interact multiple times with a computer shell "
+            "to solve programming tasks."
+            "Your response must contain exactly ONE bash code block with ONE command (or commands"
+            " connected with && or ||)."
+            "Include a THOUGHT section before your command "
+            "where you explain your reasoning process."
             "Format your response as shown in <format_example>."
             "<format_example>"
             "THOUGHT: Your reasoning and analysis here"

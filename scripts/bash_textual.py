@@ -50,8 +50,9 @@ import logging
 import threading
 import time
 from collections.abc import Iterable
-from typing import Any
 from dataclasses import dataclass
+from importlib.resources import files
+from typing import Any
 
 from rich.spinner import Spinner
 from rich.text import Text
@@ -63,16 +64,17 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
-from importlib.resources import files
-
-from agents import Agent, Runner, function_tool, AgentHooks
+from agents import Agent, AgentHooks, Runner, function_tool
 from agents.run_context import RunContextWrapper
 
 # Import bash execution function from the bash agent module
-from hepagent.agents.bash import execute_bash_command, error_msg as TOOL_CANCEL_MESSAGE
-from hepagent.agents.bash import get_cborg_model_provider
-from hepagent.token_costs import calculate_cost
+from hepagent.agents.bash import (
+    error_msg as TOOL_CANCEL_MESSAGE,
+    execute_bash_command,
+    get_cborg_model_provider,
+)
 from hepagent.model_providers import DEFAULT_CBORG_MODEL
+from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
 OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
@@ -117,7 +119,8 @@ class BashToolWrapper:
             # Show the command that's about to be executed
             adapter.add_message(
                 "assistant",
-                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\nWorking directory: {cwd or 'current'}",
+                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```\n"
+                f"Working directory: {cwd or 'current'}",
             )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
@@ -128,9 +131,7 @@ class BashToolWrapper:
                 adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             elif adapter.config.mode == "confirm":
                 # Ask for confirmation
-                prompt = (
-                    "Confirm execution? (press Enter to accept, or type your reason to reject)"
-                )
+                prompt = "Confirm execution? (press Enter to accept, or type your reason to reject)"
                 response = adapter.textual_app.input_container.request_input(prompt)
 
                 if response.strip():
@@ -142,7 +143,10 @@ class BashToolWrapper:
             elif adapter.config.mode == "human":
                 # In human mode, we should not auto-execute agent commands
                 # Ask for confirmation anyway
-                prompt = "⚠️ Agent called tool in HUMAN mode. Allow? (Enter to allow, type reason to reject)"
+                prompt = (
+                    "⚠️ Agent called tool in HUMAN mode. Allow?"
+                    "(Enter to allow, type reason to reject)"
+                )
                 response = adapter.textual_app.input_container.request_input(prompt)
                 if response.strip():
                     return self._handle_rejection(response)
@@ -158,7 +162,8 @@ class BashToolWrapper:
             )
             adapter.add_message(
                 "system",
-                f"{result_icon} Return code: {result['returncode']}\nTruncated Output:\n{truncated_output}",
+                f"{result_icon} Return code: {result['returncode']}\n"
+                f"Truncated Output:\n{truncated_output}",
             )
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
 
@@ -256,7 +261,7 @@ class SmartInputContainer(Container):
             self._single_input.focus()
 
     def request_input(self, prompt: str) -> str:
-        """Request input from user. Returns input text (empty string if confirmed without reason)."""
+        """Request input from user. Returns input text"""
         self._input_event.clear()
         self._input_result = None
         self.pending_prompt = prompt
@@ -298,11 +303,14 @@ class SmartInputContainer(Container):
             self._single_input.display = False
             self._multi_input.display = True
             self._hint_text.update(
-                "[reverse][bold][$accent] Ctrl+D [/][/][/] to submit, [reverse][bold][$accent] Tab [/][/][/] to switch focus with other controls"
+                "[reverse][bold][$accent] Ctrl+D [/][/][/] to submit, [reverse][bold][$accent]"
+                " Tab [/][/][/] to switch focus with other controls"
             )
         else:
             self._hint_text.update(
-                "[reverse][bold][$accent] Enter [/][/][/] to submit, [reverse][bold][$accent] Ctrl+T [/][/][/] to switch to multi-line input, [reverse][bold][$accent] Tab [/][/][/] to switch focus with other controls",
+                "[reverse][bold][$accent] Enter [/][/][/] to submit, [reverse][bold][$accent] "
+                "Ctrl+T [/][/][/] to switch to multi-line input, [reverse][bold][$accent] "
+                "Tab [/][/][/] to switch focus with other controls",
             )
             self._multi_input.display = False
             self._single_input.display = True
@@ -399,12 +407,14 @@ class AgentAdapter:
 
     def add_message(self, role: str, content: str, **kwargs):
         """Add a message to the messages list."""
-        self.messages.append({
-            "role": role,
-            "content": content,
-            "timestamp": time.time(),
-            **kwargs,
-        })
+        self.messages.append(
+            {
+                "role": role,
+                "content": content,
+                "timestamp": time.time(),
+                **kwargs,
+            }
+        )
         if self.textual_app.agent_state != "UNINITIALIZED":
             self.textual_app.call_from_thread(self.textual_app.on_message_added)
 
@@ -701,7 +711,10 @@ class TextualAgent(App):
         if self.agent_state == "RUNNING":
             spinner_frame = str(self._spinner.render(time.time())).strip()
             status_text = f"{self.agent_state} {spinner_frame}"
-        self.title = f"Step {self.i_step + 1}/{self.n_steps} - {status_text} - Cost: ${self.agent.model.cost:.6f}"
+        self.title = (
+            f"Step {self.i_step + 1}/{self.n_steps} - {status_text} "
+            f"- Cost: ${self.agent.model.cost:.6f}"
+        )
         self.sub_title = f"Mode: {self.agent.config.mode}"
         try:
             self.query_one("Header").set_class(self.agent_state == "RUNNING", "running")
@@ -775,7 +788,7 @@ if __name__ == "__main__":
         type=str,
         choices=["dummy", "real", "cosmicic"],
         default="dummy",
-        help="Type of agent to run: 'dummy' for DummyAgent, 'real' for real bash agent, 'cosmicic' for CosmicIC agent",
+        help="Type of agent to run: 'dummy', 'real', and 'cosmicic'",
     )
     # model name
     parser.add_argument(
@@ -795,17 +808,21 @@ if __name__ == "__main__":
         from hepagent.agents.bash import create as create_bash_agent
 
         cosmicic_prompt = (
-            "Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0. "
-            "The original cosmicic code is located at /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic. "
+            "Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0."
+            "The original cosmicic code is located at "
+            "/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic. "
             "1. Make a copy of cosmicic code to your working directory, compile it. "
-            "If the compilation is successful, copy the executable `init` to your working directory. "
-            "Note that if the platform is Perlmuttter, you need to load these module first: - cray-fftw - cray-hdf5-parallel. "
+            "If the compilation is successful, copy the `init` to your working directory."
+            "Note that if the platform is Perlmuttter, you need to load these module first: "
+            "- cray-fftw - cray-hdf5-parallel. "
             "2. Create a parameter file named `input.par` for a cosmological simulation with Nyx. "
-            "The cosmological parameters are: - hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. "
-            "And the runtime parameters are: - np = 265; - box_size = 80.0; - seed = 343240149; - z_in = 200.0; - output_file = output/ics_80mpc_256. "
+            "The cosmological parameters are: "
+            "- hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. "
+            "And the runtime parameters are: - np = 265; - box_size = 80.0; - seed = 343240149; "
+            "- z_in = 200.0; - output_file = output/ics_80mpc_256. "
             "And the transfer_function is located at `cmb.tf`. "
             "3. Create the cosmic initial conditions for Nyx simulation. "
-            "You may have to read the `cosmicic/README` file located at your working directory for more details."
+            "You may have to read the `cosmicic/README` file located for more details."
         )
         simple_bash_prompt = (
             "List the files in the current directory and tell me how many there are."

@@ -4,7 +4,8 @@ from hepagent.agents.bash import create as create_bash_agent
 
 
 async def main():
-    task_prompt = """Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0.
+    task_prompt = """
+    Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0.
     The original cosmicic code is located at /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic.
     If not already in your working directory, make a copy, and then compile it.
     If the compilation is successful, copy the executable `init` to your working directory.
@@ -22,8 +23,10 @@ async def main():
     - box_size = 80.0
     - seed = 343240149
     - z_in = 200.0
-    You may have to read the `cosmicic/README` file located at your working directory for more details.
-    After that, feel free to run the command to create the cosmic initial conditions for Nyx simulation.
+    You may have to read the `cosmicic/README` file located at your working directory
+    for more details.
+    After that, feel free to run the command to create the cosmic initial conditions
+    for Nyx simulation.
 """
     agent = create_bash_agent()
     result = await Runner.run(agent, task_prompt)

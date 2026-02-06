@@ -23,6 +23,6 @@ def test_create_uses_execute_bash_tool(monkeypatch):
     # Check that we have a bash command execution tool
     assert len(captured["tools"]) == 1
     tool = captured["tools"][0]
-    assert hasattr(tool, 'name')
-    assert 'execute_bash_command' in tool.name
+    assert hasattr(tool, "name")
+    assert "execute_bash_command" in tool.name
     assert "THOUGHT" in captured["instructions"]

@@ -26,121 +26,25 @@ Homepage = "https://github.com/xju2/hepagent"
 hepagent = "hepagent.cli.main:main"
 
 [tool.ruff]
-line-length = 99
+line-length = 100
 target-version = "py39"
 exclude = ["*ipynb"]
-preview = true
-# NOTE: Synchoronize the ignores with .flake8
-lint.ignore = [
-    # these ignores are from flake8-bugbear; please fix!
-    "B007", "B008", "B017",
-    "B018", # Useless expression
-    "B023",
-    "B028", # No explicit `stacklevel` keyword argument found
-    "E402",
-    "C408", # C408 ignored because we like the dict keyword argument syntax
-    "E501", # E501 is not flexible enough, we're using B950 instead
-    "E721",
-    "E741",
-    "EXE001",
-    "F405",
-    # these ignores are from flake8-logging-format; please fix!
-    "G101",
-    # these ignores are from ruff NPY; please fix!
-    "NPY002",
-    # these ignores are from ruff PERF; please fix!
-    "PERF203",
-    "PERF401",
-    "PERF403",
-    # these ignores are from PYI; please fix!
-    "PYI024",
-    "PYI036",
-    "PYI041",
-    "PYI056",
-    "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
-    "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
-    "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
-    "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
-    "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
-    "SIM117",
-    "SIM118",
-    "UP007" # keep-runtime-typing
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
 ]
-lint.select = [
-    "B",
-    "B904", # Re-raised error without specifying the cause via the from keyword
-    "C4",
-    "G",
-    "E",
-    "EXE",
-    "F",
-    "SIM1",
-    "SIM911",
-    "W",
-    # Not included in flake8
-    "FURB",
-    "LOG",
-    "NPY",
-    "PERF",
-    "PGH004",
-    "PIE790",
-    "PIE794",
-    "PIE800",
-    "PIE804",
-    "PIE807",
-    "PIE810",
-    "PLC0131", # type bivariance
-    "PLC0132", # type param mismatch
-    "PLC0205", # string as __slots__
-    "PLC3002", # unnecessary-direct-lambda-call
-    "PLE",
-    "PLR0133", # constant comparison
-    "PLR0206", # property with params
-    "PLR1722", # use sys exit
-    "PLR1736", # unnecessary list index
-    "PLW0129", # assert on string literal
-    "PLW0131", # named expr without context
-    "PLW0133", # useless exception statement
-    "PLW0245", # super without brackets
-    "PLW0406", # import self
-    "PLW0711", # binary op exception
-    "PLW1501", # bad open mode
-    "PLW1509", # preexec_fn not safe with threads
-    "PLW2101", # useless lock statement
-    "PLW3301", # nested min max
-    "PT006", # TODO: enable more PT rules
-    "PT022",
-    "PT023",
-    "PT024",
-    "PT025",
-    "PT026",
-    "PTH",  # flake8-use-pathlib
-    "PYI",
-    "Q003",  # avoidable escaped quote
-    "Q004",  # unnecessary escaped quote
-    "RSE",
-    "RUF008", # mutable dataclass default
-    "RUF013", # ban implicit optional
-    "RUF015", # access first ele in constant time
-    "RUF016", # type error non-integer index
-    "RUF017",
-    "RUF018", # no assignment in assert
-    "RUF019", # unnecessary-key-check
-    "RUF024", # from keys mutable
-    "RUF026", # default factory kwarg
-    "SLOT",
-    "TRY002", # ban vanilla raise (todo fix NOQAs)
-    "TRY401", # verbose-log-message
-    "UP",
-    "YTT",  # flak8-2020
-]
+isort = { combine-as-imports = true, known-first-party = ["agents"] }
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = [
-    "F401",
-]
+"examples/**/*.py" = ["E501"]
+"__init__.py" = ["F401"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -153,3 +57,32 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.14.10",
 ]
+
+[tool.coverage.run]
+source = ["src/hepagent"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+sort = "-Cover"
+exclude_also = [
+    # This is only executed while typechecking
+    "if TYPE_CHECKING:",
+    "@abc.abstractmethod",
+    "raise NotImplementedError",
+    "logger.debug",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+filterwarnings = [
+    # This is a warning that is expected to happen: we have an async filter that raises an exception
+    "ignore:coroutine 'test_async_input_filter_fails.<locals>.invalid_input_filter' was never awaited:RuntimeWarning",
+]
+markers = [
+    "allow_call_model_methods: mark test as allowing calls to real model implementations",
+]
+
+[tool.inline-snapshot]
+format-command = "ruff format --stdin-filename {filename}"
