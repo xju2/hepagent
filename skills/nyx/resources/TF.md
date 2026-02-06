@@ -4,4 +4,6 @@ Follow the following instructions in your working directory for the given cosmol
 
 ## Instructions
 
-Generate the transfer function using the c++ / c version of CLASS code to create the transfer function file `cmb.tf` in your working directory.
+- Download the C++ / C version of CLASS code.
+- Compile the code.
+- Generate the transfer function and save it to `cmb.tf` in your working directory.
