@@ -11,6 +11,7 @@ authors = [
 ]
 dependencies = [
     "camb>=1.6.5",
+    "click>=8.3.1",
     "matplotlib>=3.10.8",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",

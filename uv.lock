@@ -947,6 +947,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "camb" },
+    { name = "click" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "openai-agents", extra = ["litellm"] },
@@ -965,6 +966,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "camb", specifier = ">=1.6.5" },
+    { name = "click", specifier = ">=8.3.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "openai-agents", extras = ["litellm"], specifier = ">=0.6.3" },
