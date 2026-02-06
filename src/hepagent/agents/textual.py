@@ -14,14 +14,7 @@ Features:
     - Support for both DummyAgent (testing) and real agents from bash.py
 
 Usage:
-    # Run with DummyAgent (default):
-    python scripts/bash_textual.py
-
-    # Run with real bash agent:
-    python scripts/bash_textual.py --real
-    # (Requires CBORG_API_KEY environment variable to be set)
-
-    # In the UI:
+UI Controls:
     - Press 'y' or Ctrl+Y to switch to YOLO mode
     - Press 'c' to switch to CONFIRM mode
     - Press 'u' or Ctrl+U to switch to HUMAN mode
@@ -30,7 +23,7 @@ Usage:
 
 Integration Example:
     from hepagent.agents.bash import create as create_bash_agent
-    from scripts.bash_textual import TextualAgent, AgentAdapter
+    from hepagent.agents.textual import TextualAgent, AgentAdapter
 
     # Create bash agent
     bash_agent = create_bash_agent()
@@ -428,7 +421,7 @@ class AgentAdapter:
             import traceback
 
             traceback.print_exc()
-            raise e
+            raise
         finally:
             loop.close()
             print("Agent run complete.")

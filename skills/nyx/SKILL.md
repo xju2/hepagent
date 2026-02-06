@@ -28,5 +28,5 @@ Write down unexpected errors and critical decisions to the `MEMORY.md` file in t
 
 
 ## Additional notes
-- Ensure you prompt for approval of before running large simulations.
+- Ensure you prompt for approval before running large simulations.
 - Stop when confused about simulation parameters or steps and ask for clarification.

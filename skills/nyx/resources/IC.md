@@ -10,7 +10,7 @@ Run the cosmicic code to generate initial conditions for Nyx cosmological simula
 4. After that, write a bash script that users can run the `init` in SLURM.
 
 ## Additional notes
-* Note that if the platform is Perlmuttter, you need to load these module first:
+* Note that if the platform is Perlmutter, you need to load these modules first:
 - cray-fftw
 - cray-hdf5-parallel
 
