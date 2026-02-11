@@ -32,3 +32,10 @@ def get_repo_root() -> pathlib.Path:
 
 def get_agent_dir() -> pathlib.Path:
     return get_repo_root() / ".agents"
+
+
+def read_md(path: pathlib.Path) -> str:
+    """Safely reads a markdown file, returning an empty string if missing."""
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
