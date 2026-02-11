@@ -41,13 +41,15 @@ class AgentManifestLoader:
         self, context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
     ) -> str:
         """Assembles the full system prompt from the .agents registry."""
+        # ethics = read_md(self.common_path / "ETHICS.md")
+        memory = read_md(self.storage_path / "MEMORY.md")
+
         agent_path = self.agents_dir / "skills" / context.agent_name
         if not agent_path.exists():
             raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
         # soul = read_md(agent_path / "SOUL.md")
         # world = read_md(agent_path / "WORLD.md")
-        # ethics = read_md(self.common_path / "ETHICS.md")
-        memory = read_md(self.storage_path / "MEMORY.md")
+        logbook = read_md(agent_path / "LOGBOOK.md")
         operational = read_md(agent_path / "OPERATION.md")
 
         # Building a structured prompt
@@ -57,8 +59,16 @@ class AgentManifestLoader:
             # "# IDENTITY & PERSONALITY", soul,
             # "# OPERATIONAL BOUNDARIES", ethics,
             # "# DOMAIN KNOWLEDGE (HEP)", world,
-            "# LONG-TERM MEMORY & LESSONS",
+            "# TECHNICAL LESSONS LEARNED",
+            "## Current Memory",
+            logbook,
+            """## CRITICAL RULE
+             Whenever you encounter an error, a tool failure, or a user
+            correction, you MUST call 'update_memory' to record the corrective insight
+            so you do not repeat the mistake.""",
+            "# SHARED USER PREFERENCES & CONTEXT",
             memory,
+
         ]
 
         # Filter out empty components and join

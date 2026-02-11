@@ -1,14 +1,9 @@
-from agents import Agent, RunContextWrapper
+from agents import Agent
 from hepagent.agent_helpers import AgentManifestLoader
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.model_providers import get_cborg_model_provider
-
-
-def dynamic_instructions(
-    context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
-) -> str:
-    return f"The user's name is {context.context.agent_name}. Help them with their questions."
+from hepagent.tools.common import update_memory
 
 
 def create(agent_name: str = "nyx") -> Agent:
@@ -20,7 +15,7 @@ def create(agent_name: str = "nyx") -> Agent:
         name=f"{agent_name.capitalize()} Agent",
         instructions=loader.get_instructions,
         model=get_cborg_model_provider(),
-        tools=[execute_bash_command_with_confirmation],
+        tools=[execute_bash_command_with_confirmation, update_memory],
     )
     return agent
 
