@@ -15,6 +15,8 @@ uv pip install -e .
 uv run hepagent --help
 ```
 
+
+## Instructions
 We can run the agent as:
 ```bash
 uv run hepagent --agent nyx --task "your task here"
@@ -30,9 +32,16 @@ List available CBORG models:
 uv run hepagent list-cborg-models
 ```
 
+
+### Tests
 Test the skilled agent:
 ```bash
 uv run pytest -s tests/test_skilled_agent.py
+```
+
+Test the manifest loader:
+```bash
+uv run pytest tests/test_manifest_loader.py
 ```
 
 ## Usage
