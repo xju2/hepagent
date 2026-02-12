@@ -36,12 +36,19 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
     Loads the full SOP and identifies available resource manuals for a specific skill.
     Use this when you have identified a skill in the catalog that matches the user's task.
     """
+
+
     skill_dir = get_agent_dir() / "skills" / skill_name
     skill_file = skill_dir / "SKILL.md"
     resource_dir = skill_dir / "resources"
 
     if not skill_file.exists():
-        return f"Error: Skill '{skill_name}' does not exist in the registry."
+        ctx.context.active_skill = None  # Clear active skill if not found
+        return f"Error: Skill '{skill_name}' does not found."
+    else:
+        # Set the active skill in the context
+        ctx.context.active_skill = skill_name
+
 
     # 1. Get the main instructions (stripping YAML)
     raw_content = read_md(skill_file)
@@ -56,7 +63,7 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
 
     logbook_content = read_md(skill_dir / "LOGBOOK.md")
 
-    return textwrap.dedent(f"""
+    instruction_content = textwrap.dedent(f"""
         # FULL INSTRUCTIONS FOR {skill_name.upper()}
         {instruction_body}
 
@@ -67,6 +74,8 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
         (Use 'read_resource("{skill_name}", "resource_name")' to read these)
         {resource_list}
     """).strip()
+
+    return f"Context updated: Now using the '{skill_name}' skill set.\n\n" + instruction_content
 
 
 @function_tool

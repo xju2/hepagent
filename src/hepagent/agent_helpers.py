@@ -45,7 +45,6 @@ def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
 @function_tool
 def update_logbook(
     ctx: RunContextWrapper[AgentContext],
-    skill_name: str,
     category: str,
     observation: str,
     correction: str = "",
@@ -59,9 +58,12 @@ def update_logbook(
         observation: What went wrong or what was learned.
         correction: The specific fix to apply next time.
     """
+    skill_name = ctx.context.active_skill or "general"  # Use 'general' if no active skill
     skill_path = get_agent_dir() / "skills" / skill_name
+
+    # Ensure directory exists, or default to a common path
     if not skill_path.exists():
-        return f"Error: Skill directory '{skill_name}' not found."
+        skill_path = get_agent_dir() / "common"
 
     file_path = skill_path / "LOGBOOK.md"
 
@@ -73,7 +75,7 @@ def update_logbook(
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(f"{new_entry}\n")
 
-    return f"Logbook for {skill_name} successfully updated."
+    return f"Insight recorded in {skill_name} logbook."
 
 
 class AgentManifestLoader:
@@ -114,13 +116,13 @@ class AgentManifestLoader:
         if catalog:
             components.append(
                 f"# AVAILABLE SKILLS\nYou have access to the following specialized skills."
-                f" To use one, you MUST call 'load_skill_details(skill_name)':\n{catalog}"
+                f" Use `load_skill_details` to activate one:\n{catalog}"
             )
 
         components.append(
             textwrap.dedent("""## CRITICAL RULE
              Whenever you encounter an error, a tool failure, or a user
-            correction, you MUST call 'update_logbook' to record the corrective insight
+            correction, you MUST call `update_logbook` to record the corrective insight
             so you do not repeat the mistake.""")
         )
 
@@ -137,10 +139,9 @@ class AgentManifestLoader:
                 skill_file = skill_dir / "SKILL.md"
                 if skill_file.exists():
                     meta = self._extract_yaml(skill_file)
-                    catalog.append(
-                        f"- **{meta.get('name', skill_dir.name)}**: "
-                        f"{meta.get('description', 'No description')}"
-                    )
+                    skill_name = meta.get("name", skill_dir.name)
+                    desc = meta.get("description", "No description provided.")
+                    catalog.append(f"- **{skill_name}**: {desc}")
 
         return "\n".join(catalog)
 
