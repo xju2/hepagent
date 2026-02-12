@@ -1,6 +1,7 @@
 import pathlib
 import re
 import textwrap
+from typing import Literal
 
 import yaml
 
@@ -45,18 +46,16 @@ def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
 @function_tool
 def update_logbook(
     ctx: RunContextWrapper[AgentContext],
-    category: str,
+    category: Literal["Corrective Insight", "Technical Error", "Preference"],
     observation: str,
     correction: str = "",
 ) -> str:
-    """
-    Updates the specific skill's logbook to prevent repeating errors.
+    """Records a lesson learned into the current skill's LOGBOOK.md.
 
     Args:
-        skill_name: The name of the skill directory (e.g., 'nyx')
-        category: 'Corrective Insight', 'Technical Error', or 'User Preference'
-        observation: What went wrong or what was learned.
-        correction: The specific fix to apply next time.
+        category: The type of insight being recorded.
+        observation: Description of the error or user preference.
+        correction: The specific action to take next time to avoid the issue.
     """
     skill_name = ctx.context.active_skill or "general"  # Use 'general' if no active skill
     skill_path = get_agent_dir() / "skills" / skill_name

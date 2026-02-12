@@ -32,11 +32,11 @@ def update_memory(
 
 @function_tool
 def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) -> str:
-    """
-    Loads the full SOP and identifies available resource manuals for a specific skill.
-    Use this when you have identified a skill in the catalog that matches the user's task.
-    """
+    """Activates a specific skill and loads its SOP and Logbook.
 
+    Args:
+        skill_name: The identifier of the skill (e.g., 'nyx').
+    """
 
     skill_dir = get_agent_dir() / "skills" / skill_name
     skill_file = skill_dir / "SKILL.md"
@@ -48,7 +48,6 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
     else:
         # Set the active skill in the context
         ctx.context.active_skill = skill_name
-
 
     # 1. Get the main instructions (stripping YAML)
     raw_content = read_md(skill_file)
@@ -80,7 +79,11 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
 
 @function_tool
 def read_resource(ctx: RunContextWrapper[AgentContext], skill_name: str, resource_name: str) -> str:
-    """Reads a specific resource file (e.g., 'TF.md') for a skill."""
+    """Reads a specific technical manual (e.g., 'TF', 'IC') for the currently active skill.
+
+    Args:
+        resource_name: The name of the markdown file in the resources folder (without .md).
+    """
     # resource_name could be "TF", we append .md
     res_path = get_agent_dir() / "skills" / skill_name / "resources" / f"{resource_name}.md"
     if not res_path.exists():
