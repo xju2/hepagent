@@ -45,23 +45,27 @@ def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
 @function_tool
 def update_logbook(
     ctx: RunContextWrapper[AgentContext],
+    skill_name: str,
     category: str,
     observation: str,
     correction: str = "",
 ) -> str:
-    """Updates the agent's long-term memory to prevent repeating errors or store facts.
+    """
+    Updates the specific skill's logbook to prevent repeating errors.
 
     Args:
-        ctx: The context wrapper containing the agent's context.
-        category: Either 'Corrective Insight' or 'Preference'
-        observation: What happened or what was learned.
-        correction: The specific action to take next time to avoid the error.
+        skill_name: The name of the skill directory (e.g., 'nyx')
+        category: 'Corrective Insight', 'Technical Error', or 'User Preference'
+        observation: What went wrong or what was learned.
+        correction: The specific fix to apply next time.
     """
-    agent_path = get_agent_path(ctx)
-    if not agent_path.exists():
-        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
-    file_path = agent_path / "LOGBOOK.md"
+    skill_path = get_agent_dir() / "skills" / skill_name
+    if not skill_path.exists():
+        return f"Error: Skill directory '{skill_name}' not found."
 
+    file_path = skill_path / "LOGBOOK.md"
+
+    # Format the entry with a timestamp or clean bullet
     new_entry = f"- **{category}:** {observation}"
     if correction:
         new_entry += f" | **Correction:** {correction}"
@@ -69,7 +73,7 @@ def update_logbook(
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(f"{new_entry}\n")
 
-    return "LogBook successfully updated."
+    return f"Logbook for {skill_name} successfully updated."
 
 
 class AgentManifestLoader:

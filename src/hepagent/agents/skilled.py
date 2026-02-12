@@ -3,6 +3,7 @@ from hepagent.agent_helpers import AgentManifestLoader, update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.model_providers import get_cborg_model_provider
+from hepagent.tools.common import load_skill_details, read_resource
 
 
 def create() -> Agent[AgentContext]:
@@ -14,7 +15,12 @@ def create() -> Agent[AgentContext]:
         name="Skilled Agent",
         instructions=loader.get_instructions,
         model=get_cborg_model_provider(),
-        tools=[execute_bash_command_with_confirmation, update_logbook],
+        tools=[
+            execute_bash_command_with_confirmation,  # The "Bash Command Execution" tool
+            update_logbook,  # The "Learned Lessons Logging" tool
+            load_skill_details,  # The "Skill Discovery" tool
+            read_resource,  # The "Knowledge Retrieval" tool
+        ],
     )
     return agent
 

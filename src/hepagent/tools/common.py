@@ -54,9 +54,14 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
 
     resource_list = "\n".join(resources) if resources else "No supplementary resources available."
 
+    logbook_content = read_md(skill_dir / "LOGBOOK.md")
+
     return textwrap.dedent(f"""
         # FULL INSTRUCTIONS FOR {skill_name.upper()}
         {instruction_body}
+
+        # LESSONS LEARNED (LOGBOOK)
+        {logbook_content if logbook_content else "No previous logs for this skill."}
 
         # AVAILABLE RESOURCE MANUALS
         (Use 'read_resource("{skill_name}", "resource_name")' to read these)
