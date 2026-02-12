@@ -92,10 +92,7 @@ class AgentManifestLoader:
             correction: The specific action to take next time to avoid the error.
         """
         agent_path = self._get_agent_path(ctx)
-
-        # soul = read_md(agent_path / "SOUL.md")
-        # world = read_md(agent_path / "WORLD.md")
-        file_path = read_md(agent_path / "LOGBOOK.md")
+        file_path = agent_path / "LOGBOOK.md"
 
         new_entry = f"- **{category}:** {observation}"
         if correction:
