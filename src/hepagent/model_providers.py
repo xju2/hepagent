@@ -3,7 +3,7 @@ from openai import AsyncOpenAI
 from agents import OpenAIChatCompletionsModel
 from hepagent.helpers import get_cborg_api_key
 
-DEFAULT_CBORG_MODEL: str = "google/gemini-flash"
+DEFAULT_CBORG_MODEL: str = "gemini-flash"
 
 
 def get_cborg_model_provider(

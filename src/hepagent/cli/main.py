@@ -8,6 +8,7 @@ import click
 import hepagent.cli
 from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
+from hepagent.helpers import get_cborg_api_key
 
 
 @click.group(invoke_without_command=True)
@@ -37,6 +38,22 @@ def main(ctx: click.Context, agent_name: str, task_prompt: str | None, yolo: boo
         click.echo(result.final_output)
 
     asyncio.run(_run())
+
+
+@main.command("list-cborg-models")
+def list_cborg_models() -> None:
+    """List available CBORG models."""
+    from openai import OpenAI
+
+    api_key = get_cborg_api_key()
+    if not api_key:
+        raise click.ClickException("CBORG_API_KEY is not set.")
+
+    client = OpenAI(base_url="https://api.cborg.lbl.gov", api_key=api_key)
+    models = client.models.list()
+    names = sorted(model.id for model in models.data)
+    for name in names:
+        click.echo(name)
 
 
 # --- Auto-discover subcommands ---

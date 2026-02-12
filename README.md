@@ -25,6 +25,11 @@ YOLO mode (auto-approve all bash commands):
 uv run hepagent --agent nyx --task "your task here" --yolo
 ```
 
+List available CBORG models:
+```bash
+uv run hepagent list-cborg-models
+```
+
 ## Usage
 Start the Python environment with:
 ```
