@@ -1,13 +1,15 @@
 import re
 import textwrap
+from pathlib import Path
 from typing import Literal
 
 import yaml
 
 from agents import Agent, RunContextWrapper, Usage, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import get_agent_dir, read_md
+from hepagent.helpers import read_md
 from hepagent.token_costs import calculate_cost
+
 
 
 def print_usage(usage: Usage, model_name: str = "") -> None:
@@ -49,6 +51,8 @@ def update_logbook(
         observation: Description of the error or user preference.
         correction: The specific action to take next time to avoid the issue.
     """
+    from hepagent.helpers import get_agent_dir
+
     skill_name = ctx.context.active_skill or "general"  # Use 'general' if no active skill
     skill_path = get_agent_dir() / "skills" / skill_name
 
@@ -71,6 +75,8 @@ def update_logbook(
 
 class AgentManifestLoader:
     def __init__(self):
+        from hepagent.helpers import get_agent_dir
+
         self.agents_dir = get_agent_dir()
 
         # Paths to specific modules

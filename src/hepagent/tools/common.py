@@ -1,10 +1,23 @@
 import re
 import textwrap
+from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import get_agent_dir, read_md
+from hepagent.helpers import read_md
 
+
+def _get_skill_dir(skill_name: str) -> Path:
+    """Internal helper to resolve paths dynamically."""
+    from hepagent.helpers import get_agent_dir
+
+    return get_agent_dir() / "skills" / skill_name
+
+def _get_memory_path() -> Path:
+    """Internal helper to resolve memory file path."""
+    from hepagent.helpers import get_agent_dir
+
+    return get_agent_dir() / "storage" / "MEMORY.md"
 
 @function_tool
 def update_memory(
@@ -19,7 +32,7 @@ def update_memory(
         observation: What happened or what was learned.
         correction: The specific action to take next time to avoid the error.
     """
-    file_path = get_agent_dir() / "storage" / "MEMORY.md"
+    file_path = _get_memory_path()
     new_entry = f"- **{category}:** {observation}"
     if correction:
         new_entry += f" | **Correction:** {correction}"
@@ -38,7 +51,7 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
         skill_name: The identifier of the skill (e.g., 'nyx').
     """
 
-    skill_dir = get_agent_dir() / "skills" / skill_name
+    skill_dir = _get_skill_dir(skill_name)
     skill_file = skill_dir / "SKILL.md"
     resource_dir = skill_dir / "resources"
 
@@ -85,7 +98,7 @@ def read_resource(ctx: RunContextWrapper[AgentContext], skill_name: str, resourc
         resource_name: The name of the markdown file in the resources folder (without .md).
     """
     # resource_name could be "TF", we append .md
-    res_path = get_agent_dir() / "skills" / skill_name / "resources" / f"{resource_name}.md"
+    res_path = _get_skill_dir(skill_name) / "resources" / f"{resource_name}.md"
     if not res_path.exists():
         return f"Resource {resource_name} not found in {skill_name}."
     return read_md(res_path)
