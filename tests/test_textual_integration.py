@@ -2,13 +2,13 @@
 
 from types import SimpleNamespace
 
-from agents import Agent
 import hepagent.agents.textual as textual
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 
 
 def test_agent_adapter_integration(monkeypatch):
     """Test that AgentAdapter properly wraps an agent for TextualAgent."""
+
     class StubAgent:
         def __init__(self, name, instructions, model, tools, hooks=None, **kwargs):
             self.name = name
@@ -62,7 +62,3 @@ def test_agent_adapter_integration(monkeypatch):
     assert adapter.agent.name == "Test Bash Agent"
 
     print("✓ All integration tests passed!")
-
-
-if __name__ == "__main__":
-    test_agent_adapter_integration()
