@@ -48,14 +48,22 @@ and suggest user running the request again if needed."""
 def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
     """Only execute a bash command with user's confirmation and return the output."""
 
-    # print the command and ask for confirmation.
-    print(f"THOUGHT:{thought}")
-    print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}")
+    # print the thought and the command to be executed for user's review.
+    print(f"THOUGHT:{thought}", flush=True)
+    print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
     if os.getenv("HEPAGENT_YOLO") == "1":
         return execute_bash_command(cmd, cwd=cwd)
 
-    confirmation = input("Do you want to proceed? (y/n): ")
+    try:
+        confirmation = input("Do you want to proceed? (y/n): ")
+    except EOFError:
+        try:
+            with open("/dev/tty", encoding="utf-8") as tty:
+                print("Do you want to proceed? (y/n): ", end="", flush=True)
+                confirmation = tty.readline().strip()
+        except OSError:
+            confirmation = ""
     if confirmation.lower() != "y":
         return {"output": error_msg, "returncode": 1}
 
