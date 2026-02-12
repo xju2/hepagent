@@ -76,7 +76,13 @@ class AgentManifestLoader:
         return "\n\n".join([c for c in components if c])
 
     @function_tool
-    def update_logbook(self, ctx: RunContextWrapper[AgentContext], category: str, observation: str, correction: str = "") -> str:
+    def update_logbook(
+        self,
+        ctx: RunContextWrapper[AgentContext],
+        category: str,
+        observation: str,
+        correction: str = "",
+    ) -> str:
         """Updates the agent's long-term memory to prevent repeating errors or store facts.
 
         Args:

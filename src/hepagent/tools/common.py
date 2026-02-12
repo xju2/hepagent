@@ -1,10 +1,12 @@
 from agents import RunContextWrapper, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import get_agent_dir, read_md
+from hepagent.helpers import get_agent_dir
 
 
 @function_tool
-def update_memory(ctx: RunContextWrapper[AgentContext], category: str, observation: str, correction: str = "") -> str:
+def update_memory(
+    ctx: RunContextWrapper[AgentContext], category: str, observation: str, correction: str = ""
+) -> str:
     """
     Updates the agent's long-term memory to prevent repeating errors or store facts.
 
