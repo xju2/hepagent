@@ -5,7 +5,7 @@ description = "Agent AI for HEP tasks"
 readme = "README.md"
 requires-python = ">=3.14"
 license = {file = "LICENSE"}
-keywords = [""]
+keywords = ["hep", "cosmology", "agents"]
 authors = [
   {name = "X. Ju", email = "xju@lbl.gov" }
 ]
@@ -40,7 +40,7 @@ packages = ["src/hepagent"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py314"
 exclude = ["*ipynb"]
 
 [tool.ruff.lint]
@@ -68,6 +68,7 @@ dev = [
     "ipywidgets>=8.1.8",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.14.10",
 ]
 
