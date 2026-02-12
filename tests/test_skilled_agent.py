@@ -6,7 +6,12 @@ from hepagent.agents.skilled import create as create_skilled_agent
 
 
 @pytest.mark.asyncio
-async def test_agent_skill_cycle(mock_agent_dir):
+async def test_skilled_agent_skill_cycle(mock_agent_dir):
+    from hepagent.helpers import get_agent_dir
+
+    print(f"\n[DEBUG] Mock Dir: {mock_agent_dir}")
+    print(f"[DEBUG] Helper returns: {get_agent_dir()}")
+
     # 1. Initialize Agent and Context
     agent = create_skilled_agent()
     context = AgentContext(agent_name="Scientific Researcher")

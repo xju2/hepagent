@@ -1,4 +1,3 @@
-import pathlib
 import re
 import textwrap
 from typing import Literal
@@ -34,13 +33,6 @@ def print_usage(usage: Usage, model_name: str = "") -> None:
         print(f"Total cost: ${cost:.4f}")
     else:
         print("\n(Provide model_name parameter to calculate cost)")
-
-
-def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
-    agent_path = get_agent_dir() / "skills" / ctx.context.agent_name
-    if not agent_path.exists():
-        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
-    return agent_path
 
 
 @function_tool
