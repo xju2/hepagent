@@ -1,5 +1,5 @@
 ---
-name: nyx-sim
+name: nyx
 description: Build and run Cosmology simulation with the Nyx code. Use when analyzing Ly-alpha forest data or simulating large-scale structure formation.
 ---
 

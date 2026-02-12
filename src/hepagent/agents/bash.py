@@ -51,6 +51,10 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     # print the command and ask for confirmation.
     print(f"THOUGHT:{thought}")
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}")
+
+    if os.getenv("HEPAGENT_YOLO") == "1":
+        return execute_bash_command(cmd, cwd=cwd)
+
     confirmation = input("Do you want to proceed? (y/n): ")
     if confirmation.lower() != "y":
         return {"output": error_msg, "returncode": 1}

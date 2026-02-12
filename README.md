@@ -12,6 +12,17 @@ uv python install 3.14 (or higher)
 make sync
 source .venv/bin/activate
 uv pip install -e .
+uv run hepagent --help
+```
+
+We can run the agent as:
+```bash
+uv run hepagent --agent nyx --task "your task here"
+```
+
+YOLO mode (auto-approve all bash commands):
+```bash
+uv run hepagent --agent nyx --task "your task here" --yolo
 ```
 
 ## Usage
