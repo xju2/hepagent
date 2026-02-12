@@ -1,5 +1,5 @@
 from agents import Agent
-from hepagent.agent_helpers import AgentManifestLoader
+from hepagent.agent_helpers import AgentManifestLoader, update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.model_providers import get_cborg_model_provider
@@ -14,7 +14,7 @@ def create() -> Agent[AgentContext]:
         name="Skilled Agent",
         instructions=loader.get_instructions,
         model=get_cborg_model_provider(),
-        tools=[execute_bash_command_with_confirmation, loader.update_logbook],
+        tools=[execute_bash_command_with_confirmation, update_logbook],
     )
     return agent
 

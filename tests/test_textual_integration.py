@@ -1,16 +1,35 @@
 """Test TextualAgent integration with bash agent adapter."""
 
+from types import SimpleNamespace
+
 from agents import Agent
-from scripts.bash_textual import AgentAdapter, TextualAgent
+import hepagent.agents.textual as textual
+from hepagent.agents.textual import AgentAdapter, TextualAgent
 
 
-def test_agent_adapter_integration():
+def test_agent_adapter_integration(monkeypatch):
     """Test that AgentAdapter properly wraps an agent for TextualAgent."""
+    class StubAgent:
+        def __init__(self, name, instructions, model, tools, hooks=None, **kwargs):
+            self.name = name
+            self.instructions = instructions
+            self.model = model
+            self.tools = tools
+            self.hooks = hooks
+
+    class DummyModelProvider:
+        model = "dummy-model"
+
+    monkeypatch.setattr(textual, "Agent", StubAgent)
+    monkeypatch.setattr(
+        textual,
+        "get_cborg_model_provider",
+        lambda _=None: DummyModelProvider(),
+    )
     # Create a mock agent similar to bash agent
-    mock_agent = Agent(
+    mock_agent = SimpleNamespace(
         name="Test Bash Agent",
         instructions="You are a helpful assistant. Include THOUGHT in your responses.",
-        model="gpt-4",
         tools=[],
     )
 

@@ -31,6 +31,42 @@ def print_usage(usage: Usage, model_name: str = "") -> None:
     else:
         print("\n(Provide model_name parameter to calculate cost)")
 
+def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
+    agent_path = get_agent_dir() / "skills" / ctx.context.agent_name
+    if not agent_path.exists():
+        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
+    return agent_path
+
+
+@function_tool
+def update_logbook(
+    ctx: RunContextWrapper[AgentContext],
+    category: str,
+    observation: str,
+    correction: str = "",
+) -> str:
+    """Updates the agent's long-term memory to prevent repeating errors or store facts.
+
+    Args:
+        ctx: The context wrapper containing the agent's context.
+        category: Either 'Corrective Insight' or 'Preference'
+        observation: What happened or what was learned.
+        correction: The specific action to take next time to avoid the error.
+    """
+    agent_path = get_agent_path(ctx)
+    if not agent_path.exists():
+        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
+    file_path = agent_path / "LOGBOOK.md"
+
+    new_entry = f"- **{category}:** {observation}"
+    if correction:
+        new_entry += f" | **Correction:** {correction}"
+
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(f"{new_entry}\n")
+
+    return "LogBook successfully updated."
+
 
 class AgentManifestLoader:
     def __init__(self):
@@ -40,6 +76,9 @@ class AgentManifestLoader:
         self.common_path = self.agents_dir / "common"
         self.storage_path = self.agents_dir / "storage"
 
+        # Expose function tool for agent usage
+        self.update_logbook = update_logbook
+
     def get_instructions(
         self, context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
     ) -> str:
@@ -47,7 +86,7 @@ class AgentManifestLoader:
         # ethics = read_md(self.common_path / "ETHICS.md")
         memory = read_md(self.storage_path / "MEMORY.md")
 
-        agent_path = self._get_agent_path(context)
+        agent_path = get_agent_path(context)
 
         # soul = read_md(agent_path / "SOUL.md")
         # world = read_md(agent_path / "WORLD.md")
@@ -74,37 +113,3 @@ class AgentManifestLoader:
 
         # Filter out empty components and join
         return "\n\n".join([c for c in components if c])
-
-    @function_tool
-    def update_logbook(
-        self,
-        ctx: RunContextWrapper[AgentContext],
-        category: str,
-        observation: str,
-        correction: str = "",
-    ) -> str:
-        """Updates the agent's long-term memory to prevent repeating errors or store facts.
-
-        Args:
-            ctx: The context wrapper containing the agent's context.
-            category: Either 'Corrective Insight' or 'Preference'
-            observation: What happened or what was learned.
-            correction: The specific action to take next time to avoid the error.
-        """
-        agent_path = self._get_agent_path(ctx)
-        file_path = agent_path / "LOGBOOK.md"
-
-        new_entry = f"- **{category}:** {observation}"
-        if correction:
-            new_entry += f" | **Correction:** {correction}"
-
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(f"{new_entry}\n")
-
-        return "LogBook successfully updated."
-
-    def _get_agent_path(self, ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
-        agent_path = self.agents_dir / "skills" / ctx.context.agent_name
-        if not agent_path.exists():
-            raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
-        return agent_path
