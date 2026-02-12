@@ -1,6 +1,7 @@
 import sys
 import textwrap
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -11,10 +12,14 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-@pytest.fixture
-def mock_agent_dir(tmp_path, monkeypatch):
-    """Creates a temporary .agents directory structure for testing."""
-    agents_dir = tmp_path / ".agents"
+@pytest.fixture(scope="session")
+def agent_registry_temp(tmp_path_factory):
+    """Creates a persistent but temporary .agents directory for the whole session."""
+    # Create a unique temp folder for this test session
+    base_dir = tmp_path_factory.mktemp("agent_registry")
+    agents_dir = base_dir / ".agents"
+
+    # Setup Nyx Skill
     skills_dir = agents_dir / "skills" / "nyx"
     skills_dir.mkdir(parents=True)
 
@@ -35,9 +40,18 @@ def mock_agent_dir(tmp_path, monkeypatch):
     # Create an empty LOGBOOK.md
     (skills_dir / "LOGBOOK.md").write_text("# LOGBOOK\n")
 
-    # Mock the get_agent_dir helper to point to this temp directory
-    import hepagent.helpers
-
-    monkeypatch.setattr(hepagent.helpers, "get_agent_dir", lambda: agents_dir)
+    # Setup Global Storage
+    storage_dir = agents_dir / "storage"
+    storage_dir.mkdir()
+    (storage_dir / "MEMORY.md").write_text("Global shared memory.")
 
     return agents_dir
+
+
+@pytest.fixture(autouse=True)
+def mock_agent_env(agent_registry_temp):
+    """Automatically patches get_agent_dir for every test to use the session registry."""
+    # We patch the low-level helper.
+    # Because you used late-binding (import inside function), this works perfectly!
+    with patch("hepagent.helpers.get_agent_dir", return_value=agent_registry_temp):
+        yield agent_registry_temp

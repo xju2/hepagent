@@ -13,11 +13,13 @@ def _get_skill_dir(skill_name: str) -> Path:
 
     return get_agent_dir() / "skills" / skill_name
 
+
 def _get_memory_path() -> Path:
     """Internal helper to resolve memory file path."""
     from hepagent.helpers import get_agent_dir
 
     return get_agent_dir() / "storage" / "MEMORY.md"
+
 
 @function_tool
 def update_memory(
