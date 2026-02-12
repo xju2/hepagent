@@ -30,6 +30,11 @@ List available CBORG models:
 uv run hepagent list-cborg-models
 ```
 
+Test the skilled agent:
+```bash
+uv run pytest -s tests/test_skilled_agent.py
+```
+
 ## Usage
 Start the Python environment with:
 ```
