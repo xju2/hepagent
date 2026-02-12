@@ -1,5 +1,8 @@
 import pathlib
+import re
 import textwrap
+
+import yaml
 
 from agents import Agent, RunContextWrapper, Usage, function_tool
 from hepagent.agents.common import AgentContext
@@ -84,33 +87,60 @@ class AgentManifestLoader:
         self, context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
     ) -> str:
         """Assembles the full system prompt from the .agents registry."""
-        # ethics = read_md(self.common_path / "ETHICS.md")
-        memory = read_md(self.storage_path / "MEMORY.md")
+        ethics = read_md(self.common_path / "ETHICS.md")  # Guardrail guidelines
+        soul = read_md(self.common_path / "SOUL.md")  # Personality & Vibe
+        operation = read_md(self.common_path / "OPERATION.md")  # Operational rules
+        memory = read_md(self.storage_path / "MEMORY.md")  # Project/User preferences, etc.
 
-        agent_path = get_agent_path(context)
+        catalog = self.get_skill_catalog()
 
-        # soul = read_md(agent_path / "SOUL.md")
-        # world = read_md(agent_path / "WORLD.md")
-        logbook = read_md(agent_path / "LOGBOOK.md")
-        operational = read_md(agent_path / "OPERATION.md")
+        components = []
+        if soul:
+            components.append(f"# IDENTITY\n{soul}")
 
-        # Building a structured prompt
-        components = [
-            "# OPERATIONAL RULES",
-            operational,
-            # "# IDENTITY & PERSONALITY", soul,
-            # "# OPERATIONAL BOUNDARIES", ethics,
-            # "# DOMAIN KNOWLEDGE (HEP)", world,
-            "# TECHNICAL LESSONS LEARNED",
-            "## Current Memory",
-            logbook,
+        if operation:
+            components.append(f"# OPERATIONAL RULES\n{operation}")
+
+        if ethics:
+            components.append(f"# GUARDRAIL GUIDELINES\n{ethics}")
+
+        if memory:
+            components.append(f"# SHARED MEMORY\n{memory}")
+
+        if catalog:
+            components.append(
+                f"# AVAILABLE SKILLS\nYou have access to the following specialized skills."
+                f" To use one, you MUST call 'load_skill_details(skill_name)':\n{catalog}"
+            )
+
+        components.append(
             textwrap.dedent("""## CRITICAL RULE
              Whenever you encounter an error, a tool failure, or a user
             correction, you MUST call 'update_logbook' to record the corrective insight
-            so you do not repeat the mistake."""),
-            "# SHARED USER PREFERENCES & CONTEXT",
-            memory,
-        ]
+            so you do not repeat the mistake.""")
+        )
 
         # Filter out empty components and join
-        return "\n\n".join([c for c in components if c])
+        return "\n\n".join(components)
+
+    def get_skill_catalog(self) -> str:
+        """Scans all skill directories and returns their YAML descriptions."""
+        catalog = []
+        skills_root = self.agents_dir / "skills"
+
+        for skill_dir in skills_root.iterdir():
+            if skill_dir.is_dir():
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    meta = self._extract_yaml(skill_file)
+                    catalog.append(
+                        f"- **{meta.get('name', skill_dir.name)}**: "
+                        f"{meta.get('description', 'No description')}"
+                    )
+
+        return "\n".join(catalog)
+
+    def _extract_yaml(self, path):
+        content = read_md(path)
+        match = re.search(r"^---\s*(.*?)\s*---", content, re.DOTALL)
+        return yaml.safe_load(match.group(1)) if match else {}
