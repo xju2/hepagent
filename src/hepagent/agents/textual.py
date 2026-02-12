@@ -62,7 +62,7 @@ from agents.run_context import RunContextWrapper
 
 # Import bash execution function from the bash agent module
 from hepagent.agents.bash import (
-    error_msg as TOOL_CANCEL_MESSAGE,
+    TOOL_CANCEL_MESSAGE,
     execute_bash_command,
     get_cborg_model_provider,
 )

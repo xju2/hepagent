@@ -39,7 +39,9 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     return {"output": result.stdout, "returncode": result.returncode}
 
 
-error_msg = """Tool calling is cancelled by user. Stop thinking!
+TOOL_CANCEL_MESSAGE = """Tool calling is cancelled by user.
+Here is the reason: {reason}.
+Stop thinking!
 Tell users what was your plan to justify the tool calling
 and suggest user running the request again if needed."""
 
@@ -48,16 +50,28 @@ and suggest user running the request again if needed."""
 def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
     """Only execute a bash command with user's confirmation and return the output."""
 
-    # print the command and ask for confirmation.
-    print(f"THOUGHT:{thought}")
-    print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}")
+    # print the thought and the command to be executed for user's review.
+    print(f"THOUGHT:{thought}", flush=True)
+    print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
     if os.getenv("HEPAGENT_YOLO") == "1":
         return execute_bash_command(cmd, cwd=cwd)
 
-    confirmation = input("Do you want to proceed? (y/n): ")
+    prompt = (
+        "⚠️ Agent called tool in HUMAN mode. Allow?\n"
+        "(Enter 'y' to allow, type reason to reject): "
+    )
+    try:
+        confirmation = input(prompt)
+    except EOFError:
+        try:
+            with open("/dev/tty", encoding="utf-8") as tty:
+                print(prompt, end="", flush=True)
+                confirmation = tty.readline().strip()
+        except OSError:
+            confirmation = ""
     if confirmation.lower() != "y":
-        return {"output": error_msg, "returncode": 1}
+        return {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
 
     results = execute_bash_command(cmd, cwd=cwd)
     print(f"Command return code:\t{results['returncode']}")
