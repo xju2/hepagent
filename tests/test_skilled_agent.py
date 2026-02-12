@@ -6,10 +6,10 @@ from hepagent.agents.skilled import create as create_skilled_agent
 
 
 @pytest.mark.asyncio
-async def test_skilled_agent_skill_cycle(mock_agent_dir):
+async def test_skilled_agent_skill_cycle(mock_agent_env):
     from hepagent.helpers import get_agent_dir
 
-    print(f"\n[DEBUG] Mock Dir: {mock_agent_dir}")
+    print(f"\n[DEBUG] Mock Dir: {mock_agent_env}")
     print(f"[DEBUG] Helper returns: {get_agent_dir()}")
 
     # 1. Initialize Agent and Context
@@ -29,7 +29,7 @@ async def test_skilled_agent_skill_cycle(mock_agent_dir):
     await Runner.run(agent, error_task, context=context)
 
     # Check the actual file in the mock directory
-    logbook_file = mock_agent_dir / "skills" / "nyx" / "LOGBOOK.md"
+    logbook_file = mock_agent_env / "skills" / "nyx" / "LOGBOOK.md"
     log_content = logbook_file.read_text()
 
     assert "Timeout" in log_content
