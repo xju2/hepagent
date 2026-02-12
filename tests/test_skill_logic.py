@@ -6,28 +6,25 @@ from hepagent.agents.skilled import create as create_skilled_agent
 
 
 @pytest.mark.asyncio
-async def test_nyx_skill_activation_and_logging():
-    # Setup
+async def test_agent_skill_cycle(mock_agent_dir):
+    # 1. Initialize Agent and Context
     agent = create_skilled_agent()
-    context = AgentContext(agent_name="nyx")
+    context = AgentContext(agent_name="Scientific Researcher")
 
-    # 1. Test Discovery: Does it load the skill when asked?
-    task = "I need to set up a Nyx simulation."
-    result = await Runner.run(agent, task, context=context)
+    # 2. Verify Skill Loading (State Management)
+    # The agent should call load_skill_details because it sees 'nyx' in the catalog
+    task = "I need to start a Nyx project."
+    await Runner.run(agent, task, context=context)
 
-    # Check if the tool was actually triggered and context updated
     assert context.active_skill == "nyx"
 
-    # 2. Test Critical Rule: Does it log an error?
-    error_task = "The bash command to create the directory failed with 'Disk Full'. Record this."
+    # 3. Verify Logbook Tool (Structured Input)
+    # We simulate a failure and check if the agent logs it
+    error_task = "The bash command failed with error 'Timeout'. Log this immediately."
     await Runner.run(agent, error_task, context=context)
 
-    # Verify the logbook file was actually written to
-    # (Assuming your get_agent_path logic points to a testable temp dir or the local .agents)
-    from hepagent.agent_helpers import get_agent_path
+    # Check the actual file in the mock directory
+    logbook_file = mock_agent_dir / "skills" / "nyx" / "LOGBOOK.md"
+    log_content = logbook_file.read_text()
 
-    log_path = get_agent_path(context) / "LOGBOOK.md"
-
-    with open(log_path) as f:
-        content = f.read()
-        assert "Disk Full" in content
+    assert "Timeout" in log_content
