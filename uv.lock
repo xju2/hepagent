@@ -550,6 +550,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "openai-agents", extra = ["litellm"] },
+    { name = "pyyaml" },
     { name = "textual" },
 ]
 
@@ -570,6 +571,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "openai-agents", extras = ["litellm"], specifier = ">=0.6.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "textual", specifier = ">=6.11.0" },
 ]
 
