@@ -1,3 +1,4 @@
+import os
 import re
 import textwrap
 from pathlib import Path
@@ -123,5 +124,21 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
     Returns:
         str: The user's input exactly as entered.
     """
-    user_input = input(f"{prompt}: ")
+    # In YOLO mode, return empty string to allow automated testing
+    if os.getenv("HEPAGENT_YOLO") == "1":
+        return ""
+    
+    formatted_prompt = f"{prompt}: "
+    try:
+        user_input = input(formatted_prompt)
+    except EOFError:
+        # Try to read from /dev/tty if stdin is not available
+        try:
+            with open("/dev/tty", encoding="utf-8") as tty:
+                print(formatted_prompt, end="", flush=True)
+                user_input = tty.readline().strip()
+        except OSError:
+            # Fall back to empty string if /dev/tty is not available
+            user_input = ""
+    
     return user_input
