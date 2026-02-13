@@ -119,6 +119,9 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
 
     Args:
         prompt: The question to display to the user.
+
+    Returns:
+        str: The user's input exactly as entered.
     """
     user_input = input(f"{prompt}: ")
     return user_input
