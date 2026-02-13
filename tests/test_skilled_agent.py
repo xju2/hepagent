@@ -8,6 +8,7 @@ from hepagent.agents.skilled import create as create_skilled_agent
 
 
 @pytest.mark.asyncio
+@pytest.mark.allow_call_model_methods # Allow actual model calls for this test
 async def test_skilled_agent_skill_cycle(mock_agent_env):
     from hepagent.helpers import get_agent_dir
 
@@ -29,6 +30,9 @@ async def test_skilled_agent_skill_cycle(mock_agent_env):
     # We simulate a failure and check if the agent logs it
     error_task = "The bash command failed with error 'Timeout'. Log this immediately."
     await Runner.run(agent, error_task, context=context)
+
+    # Basic sanity check that the context is correctly initialized and attached.
+    assert context.agent_name == "Scientific Researcher"
 
     # Check the actual file in the mock directory
     logbook_file = mock_agent_env / "skills" / "nyx" / "LOGBOOK.md"
