@@ -12,7 +12,10 @@ class AskUserToolWrapper:
 
     def _create_tool(self, adapter):
         @function_tool
-        def ask_user_for_info(prompt: str) -> str:
+        def ask_user_for_info(prompt: str, thought: str = "") -> str:
+            if thought:
+                adapter.add_message("assistant", f"💭 THOUGHT: {thought}")
+                adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             adapter.add_message("assistant", f"❓ {prompt}")
             adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
             response = adapter.textual_app.input_container.request_input(f"{prompt}:")

@@ -111,7 +111,9 @@ def read_resource(ctx: RunContextWrapper[AgentContext], resource_name: str) -> s
 
 
 @function_tool
-def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
+def ask_user_for_info(
+    ctx: RunContextWrapper[AgentContext], prompt: str, thought: str = ""
+) -> str:
     """
     Pauses execution to ask the user for missing information or clarification.
     Use this when a required parameter (like a directory path) is missing.
@@ -125,6 +127,8 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
         str: The user's input as a string. If input cannot be read, returns an empty string.
     """
     try:
+        if thought:
+            print(f"THOUGHT: {thought}")
         user_input = input(f"{prompt}: ")
     except EOFError:
         try:
