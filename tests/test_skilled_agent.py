@@ -1,3 +1,4 @@
+from unittest.mock import patch
 
 import pytest
 
@@ -38,3 +39,45 @@ async def test_skilled_agent_skill_cycle(mock_agent_env):
     log_content = logbook_file.read_text()
 
     assert "Timeout" in log_content
+
+
+def test_ask_user_for_info():
+    """Test that ask_user_for_info properly collects and returns user input."""
+    from agents import RunContextWrapper
+    from hepagent.agents.common import AgentContext
+    from hepagent.tools.common import ask_user_for_info
+
+    # Create a mock context
+    context = AgentContext(agent_name="Test Agent")
+    ctx_wrapper = RunContextWrapper(context=context)
+
+    # Mock the input function to return a specific value
+    with patch("builtins.input", return_value="test_input_value"):
+        result = ask_user_for_info(ctx_wrapper, "What is your name?")
+
+    # Verify the function returns the mocked input exactly
+    assert result == "test_input_value"
+
+
+def test_ask_user_for_info_with_different_prompts():
+    """Test that ask_user_for_info works with different prompts."""
+    from agents import RunContextWrapper
+    from hepagent.agents.common import AgentContext
+    from hepagent.tools.common import ask_user_for_info
+
+    # Create a mock context
+    context = AgentContext(agent_name="Test Agent")
+    ctx_wrapper = RunContextWrapper(context=context)
+
+    # Test with different prompts and responses
+    test_cases = [
+        ("Enter directory path", "/home/user/project"),
+        ("Confirm action (y/n)", "y"),
+        ("Enter number", "42"),
+        ("Enter text with spaces", "hello world"),
+    ]
+
+    for prompt, expected_input in test_cases:
+        with patch("builtins.input", return_value=expected_input):
+            result = ask_user_for_info(ctx_wrapper, prompt)
+            assert result == expected_input
