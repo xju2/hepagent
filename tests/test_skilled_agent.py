@@ -2,9 +2,10 @@ from unittest.mock import patch
 
 import pytest
 
-from agents import Runner
+from agents import RunContextWrapper, Runner
 from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
+from hepagent.tools.common import ask_user_for_info
 
 
 @pytest.mark.asyncio
@@ -43,10 +44,6 @@ async def test_skilled_agent_skill_cycle(mock_agent_env):
 
 def test_ask_user_for_info():
     """Test that ask_user_for_info properly collects and returns user input."""
-    from agents import RunContextWrapper
-    from hepagent.agents.common import AgentContext
-    from hepagent.tools.common import ask_user_for_info
-
     # Create a mock context
     context = AgentContext(agent_name="Test Agent")
     ctx_wrapper = RunContextWrapper(context=context)
@@ -61,10 +58,6 @@ def test_ask_user_for_info():
 
 def test_ask_user_for_info_with_different_prompts():
     """Test that ask_user_for_info works with different prompts."""
-    from agents import RunContextWrapper
-    from hepagent.agents.common import AgentContext
-    from hepagent.tools.common import ask_user_for_info
-
     # Create a mock context
     context = AgentContext(agent_name="Test Agent")
     ctx_wrapper = RunContextWrapper(context=context)
