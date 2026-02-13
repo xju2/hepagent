@@ -19,7 +19,7 @@ uv run hepagent --help
 ## Instructions
 We can run the agent as:
 ```bash
-uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code."
+uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
 ```
 
 YOLO mode (auto-approve all bash commands):

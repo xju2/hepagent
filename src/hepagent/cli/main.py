@@ -5,6 +5,7 @@ import pkgutil
 import click
 
 import hepagent.cli
+from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
@@ -19,6 +20,13 @@ from hepagent.model_providers import DEFAULT_CBORG_MODEL, get_cborg_model_provid
 @click.option("--task", "task_prompt")
 @click.option("--yolo", is_flag=True, help="Auto-approve all bash commands.")
 @click.option(
+    "--max-turn",
+    "max_turns",
+    type=int,
+    default=DEFAULT_MAX_TURNS,
+    help="Maximum number of agent turns (defaults to SDK default).",
+)
+@click.option(
     "--model",
     default=DEFAULT_CBORG_MODEL,
     show_default=True,
@@ -30,6 +38,7 @@ def main(
     agent_name: str,
     task_prompt: str | None,
     yolo: bool,
+    max_turns: int = DEFAULT_MAX_TURNS,
     model: str = DEFAULT_CBORG_MODEL,
 ) -> None:
     """HepAgent: A framework for building and deploying AI agents in HEP."""
@@ -49,7 +58,7 @@ def main(
     app.agent = AgentAdapter(agent, app, tool_wrapper=wrapper)
     if yolo:
         app.agent.config.mode = "yolo"
-    exit_status, result = app.run_task(task=task_prompt, context=context)
+    exit_status, result = app.run_task(task=task_prompt, context=context, max_turns=max_turns)
     print(f"Agent exited with status: {exit_status}, result: {result}")
 
 

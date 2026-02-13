@@ -361,12 +361,13 @@ class AgentAdapter:
         asyncio.set_event_loop(loop)
         try:
             context = kwargs.get("context")
+            max_turns = kwargs.get("max_turns")
+            runner_kwargs = {}
             if context is not None:
-                result = loop.run_until_complete(
-                    Runner.run(self.agent, task, max_turns=20, context=context)
-                )
-            else:
-                result = loop.run_until_complete(Runner.run(self.agent, task, max_turns=20))
+                runner_kwargs["context"] = context
+            if max_turns is not None:
+                runner_kwargs["max_turns"] = max_turns
+            result = loop.run_until_complete(Runner.run(self.agent, task, **runner_kwargs))
             self.add_message("system", f"✓ Task completed: {result.final_output}", kind="final")
             self.textual_app.call_from_thread(
                 self.textual_app.on_agent_finished, "success", result.final_output

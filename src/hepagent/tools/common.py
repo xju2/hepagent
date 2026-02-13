@@ -111,9 +111,7 @@ def read_resource(ctx: RunContextWrapper[AgentContext], resource_name: str) -> s
 
 
 @function_tool
-def ask_user_for_info(
-    ctx: RunContextWrapper[AgentContext], prompt: str, thought: str = ""
-) -> str:
+def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought: str = "") -> str:
     """
     Pauses execution to ask the user for missing information or clarification.
     Use this when a required parameter (like a directory path) is missing.
