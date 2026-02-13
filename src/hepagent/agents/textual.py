@@ -345,15 +345,12 @@ class AgentAdapter:
     def run(self, task: str, **kwargs):
         """Run the agent with the given task."""
         self.messages = []
-        instruction_in = self.original_agent.instructions
-        if callable(instruction_in):
+        instructions = self.original_agent.instructions
+        if callable(instructions):
             context = kwargs.get("context")
-            try:
-                instructions = instruction_in(context, self.original_agent)
-            except TypeError:
-                # Fallback for callables that expect (context, agent)
-                instructions = instruction_in(context, self.original_agent)
-        self.add_message("system", instructions)
+            instructions = instructions(context, self.original_agent)  # type: ignore[call-arg]
+
+        self.add_message("system", instructions)  # type: ignore[assignment]
         self.add_message("user", task, kind="task")
 
         # Run the agent asynchronously
