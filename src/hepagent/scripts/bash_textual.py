@@ -30,6 +30,7 @@ if __name__ == "__main__":
     if use_real_agent:
         from hepagent.agents.bash import create as create_bash_agent
         from hepagent.agents.textual import AgentAdapter
+        from hepagent.agents.textual_bash import BashToolWrapper
 
         cosmicic_prompt = (
             "Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0."
@@ -58,7 +59,7 @@ if __name__ == "__main__":
             bash_agent = create_bash_agent()
             app = TextualAgent(model="gpt-4", env={})
             # Wrap the bash agent with our adapter
-            app.agent = AgentAdapter(bash_agent, app)
+            app.agent = AgentAdapter(bash_agent, app, tool_wrapper=BashToolWrapper())
             exit_status, result = app.run_task(task=task_prompt)
             print(f"Agent exited with status: {exit_status}, result: {result}")
         except Exception as e:

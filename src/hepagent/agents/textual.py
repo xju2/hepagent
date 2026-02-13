@@ -11,7 +11,7 @@ Features:
         * HUMAN mode (u): Disable automatic command execution
     - Step-by-step navigation through agent execution
     - Real-time cost tracking
-    - Support for both DummyAgent (testing) and real agents from bash.py
+    - Support for both DummyAgent (testing) and real agents via tool wrappers
 
 Usage:
 UI Controls:
@@ -24,6 +24,7 @@ UI Controls:
 Integration Example:
     from hepagent.agents.bash import create as create_bash_agent
     from hepagent.agents.textual import TextualAgent, AgentAdapter
+    from hepagent.agents.textual_bash import BashToolWrapper
 
     # Create bash agent
     bash_agent = create_bash_agent()
@@ -32,7 +33,7 @@ Integration Example:
     app = TextualAgent(model="gpt-4", env={})
 
     # Wrap bash agent with adapter
-    app.agent = AgentAdapter(bash_agent, app)
+    app.agent = AgentAdapter(bash_agent, app, tool_wrapper=BashToolWrapper())
 
     # Run with a task
     exit_status, result = app.run(task="List files in current directory")
@@ -45,7 +46,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib.resources import files
-from typing import Any
+from typing import Any, Protocol
 
 from rich.spinner import Spinner
 from rich.text import Text
@@ -57,15 +58,8 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
-from agents import Agent, AgentHooks, Runner, function_tool
+from agents import Agent, AgentHooks, Runner
 from agents.run_context import RunContextWrapper
-
-# Import bash execution function from the bash agent module
-from hepagent.agents.bash import (
-    TOOL_CANCEL_MESSAGE,
-    execute_bash_command,
-    get_cborg_model_provider,
-)
 from hepagent.token_costs import calculate_cost
 
 # Constants for display and cost tracking
@@ -82,86 +76,18 @@ class AddLogEmitCallback(logging.Handler):
         self.callback(record)  # type: ignore[attr-defined]
 
 
-class BashToolWrapper:
-    """Wrapper for bash tool that is mode-aware."""
+class ToolWrapper(Protocol):
+    """Protocol for wrapping agent tools for UI behavior."""
 
-    def __init__(self, adapter: AgentAdapter):
-        self.adapter = adapter
+    def wrap_tools(self, tools: list, adapter: AgentAdapter) -> list:
+        """Return a list of tools to attach to the wrapped agent."""
 
-    def _handle_rejection(self, reason: str) -> dict:
-        """Handle user rejection of a command."""
-        self.adapter.add_message("user", f"❌ Rejected: {reason}")
-        self.adapter.textual_app.call_from_thread(self.adapter.textual_app.on_message_added)
-        return {"output": TOOL_CANCEL_MESSAGE, "returncode": 1}
 
-    def create_tool(self):
-        """Create a function tool that wraps bash execution."""
-        adapter = self.adapter  # Capture in closure
+class NoopToolWrapper:
+    """Default wrapper that leaves tools unchanged."""
 
-        @function_tool
-        def execute_bash_command_with_confirmation(
-            cmd: str, cwd: str = "", thought: str = ""
-        ) -> dict:
-            """Execute a bash command with user's confirmation and return the output."""
-            # Add the thought to messages
-            if thought:
-                adapter.add_message("assistant", f"💭 THOUGHT: {thought}")
-                adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
-
-            # Show the command that's about to be executed
-            adapter.add_message(
-                "assistant",
-                f"🔧 Preparing to execute:\n```bash\n{cmd}\n```"
-                f"\nWorking directory: {cwd or 'current'}",
-            )
-            adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
-
-            # Handle based on mode
-            if adapter.config.mode == "yolo":
-                # Auto-approve in YOLO mode
-                adapter.add_message("system", "✓ Auto-approved (YOLO mode)")
-                adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
-            elif adapter.config.mode == "confirm":
-                # Ask for confirmation
-                prompt = "Confirm execution? (press Enter to accept, or type your reason to reject)"
-                response = adapter.textual_app.input_container.request_input(prompt)
-
-                if response.strip():
-                    # User provided a reason to reject
-                    return self._handle_rejection(response)
-                else:
-                    adapter.add_message("user", "✓ Approved")
-                    adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
-            elif adapter.config.mode == "human":
-                # In human mode, we should not auto-execute agent commands
-                # Ask for confirmation anyway
-                prompt = (
-                    "⚠️ Agent called tool in HUMAN mode. Allow? "
-                    "(Enter to allow, type reason to reject)"
-                )
-                response = adapter.textual_app.input_container.request_input(prompt)
-                if response.strip():
-                    return self._handle_rejection(response)
-
-            # Execute the command using the imported function from bash.py
-            result = execute_bash_command(cmd, cwd=cwd)
-
-            # Show the result
-            result_icon = "✓" if result["returncode"] == 0 else "✗"
-            output = result["output"]
-            truncated_output = output[:OUTPUT_TRUNCATE_LENGTH] + (
-                "..." if len(output) > OUTPUT_TRUNCATE_LENGTH else ""
-            )
-            adapter.add_message(
-                "system",
-                f"{result_icon} Return code: {result['returncode']}\n"
-                f"Truncated Output:\n{truncated_output}",
-            )
-            adapter.textual_app.call_from_thread(adapter.textual_app.on_message_added)
-
-            return result
-
-        return execute_bash_command_with_confirmation
+    def wrap_tools(self, tools: list, adapter: AgentAdapter) -> list:
+        return list(tools)
 
 
 def _message_header_label(self, message: dict) -> str:
@@ -371,29 +297,35 @@ class AgentAdapter:
         agent: The wrapped Agent with mode-aware tools
     """
 
-    def __init__(self, agent: Agent, textual_app: TextualAgent, model_name: str | None = None):
+    def __init__(
+        self,
+        agent: Agent,
+        textual_app: TextualAgent,
+        tool_wrapper: ToolWrapper | None = None,
+    ):
         self.original_agent = agent
         self.textual_app = textual_app
         self.messages = []
         self.env = {}
         self.config = AgentConfig()
 
-        # Create a custom tool that's mode-aware
-        bash_tool_wrapper = BashToolWrapper(self)
-        custom_bash_tool = bash_tool_wrapper.create_tool()
+        wrapped_tools = (
+            tool_wrapper.wrap_tools(agent.tools, self)
+            if tool_wrapper is not None
+            else NoopToolWrapper().wrap_tools(agent.tools, self)
+        )
 
-        # Get the model provider
-        model_provider = get_cborg_model_provider(model_name)
+        model_name = (
+            agent.model if isinstance(agent.model, str) else getattr(agent.model, "model", "")
+        )
+        self.model = AgentModel(name=model_name)
 
-        # Initialize model with the model name
-        self.model = AgentModel(name=model_provider.model)
-
-        # Create a new agent with our custom tool
+        # Create a new agent with wrapped tools while preserving the model
         self.agent = Agent(
             name=agent.name,
             instructions=agent.instructions,
-            model=model_provider,
-            tools=[custom_bash_tool],
+            model=agent.model,
+            tools=wrapped_tools,
             hooks=LogBashCallAgentHooks(self),
         )
 
