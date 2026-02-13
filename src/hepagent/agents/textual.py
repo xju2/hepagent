@@ -62,9 +62,6 @@ from agents import Agent, AgentHooks, Runner
 from agents.run_context import RunContextWrapper
 from hepagent.token_costs import calculate_cost
 
-# Constants for display and cost tracking
-OUTPUT_TRUNCATE_LENGTH = 500  # Maximum characters to show from command output
-
 
 class AddLogEmitCallback(logging.Handler):
     def __init__(self, callback):

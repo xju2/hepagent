@@ -2,8 +2,7 @@
 
 from agents import function_tool
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
-
-OUTPUT_TRUNCATE_LENGTH = 500
+from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
 
 
 class BashToolWrapper:
