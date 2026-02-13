@@ -118,6 +118,10 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
     Use this when a required parameter (like a directory path) is missing.
     Ask one parameter at a time, and be specific in the prompt to guide the user.
 
+    Note: The /dev/tty fallback is Unix-specific. On systems where /dev/tty is not
+    available (e.g., Windows or non-interactive environments), the function will
+    return an empty string.
+
     Args:
         prompt: The question to display to the user.
 
@@ -132,7 +136,7 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
     try:
         user_input = input(formatted_prompt)
     except EOFError:
-        # Try to read from /dev/tty if stdin is not available
+        # Try to read from /dev/tty if stdin is not available (Unix-only)
         try:
             with open("/dev/tty", encoding="utf-8") as tty:
                 print(formatted_prompt, end="", flush=True)
