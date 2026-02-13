@@ -398,10 +398,13 @@ class LogBashCallAgentHooks(AgentHooks):
         input_items: list,
     ) -> None:
         """Called when the LLM starts processing."""
-        # We could show a "thinking" message here
+        self.adapter.add_message("system", "⏳ Thinking...", kind="status")
+        self.adapter.textual_app.call_from_thread(self.adapter.textual_app.on_message_added)
 
     async def on_llm_end(self, context: RunContextWrapper, agent: Agent, response: Any) -> None:
         """Called when the LLM finishes processing."""
+        self.adapter.add_message("system", "✅ LLM responded", kind="status")
+        self.adapter.textual_app.call_from_thread(self.adapter.textual_app.on_message_added)
         # Extract assistant's response
         if hasattr(response, "output_items"):
             for item in response.output_items:
@@ -649,9 +652,10 @@ class TextualAgent(App):
         if self.agent_state == "RUNNING":
             spinner_frame = str(self._spinner.render(time.time())).strip()
             status_text = f"{self.agent_state} {spinner_frame}"
+        model_name = getattr(self.agent.model, "name", "") or "unknown-model"
         self.title = (
             f"Step {self.i_step + 1}/{self.n_steps} - {status_text} "
-            f"- Cost: ${self.agent.model.cost:.6f}"
+            f"- Model: {model_name} - Cost: ${self.agent.model.cost:.6f}"
         )
         self.sub_title = f"Mode: {self.agent.config.mode}"
         try:

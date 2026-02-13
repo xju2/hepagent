@@ -9,6 +9,7 @@ from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
+from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.helpers import get_cborg_api_key
 from hepagent.model_providers import DEFAULT_CBORG_MODEL, get_cborg_model_provider
 
@@ -44,7 +45,8 @@ def main(
     app = TextualAgent(model=model, env={})
 
     # Wrap the bash agent with our adapter
-    app.agent = AgentAdapter(agent, app, tool_wrapper=BashToolWrapper())
+    wrapper = CompositeToolWrapper(BashToolWrapper(), AskUserToolWrapper())
+    app.agent = AgentAdapter(agent, app, tool_wrapper=wrapper)
     if yolo:
         app.agent.config.mode = "yolo"
     exit_status, result = app.run_task(task=task_prompt, context=context)
