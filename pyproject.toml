@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",
+    "pyyaml>=6.0.3",
     "textual>=6.11.0",
 ]
 
@@ -64,6 +65,7 @@ convention = "google"
 
 [dependency-groups]
 dev = [
+    "coverage>=7.13.4",
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.8",
     "pre-commit>=4.5.1",
@@ -88,6 +90,8 @@ exclude_also = [
 ]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
 filterwarnings = [
     # This is a warning that is expected to happen: we have an async filter that raises an exception
     "ignore:coroutine 'test_async_input_filter_fails.<locals>.invalid_input_filter' was never awaited:RuntimeWarning",

@@ -85,7 +85,7 @@ class AddLogEmitCallback(logging.Handler):
 class BashToolWrapper:
     """Wrapper for bash tool that is mode-aware."""
 
-    def __init__(self, adapter: "AgentAdapter"):
+    def __init__(self, adapter: AgentAdapter):
         self.adapter = adapter
 
     def _handle_rejection(self, reason: str) -> dict:
@@ -211,7 +211,7 @@ def _messages_to_steps(messages: list[dict]) -> list[list[dict]]:
 
 
 class SmartInputContainer(Container):
-    def __init__(self, app: "TextualAgent"):
+    def __init__(self, app: TextualAgent):
         """Smart input container supporting single-line and multi-line input modes."""
         super().__init__(classes="smart-input-container")
         self._app = app
@@ -371,7 +371,7 @@ class AgentAdapter:
         agent: The wrapped Agent with mode-aware tools
     """
 
-    def __init__(self, agent: Agent, textual_app: "TextualAgent", model_name: str | None = None):
+    def __init__(self, agent: Agent, textual_app: TextualAgent, model_name: str | None = None):
         self.original_agent = agent
         self.textual_app = textual_app
         self.messages = []

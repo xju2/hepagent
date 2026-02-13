@@ -1,9 +1,12 @@
-import pathlib
+import re
 import textwrap
+from typing import Literal
+
+import yaml
 
 from agents import Agent, RunContextWrapper, Usage, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import get_agent_dir, read_md
+from hepagent.helpers import read_md
 from hepagent.token_costs import calculate_cost
 
 
@@ -32,33 +35,32 @@ def print_usage(usage: Usage, model_name: str = "") -> None:
         print("\n(Provide model_name parameter to calculate cost)")
 
 
-def get_agent_path(ctx: RunContextWrapper[AgentContext]) -> pathlib.Path:
-    agent_path = get_agent_dir() / "skills" / ctx.context.agent_name
-    if not agent_path.exists():
-        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
-    return agent_path
-
-
 @function_tool
 def update_logbook(
     ctx: RunContextWrapper[AgentContext],
-    category: str,
+    category: Literal["Corrective Insight", "Technical Error", "Preference"],
     observation: str,
     correction: str = "",
 ) -> str:
-    """Updates the agent's long-term memory to prevent repeating errors or store facts.
+    """Records a lesson learned into the current skill's LOGBOOK.md.
 
     Args:
-        ctx: The context wrapper containing the agent's context.
-        category: Either 'Corrective Insight' or 'Preference'
-        observation: What happened or what was learned.
-        correction: The specific action to take next time to avoid the error.
+        category: The type of insight being recorded.
+        observation: Description of the error or user preference.
+        correction: The specific action to take next time to avoid the issue.
     """
-    agent_path = get_agent_path(ctx)
-    if not agent_path.exists():
-        raise FileNotFoundError(f"Agent manifest directory not found: {agent_path}")
-    file_path = agent_path / "LOGBOOK.md"
+    from hepagent.helpers import get_agent_dir
 
+    skill_name = ctx.context.active_skill or "general"  # Use 'general' if no active skill
+    skill_path = get_agent_dir() / "skills" / skill_name
+
+    # Ensure directory exists, or default to a common path
+    if not skill_path.exists():
+        skill_path = get_agent_dir() / "common"
+
+    file_path = skill_path / "LOGBOOK.md"
+
+    # Format the entry with a timestamp or clean bullet
     new_entry = f"- **{category}:** {observation}"
     if correction:
         new_entry += f" | **Correction:** {correction}"
@@ -66,11 +68,13 @@ def update_logbook(
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(f"{new_entry}\n")
 
-    return "LogBook successfully updated."
+    return f"Insight recorded in {skill_name} logbook."
 
 
 class AgentManifestLoader:
     def __init__(self):
+        from hepagent.helpers import get_agent_dir
+
         self.agents_dir = get_agent_dir()
 
         # Paths to specific modules
@@ -84,33 +88,61 @@ class AgentManifestLoader:
         self, context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
     ) -> str:
         """Assembles the full system prompt from the .agents registry."""
-        # ethics = read_md(self.common_path / "ETHICS.md")
-        memory = read_md(self.storage_path / "MEMORY.md")
+        ethics = read_md(self.common_path / "ETHICS.md")  # Guardrail guidelines
+        identity = read_md(self.common_path / "IDENTITY.md")  # Personality & Vibe
+        operation = read_md(self.common_path / "OPERATION.md")  # Operational rules
+        memory = read_md(self.storage_path / "MEMORY.md")  # Project/User preferences, etc.
 
-        agent_path = get_agent_path(context)
+        catalog = self.get_skill_catalog()
 
-        # soul = read_md(agent_path / "SOUL.md")
-        # world = read_md(agent_path / "WORLD.md")
-        logbook = read_md(agent_path / "LOGBOOK.md")
-        operational = read_md(agent_path / "OPERATION.md")
+        components = []
+        if identity:
+            components.append(f"# IDENTITY\n{identity}")
 
-        # Building a structured prompt
-        components = [
-            "# OPERATIONAL RULES",
-            operational,
-            # "# IDENTITY & PERSONALITY", soul,
-            # "# OPERATIONAL BOUNDARIES", ethics,
-            # "# DOMAIN KNOWLEDGE (HEP)", world,
-            "# TECHNICAL LESSONS LEARNED",
-            "## Current Memory",
-            logbook,
-            textwrap.dedent("""## CRITICAL RULE
+        if operation:
+            components.append(f"# OPERATIONAL RULES\n{operation}")
+
+        if ethics:
+            components.append(f"# GUARDRAIL GUIDELINES\n{ethics}")
+
+        if memory:
+            components.append(f"# SHARED MEMORY\n{memory}")
+
+        if catalog:
+            components.append(
+                f"# AVAILABLE SKILLS\nYou have access to the following specialized skills."
+                f" Use `load_skill_details` to activate one:\n{catalog}"
+            )
+
+        components.append(
+            textwrap.dedent("""# CRITICAL RULE: SELF-IMPROVEMENT
              Whenever you encounter an error, a tool failure, or a user
-            correction, you MUST call 'update_logbook' to record the corrective insight
-            so you do not repeat the mistake."""),
-            "# SHARED USER PREFERENCES & CONTEXT",
-            memory,
-        ]
+            correction, you MUST call `update_logbook` to record the corrective insight
+            so you do not repeat the mistake.""")
+        )
 
         # Filter out empty components and join
-        return "\n\n".join([c for c in components if c])
+        return "\n\n".join(components)
+
+    def get_skill_catalog(self) -> str:
+        """Scans all skill directories and returns their YAML descriptions."""
+        catalog = []
+        skills_root = self.agents_dir / "skills"
+        if not skills_root.exists():
+            return ""  # No skills available
+
+        for skill_dir in skills_root.iterdir():
+            if skill_dir.is_dir():
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    meta = self._extract_yaml(skill_file)
+                    skill_name = meta.get("name", skill_dir.name)
+                    desc = meta.get("description", "No description provided.")
+                    catalog.append(f"- **{skill_name}**: {desc}")
+
+        return "\n".join(catalog)
+
+    def _extract_yaml(self, path):
+        content = read_md(path)
+        match = re.search(r"^---\s*(.*?)\s*---", content, re.DOTALL)
+        return yaml.safe_load(match.group(1)) if match else {}

@@ -58,8 +58,7 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
         return execute_bash_command(cmd, cwd=cwd)
 
     prompt = (
-        "⚠️ Agent called tool in HUMAN mode. Allow?\n"
-        "(Enter 'y' to allow, type reason to reject): "
+        "⚠️ Agent called tool in HUMAN mode. Allow?\n(Enter 'y' to allow, type reason to reject): "
     )
     try:
         confirmation = input(prompt)
