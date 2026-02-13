@@ -6,6 +6,7 @@ def test_get_skill_catalog(mock_agent_env):
     """Verify the loader correctly scans the skills directory and parses YAML."""
     loader = AgentManifestLoader()
     catalog = loader.get_skill_catalog()
+    print(f"\n[DEBUG] Skill Catalog:\n{catalog}")
 
     # Check if the nyx skill from our conftest.py is present
     assert "nyx" in catalog.lower()
@@ -30,12 +31,13 @@ def test_get_instructions_assembly(mock_agent_env):
 
     # Call the loader (passing None for agent as it's likely unused in the string build)
     instructions = loader.get_instructions(wrapper, None)  # type: ignore
+    print(f"\n[DEBUG] Assembled Instructions:\n{instructions}")
 
     # Assertions on prompt structure
     assert "# IDENTITY" in instructions
     assert "# AVAILABLE SKILLS" in instructions
-    assert "Global shared memory" in instructions
-    assert "CRITICAL RULE: SELF-IMPROVEMENT" in instructions
+    assert "# SHARED MEMORY" in instructions
+    assert "# CRITICAL RULE: SELF-IMPROVEMENT" in instructions
 
 
 def test_loader_missing_files(tmp_path, monkeypatch):

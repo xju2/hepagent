@@ -89,15 +89,15 @@ class AgentManifestLoader:
     ) -> str:
         """Assembles the full system prompt from the .agents registry."""
         ethics = read_md(self.common_path / "ETHICS.md")  # Guardrail guidelines
-        soul = read_md(self.common_path / "SOUL.md")  # Personality & Vibe
+        identity = read_md(self.common_path / "IDENTITY.md")  # Personality & Vibe
         operation = read_md(self.common_path / "OPERATION.md")  # Operational rules
         memory = read_md(self.storage_path / "MEMORY.md")  # Project/User preferences, etc.
 
         catalog = self.get_skill_catalog()
 
         components = []
-        if soul:
-            components.append(f"# IDENTITY\n{soul}")
+        if identity:
+            components.append(f"# IDENTITY\n{identity}")
 
         if operation:
             components.append(f"# OPERATIONAL RULES\n{operation}")
@@ -115,7 +115,7 @@ class AgentManifestLoader:
             )
 
         components.append(
-            textwrap.dedent("""## CRITICAL RULE
+            textwrap.dedent("""# CRITICAL RULE: SELF-IMPROVEMENT
              Whenever you encounter an error, a tool failure, or a user
             correction, you MUST call `update_logbook` to record the corrective insight
             so you do not repeat the mistake.""")
@@ -128,6 +128,8 @@ class AgentManifestLoader:
         """Scans all skill directories and returns their YAML descriptions."""
         catalog = []
         skills_root = self.agents_dir / "skills"
+        if not skills_root.exists():
+            return ""  # No skills available
 
         for skill_dir in skills_root.iterdir():
             if skill_dir.is_dir():
