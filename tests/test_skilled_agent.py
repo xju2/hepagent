@@ -49,11 +49,13 @@ def test_ask_user_for_info():
     ctx_wrapper = RunContextWrapper(context=context)
 
     # Mock the input function to return a specific value
-    with patch("builtins.input", return_value="test_input_value"):
+    with patch("builtins.input", return_value="test_input_value") as mock_input:
         result = ask_user_for_info(ctx_wrapper, "What is your name?")
 
     # Verify the function returns the mocked input exactly
     assert result == "test_input_value"
+    # Verify the prompt was passed correctly with a colon and space
+    mock_input.assert_called_once_with("What is your name?: ")
 
 
 def test_ask_user_for_info_with_different_prompts():
@@ -71,6 +73,8 @@ def test_ask_user_for_info_with_different_prompts():
     ]
 
     for prompt, expected_input in test_cases:
-        with patch("builtins.input", return_value=expected_input):
+        with patch("builtins.input", return_value=expected_input) as mock_input:
             result = ask_user_for_info(ctx_wrapper, prompt)
             assert result == expected_input
+            # Verify the prompt was passed correctly with a colon and space
+            mock_input.assert_called_once_with(f"{prompt}: ")
