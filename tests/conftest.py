@@ -39,7 +39,7 @@ def agent_registry_temp(tmp_path_factory):
         textwrap.dedent("""\
         - Always verify the success of a tool execution before proceeding.
         - If a tool fails, log the error and the corrective insight in the logbook.
-        - When a user requests a skill, check the catalog and load the relevant details before execution.
+        - When a user requests a skill, check the catalog and load the relevant details execution.
     """)
     )
 
