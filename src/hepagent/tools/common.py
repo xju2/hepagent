@@ -108,3 +108,30 @@ def read_resource(ctx: RunContextWrapper[AgentContext], resource_name: str) -> s
     if not res_path.exists():
         return f"Resource {resource_name} not found in {skill_name}."
     return read_md(res_path)
+
+
+@function_tool
+def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
+    """
+    Pauses execution to ask the user for missing information or clarification.
+    Use this when a required parameter (like a directory path) is missing.
+    Ask one parameter at a time, and be specific in the prompt to guide the user.
+    Stop thinking if user input is empty or cannot be read.
+
+    Args:
+        prompt: The question to display to the user.
+
+    Returns:
+        str: The user's input as a string. If input cannot be read, returns an empty string.
+    """
+    try:
+        user_input = input(f"{prompt}: ")
+    except EOFError:
+        try:
+            with open("/dev/tty", encoding="utf-8") as tty:
+                print(f"{prompt}: ", end="", flush=True)
+                user_input = tty.readline().strip()
+        except OSError:
+            user_input = ""
+
+    return user_input.strip()
