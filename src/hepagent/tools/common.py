@@ -39,7 +39,7 @@ def update_memory(
     if correction:
         new_entry += f" | **Correction:** {correction}"
 
-    with open(file_path, "a") as f:
+    with open(file_path, "a", encoding="utf-8") as f:
         f.write(f"{new_entry}\n")
 
     return "Memory successfully updated."
@@ -59,10 +59,10 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
 
     if not skill_file.exists():
         ctx.context.active_skill = None  # Clear active skill if not found
-        return f"Error: Skill '{skill_name}' does not found."
-    else:
-        # Set the active skill in the context
-        ctx.context.active_skill = skill_name
+        return f"Error: Skill '{skill_name}' does not exist."
+
+    # Set the active skill in the context
+    ctx.context.active_skill = skill_name
 
     # 1. Get the main instructions (stripping YAML)
     raw_content = read_md(skill_file)
@@ -93,13 +93,17 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
 
 
 @function_tool
-def read_resource(ctx: RunContextWrapper[AgentContext], skill_name: str, resource_name: str) -> str:
+def read_resource(ctx: RunContextWrapper[AgentContext], resource_name: str) -> str:
     """Reads a specific technical manual (e.g., 'TF', 'IC') for the currently active skill.
 
     Args:
         resource_name: The name of the markdown file in the resources folder (without .md).
     """
     # resource_name could be "TF", we append .md
+    skill_name = ctx.context.active_skill
+    if not skill_name:
+        return "Error: No active skill. Please load a skill first using 'load_skill_details'."
+
     res_path = _get_skill_dir(skill_name) / "resources" / f"{resource_name}.md"
     if not res_path.exists():
         return f"Resource {resource_name} not found in {skill_name}."
