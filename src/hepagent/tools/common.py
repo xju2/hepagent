@@ -108,3 +108,17 @@ def read_resource(ctx: RunContextWrapper[AgentContext], resource_name: str) -> s
     if not res_path.exists():
         return f"Resource {resource_name} not found in {skill_name}."
     return read_md(res_path)
+
+
+@function_tool
+def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
+    """
+    Pauses execution to ask the user for missing information or clarification.
+    Use this when a required parameter (like a directory path) is missing.
+    Ask one parameter at a time, and be specific in the prompt to guide the user.
+
+    Args:
+        prompt: The question to display to the user.
+    """
+    user_input = input(f"{prompt}: ")
+    return user_input

@@ -1,4 +1,3 @@
-from unittest.mock import patch
 
 import pytest
 
@@ -8,7 +7,7 @@ from hepagent.agents.skilled import create as create_skilled_agent
 
 
 @pytest.mark.asyncio
-@pytest.mark.allow_call_model_methods # Allow actual model calls for this test
+@pytest.mark.allow_call_model_methods  # Allow actual model calls for this test
 async def test_skilled_agent_skill_cycle(mock_agent_env):
     from hepagent.helpers import get_agent_dir
 
