@@ -123,10 +123,7 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str) -> str:
     Returns:
         str: The user's input with leading/trailing whitespace removed.
              Returns an empty string if the user provides no input or only whitespace.
-
-    Note:
-        Empty or whitespace-only input is accepted but returned as an empty string.
-        Callers should check for empty strings if the input is required.
+             Callers should check for empty strings if the input is required.
     """
     user_input = input(f"{prompt}: ")
     return user_input.strip()
