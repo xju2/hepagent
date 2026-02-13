@@ -12,7 +12,7 @@ from hepagent.helpers import get_cborg_api_key
 
 
 @click.group(invoke_without_command=True)
-@click.option("--agent", "agent_name", default="nyx", show_default=True)
+@click.option("--agent", "agent_name", default="research_scientist", show_default=True)
 @click.option("--task", "task_prompt")
 @click.option("--yolo", is_flag=True, help="Auto-approve all bash commands.")
 @click.pass_context

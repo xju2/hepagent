@@ -19,12 +19,12 @@ uv run hepagent --help
 ## Instructions
 We can run the agent as:
 ```bash
-uv run hepagent --agent nyx --task "your task here"
+uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code."
 ```
 
 YOLO mode (auto-approve all bash commands):
 ```bash
-uv run hepagent --agent nyx --task "your task here" --yolo
+uv run hepagent --agent "hep_physicist" --task "your task here" --yolo
 ```
 
 List available CBORG models:
