@@ -1,11 +1,11 @@
 import importlib
 import inspect
-import os
 import pkgutil
 
 import click
 
 import hepagent.cli
+from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
@@ -38,26 +38,17 @@ def main(
     if not task_prompt:
         raise click.UsageError("Missing required option '--task'.")
 
+    agent = create_skilled_agent()
+    agent.model = get_cborg_model_provider(model)
+    context = AgentContext(agent_name=agent_name)
+    app = TextualAgent(model=model, env={})
+
+    # Wrap the bash agent with our adapter
+    app.agent = AgentAdapter(agent, app, tool_wrapper=BashToolWrapper())
     if yolo:
-        os.environ["HEPAGENT_YOLO"] = "1"
-
-    import asyncio
-
-    async def _run():
-        agent = create_skilled_agent()
-        agent.model = get_cborg_model_provider(model)
-        # context = AgentContext(agent_name=agent_name)
-        app = TextualAgent(model=model, env={})
-
-        # Wrap the bash agent with our adapter
-        app.agent = AgentAdapter(agent, app, tool_wrapper=BashToolWrapper())
-        exit_status, result = app.run_task(task=task_prompt)
-        print(f"Agent exited with status: {exit_status}, result: {result}")
-
-        # result = await Runner.run(agent, task_prompt, context=context)
-        # click.echo(result.final_output)
-
-    asyncio.run(_run())
+        app.agent.config.mode = "yolo"
+    exit_status, result = app.run_task(task=task_prompt, context=context)
+    print(f"Agent exited with status: {exit_status}, result: {result}")
 
 
 @main.command("list-cborg-models")
