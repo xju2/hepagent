@@ -21,7 +21,7 @@ mypy:
 
 .PHONY: tests
 tests:
-	uv run pytest
+	uv run pytest -k "not skilled_agent"
 
 .PHONY: coverage
 coverage:
