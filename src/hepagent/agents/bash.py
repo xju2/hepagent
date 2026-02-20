@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
-from hepagent.model_providers import get_cborg_model_provider
+from hepagent.model_providers import get_model_provider
 
 
 class LocalEnvironmentConfig(BaseModel):
@@ -77,7 +77,10 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     return results
 
 
-def create() -> Agent:
+def create(
+    model_provider: str = "cborg",
+    model_name: str | None = None,
+) -> Agent:
     agent = Agent(
         name="Bash Agent",
         instructions=(
@@ -96,7 +99,7 @@ def create() -> Agent:
             "</format_example>"
             "Failure to follow these rules will cause your response to be rejected."
         ),
-        model=get_cborg_model_provider(),
+        model=get_model_provider(model_provider=model_provider, model_name=model_name),
         tools=[execute_bash_command_with_confirmation],
     )
     return agent

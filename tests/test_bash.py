@@ -13,7 +13,7 @@ def test_create_uses_execute_bash_tool(monkeypatch):
 
     sentinel_model = object()
     monkeypatch.setattr(bash, "Agent", StubAgent)
-    monkeypatch.setattr(bash, "get_cborg_model_provider", lambda: sentinel_model)
+    monkeypatch.setattr(bash, "get_model_provider", lambda **_kwargs: sentinel_model)
 
     agent = bash.create()
 

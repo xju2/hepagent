@@ -1,6 +1,6 @@
 # Project
 Building a HEP Agent framwork for cosmology simulation and particle physics analysis.
-The framework is based on the `openai-agent-framework` and `cborg` model provider.
+The framework is based on the `openai-agent-framework` and supports multiple model providers.
 
 ## Introduction
 
@@ -20,6 +20,8 @@ uv run hepagent --help
 We can run the agent as:
 ```bash
 uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+uv run hepagent --agent "research_scientist" --task "..." --model "openai:gpt-5-mini"
+uv run hepagent --agent "research_scientist" --task "..." --model "gemini-flash"  # defaults to cborg
 ```
 
 YOLO mode (auto-approve all bash commands):
@@ -27,9 +29,11 @@ YOLO mode (auto-approve all bash commands):
 uv run hepagent --agent "hep_physicist" --task "your task here" --yolo
 ```
 
-List available CBORG models:
+List available models for a platform:
 ```bash
-uv run hepagent list-cborg-models
+uv run hepagent list-models --platform cborg
+uv run hepagent list-models --platform amsc
+uv run hepagent list-models --platform openai
 ```
 
 
@@ -66,11 +70,35 @@ Run with DummyAgent (demo mode, no API key required):
 python3 scripts/bash_textual.py
 ```
 
-Run with real bash agent (requires `CBORG_API_KEY` environment variable):
+Run with real bash agent (requires provider API key):
 ```bash
 export CBORG_API_KEY="your-api-key"
+export OPENAI_API_KEY="your-api-key"
+export AMSC_API_KEY="your-api-key"
 export OPENAI_AGENTS_DISABLE_TRACING=1
-python3 scripts/bash_textual.py --real
+python3 scripts/bash_textual.py --task "dummy"
+```
+Specify provider/model for the real bash agent:
+```bash
+python3 scripts/bash_textual.py --task "real" --model "openai:gpt-5-mini"
+python3 scripts/bash_textual.py --task "dummy" --model "amsc:gpt-oss-20b"
+```
+
+### Model Providers
+Provider defaults and environment variable mappings live in `src/hepagent/config/providers.toml`.
+Each provider entry supports:
+- `base_url`: Default API base URL
+- `api_key_env`: Environment variable for the API key
+- `base_url_env`: Optional environment variable override for `base_url`
+- `default_model`: Default model name used when `--model` omits a model
+
+Example (excerpt):
+```toml
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+base_url_env = "OPENAI_BASE_URL"
+default_model = "gpt-5-mini"
 ```
 
 #### Features

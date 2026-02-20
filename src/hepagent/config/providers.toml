@@ -1,0 +1,17 @@
+[providers.cborg]
+base_url = "https://api.cborg.lbl.gov"
+api_key_env = "CBORG_API_KEY"
+base_url_env = "CBORG_BASE_URL"
+default_model = "gemini-flash"
+
+[providers.amsc]
+base_url = "https://api.i2-core.american-science-cloud.org"
+api_key_env = "AMSC_API_KEY"
+base_url_env = "AMSC_BASE_URL"
+default_model = "gpt-oss-20b"
+
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+base_url_env = "OPENAI_BASE_URL"
+default_model = "gpt-5-mini"

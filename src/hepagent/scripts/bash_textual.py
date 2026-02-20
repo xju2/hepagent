@@ -1,5 +1,5 @@
 from hepagent.agents.textual import TextualAgent
-from hepagent.model_providers import DEFAULT_CBORG_MODEL
+from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
 if __name__ == "__main__":
     import argparse
@@ -18,13 +18,13 @@ if __name__ == "__main__":
         "-m",
         "--model",
         type=str,
-        default=DEFAULT_CBORG_MODEL,
-        help="Model name to use for the real bash agent (if applicable)",
+        default=None,
+        help='Model to use as "provider:model" (e.g. "openai:gpt-5-mini") or a bare model name.',
     )
     args = parser.parse_args()
 
     task = args.task
-    model_name = args.model
+    model_provider, model_name = parse_model_spec(args.model)
     use_real_agent = task in ("real", "cosmicic")
 
     if use_real_agent:
@@ -57,8 +57,12 @@ if __name__ == "__main__":
 
         # Create the bash agent
         try:
-            bash_agent = create_bash_agent()
-            app = TextualAgent(model="gpt-4", env={})
+            bash_agent = create_bash_agent(
+                model_provider=model_provider,
+                model_name=model_name,
+            )
+            display_model = model_name or get_model_provider_settings(model_provider).default_model
+            app = TextualAgent(model=display_model, env={})
             # Wrap the bash agent with our adapter
             wrapper = CompositeToolWrapper(BashToolWrapper(), AskUserToolWrapper())
             app.agent = AgentAdapter(bash_agent, app, tool_wrapper=wrapper)
@@ -66,7 +70,7 @@ if __name__ == "__main__":
             print(f"Agent exited with status: {exit_status}, result: {result}")
         except Exception as e:
             print(f"Error: {e}")
-            print("Make sure you have set the CBORG_API_KEY environment variable")
+            print("Make sure you have set the required API key for the selected provider.")
             print("Falling back to DummyAgent...")
             app = TextualAgent(model="gpt-4", env={})
             exit_status, result = app.run_task(task="Demonstrate the Textual Bash Agent UI")
