@@ -84,6 +84,23 @@ python3 scripts/bash_textual.py --real --model "openai:gpt-5-mini"
 python3 scripts/bash_textual.py --real --model "amsc:gpt-oss-20b"
 ```
 
+### Model Providers
+Provider defaults and environment variable mappings live in `src/hepagent/config/providers.toml`.
+Each provider entry supports:
+- `base_url`: Default API base URL
+- `api_key_env`: Environment variable for the API key
+- `base_url_env`: Optional environment variable override for `base_url`
+- `default_model`: Default model name used when `--model` omits a model
+
+Example (excerpt):
+```toml
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+base_url_env = "OPENAI_BASE_URL"
+default_model = "gpt-5-mini"
+```
+
 #### Features
 
 - **Interactive Display**: Real-time visualization of agent thinking and command execution

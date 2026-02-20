@@ -1,21 +1,14 @@
 import os
+import tomllib
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib import resources
+from typing import Any
 
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
 from hepagent.helpers import load_env
-
-DEFAULT_CBORG_MODEL: str = "gemini-flash"
-DEFAULT_CBORG_BASE_URL: str = "https://api.cborg.lbl.gov"
-
-DEFAULT_AMSC_MODEL: str = "gpt-oss-20b"
-DEFAULT_AMSC_BASE_URL: str = "https://api.i2-core.american-science-cloud.org"
-
-DEFAULT_OPENAI_MODEL: str = "gpt-5-mini"
-DEFAULT_OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-
-SUPPORTED_MODEL_PROVIDERS: tuple[str, ...] = ("cborg", "amsc", "openai")
 
 
 @dataclass(frozen=True)
@@ -26,50 +19,50 @@ class ModelProviderSettings:
     default_model: str
 
 
-def get_openai_api_key() -> str | None:
-    load_env()
-    return os.getenv("OPENAI_API_KEY")
+@lru_cache
+def _load_providers_config() -> dict[str, dict[str, Any]]:
+    path = resources.files("hepagent.config").joinpath("providers.toml")
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    providers = data.get("providers")
+    if not isinstance(providers, dict) or not providers:
+        raise ValueError("No providers configured in providers.toml")
+    return providers
 
 
-def get_amsc_api_key() -> str | None:
-    load_env()
-    return os.getenv("AMSC_API_KEY")
+def get_supported_model_providers() -> tuple[str, ...]:
+    return tuple(_load_providers_config().keys())
 
 
-def get_cborg_api_key() -> str | None:
-    load_env()
-    return os.getenv("CBORG_API_KEY")
+SUPPORTED_MODEL_PROVIDERS: tuple[str, ...] = get_supported_model_providers()
+
+
+def _get_provider_config(model_provider: str) -> dict[str, Any]:
+    provider = model_provider.strip().lower()
+    providers = _load_providers_config()
+    if provider not in providers:
+        raise ValueError(f"Unsupported model provider: {model_provider}")
+    return providers[provider]
 
 
 def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
-    provider = model_provider.strip().lower()
-    if provider == "cborg":
-        base_url = os.getenv("CBORG_BASE_URL") or DEFAULT_CBORG_BASE_URL
-        return ModelProviderSettings(
-            base_url=base_url,
-            api_key=get_cborg_api_key(),
-            api_key_env="CBORG_API_KEY",
-            default_model=DEFAULT_CBORG_MODEL,
-        )
-    if provider == "amsc":
-        load_env()
-        base_url = os.getenv("AMSC_BASE_URL") or DEFAULT_AMSC_BASE_URL
-        return ModelProviderSettings(
-            base_url=base_url,
-            api_key=get_amsc_api_key(),
-            api_key_env="AMSC_API_KEY",
-            default_model=DEFAULT_AMSC_MODEL,
-        )
-    if provider == "openai":
-        load_env()
-        base_url = os.getenv("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL
-        return ModelProviderSettings(
-            base_url=base_url,
-            api_key=get_openai_api_key(),
-            api_key_env="OPENAI_API_KEY",
-            default_model=DEFAULT_OPENAI_MODEL,
-        )
-    raise ValueError(f"Unsupported model provider: {model_provider}")
+    cfg = _get_provider_config(model_provider)
+    base_url = cfg.get("base_url")
+    api_key_env = cfg.get("api_key_env")
+    default_model = cfg.get("default_model")
+    if not base_url or not api_key_env or not default_model:
+        raise ValueError(f"Incomplete provider configuration for {model_provider}")
+
+    load_env()
+    base_url_env = cfg.get("base_url_env")
+    if base_url_env:
+        base_url = os.getenv(base_url_env) or base_url
+    api_key = os.getenv(api_key_env)
+    return ModelProviderSettings(
+        base_url=base_url,
+        api_key=api_key,
+        api_key_env=api_key_env,
+        default_model=default_model,
+    )
 
 
 def parse_model_spec(
