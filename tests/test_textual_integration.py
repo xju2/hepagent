@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import hepagent.agents.textual as textual
 from hepagent.agents.textual import AgentAdapter, TextualAgent
-from hepagent.model_providers import DEFAULT_CBORG_MODEL
+from hepagent.model_providers import get_model_provider_settings
 
 
 def test_agent_adapter_integration(monkeypatch):
@@ -20,15 +20,16 @@ def test_agent_adapter_integration(monkeypatch):
 
     monkeypatch.setattr(textual, "Agent", StubAgent)
     # Create a mock agent similar to bash agent
+    default_model = get_model_provider_settings("cborg").default_model
     mock_agent = SimpleNamespace(
         name="Test Bash Agent",
         instructions="You are a helpful assistant. Include THOUGHT in your responses.",
-        model=DEFAULT_CBORG_MODEL,
+        model=default_model,
         tools=[],
     )
 
     # Create TextualAgent
-    textual_app = TextualAgent(model=DEFAULT_CBORG_MODEL, env={})
+    textual_app = TextualAgent(model=default_model, env={})
 
     # Create adapter
     adapter = AgentAdapter(mock_agent, textual_app)
