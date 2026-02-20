@@ -76,12 +76,12 @@ export CBORG_API_KEY="your-api-key"
 export OPENAI_API_KEY="your-api-key"
 export AMSC_API_KEY="your-api-key"
 export OPENAI_AGENTS_DISABLE_TRACING=1
-python3 scripts/bash_textual.py --real
+python3 scripts/bash_textual.py --task "dummy"
 ```
 Specify provider/model for the real bash agent:
 ```bash
-python3 scripts/bash_textual.py --real --model "openai:gpt-5-mini"
-python3 scripts/bash_textual.py --real --model "amsc:gpt-oss-20b"
+python3 scripts/bash_textual.py --task "real" --model "openai:gpt-5-mini"
+python3 scripts/bash_textual.py --task "dummy" --model "amsc:gpt-oss-20b"
 ```
 
 ### Model Providers
