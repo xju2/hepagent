@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
@@ -16,6 +17,31 @@ from agents.stream_events import (
     RawResponsesStreamEvent,
     RunItemStreamEvent,
 )
+
+
+def _configure_readline() -> None:
+    """Best-effort readline setup for basic line editing/history on Unix."""
+    try:
+        import readline
+    except Exception:
+        return
+
+    try:
+        readline.parse_and_bind("tab: complete")
+    except Exception:
+        return
+
+
+def _read_user_input(prompt_text: str) -> str:
+    """Read user input using robust TTY backends with graceful fallback."""
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from prompt_toolkit import prompt as pt_prompt
+
+            return pt_prompt(prompt_text)
+        except Exception:
+            pass
+    return input(prompt_text)
 
 
 async def run_demo_loop(
@@ -38,11 +64,13 @@ async def run_demo_loop(
         max_turns: Maximum number of turns to run in the REPL loop.
     """
 
+    _configure_readline()
+
     current_agent = agent
     input_items: list[TResponseInputItem] = []
     while True:
         try:
-            user_input = input(" > ")
+            user_input = _read_user_input(" > ")
         except (EOFError, KeyboardInterrupt):
             print()
             break
