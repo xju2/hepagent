@@ -48,6 +48,26 @@ The bash agent supports these environment variables:
   - Caps characters returned from each bash command to keep context bounded.
   - When truncated, output includes a marker showing omitted character count.
 
+- `HEPAGENT_DISABLE_PROGRESS_GUARD`
+  - Default: unset (`0` behavior)
+  - If set to `1`, disables anti-overthinking progress guardrails.
+
+- `HEPAGENT_MAX_READ_STEPS`
+  - Default: `6`
+  - Maximum consecutive read-only commands before the progress guard blocks further read-only steps.
+
+- `HEPAGENT_MAX_SAME_COMMAND_STREAK`
+  - Default: `2`
+  - Maximum repeated proposals of the same normalized command before blocking.
+
+- `HEPAGENT_MAX_SAME_THOUGHT_STREAK`
+  - Default: `2`
+  - Maximum repeated normalized reasoning strings before blocking.
+
+- `HEPAGENT_MAX_THOUGHT_CHARS`
+  - Default: `1200`
+  - Maximum thought length accepted before requiring a shorter, action-oriented thought.
+
 List available models for a platform:
 ```bash
 uv run hepagent list-models --platform cborg

@@ -72,3 +72,23 @@ def test_execute_bash_command_blocks_multifile_cat(monkeypatch):
     result = bash.execute_bash_command("cat a.txt b.txt", cwd="")
     assert result["returncode"] == 2
     assert "multi-file 'cat'" in result["output"]
+
+
+def test_progress_guard_blocks_repeated_command(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_SAME_COMMAND_STREAK", "1")
+    first = guard.evaluate("ls -F .", "read once")
+    second = guard.evaluate("ls -F .", "read once")
+    assert first is None
+    assert second is not None
+    assert "repeated command proposals" in second
+
+
+def test_progress_guard_blocks_excessive_read_only_streak(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_READ_STEPS", "1")
+    first = guard.evaluate("ls -F .", "inspect")
+    second = guard.evaluate("cat README.md", "inspect next")
+    assert first is None
+    assert second is not None
+    assert "too many read-only steps" in second

@@ -5,6 +5,7 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,17 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int = 30
+
+
+def _get_int_env(name: str, default: int, min_value: int = 1) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, parsed)
 
 
 def _get_output_limit() -> int:
@@ -78,6 +90,113 @@ def _overread_reason(cmd: str) -> str | None:
     return None
 
 
+READ_ONLY_COMMANDS = {
+    "ls",
+    "cat",
+    "sed",
+    "head",
+    "tail",
+    "find",
+    "rg",
+    "tree",
+    "stat",
+    "wc",
+    "grep",
+}
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9\s]+", " ", text.lower()).split())
+
+
+def _split_command_segments(cmd: str) -> list[str]:
+    parts = re.split(r"\s*(?:&&|\|\||;|\|)\s*", cmd.strip())
+    return [p for p in parts if p]
+
+
+def _is_read_only_command(cmd: str) -> bool:
+    segments = _split_command_segments(cmd)
+    if not segments:
+        return False
+    for segment in segments:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            return False
+        if not tokens:
+            continue
+        if tokens[0] not in READ_ONLY_COMMANDS:
+            return False
+    return True
+
+
+class _ProgressGuardState:
+    def __init__(self) -> None:
+        self.read_since_nonread = 0
+        self.last_cmd = ""
+        self.same_cmd_streak = 0
+        self.last_thought = ""
+        self.same_thought_streak = 0
+
+    def evaluate(self, cmd: str, thought: str) -> str | None:
+        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", 6)
+        max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", 2)
+        max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", 2)
+        max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", 1200)
+
+        normalized_cmd = _normalize_text(cmd)
+        normalized_thought = _normalize_text(thought or "")
+
+        if len(thought or "") > max_thought_chars:
+            return (
+                "Progress guard: thought is too long for an actionable step. "
+                "Use a concise thought, then execute one concrete command."
+            )
+
+        if normalized_cmd and normalized_cmd == self.last_cmd:
+            self.same_cmd_streak += 1
+        else:
+            self.same_cmd_streak = 1
+        self.last_cmd = normalized_cmd
+
+        if normalized_thought and normalized_thought == self.last_thought:
+            self.same_thought_streak += 1
+        elif normalized_thought:
+            self.same_thought_streak = 1
+        self.last_thought = normalized_thought
+
+        if self.same_cmd_streak > max_same_cmd_streak:
+            return (
+                "Progress guard: repeated command proposals detected. "
+                "Execute a different next step or ask one blocking clarification question."
+            )
+        if normalized_thought and self.same_thought_streak > max_same_thought_streak:
+            return (
+                "Progress guard: repeated reasoning detected. "
+                "Proceed with one concrete action or ask one blocking clarification question."
+            )
+
+        if _is_read_only_command(cmd):
+            self.read_since_nonread += 1
+            if self.read_since_nonread > max_read_steps:
+                return (
+                    "Progress guard: too many read-only steps in a row. "
+                    "Run the next required execution step, or ask the user one blocking question."
+                )
+        else:
+            self.read_since_nonread = 0
+
+        return None
+
+
+_PROGRESS_GUARD = _ProgressGuardState()
+
+
+def _reset_progress_guard_for_tests() -> None:
+    global _PROGRESS_GUARD
+    _PROGRESS_GUARD = _ProgressGuardState()
+
+
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
@@ -133,6 +252,17 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     print(f"THOUGHT:{thought}", flush=True)
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
+    if os.getenv("HEPAGENT_DISABLE_PROGRESS_GUARD") != "1":
+        guard_reason = _PROGRESS_GUARD.evaluate(cmd, thought)
+        if guard_reason:
+            return {
+                "output": (
+                    f"{guard_reason}\n"
+                    "If path/context is missing, ask the user for exact scope instead of further probing."
+                ),
+                "returncode": 2,
+            }
+
     if os.getenv("HEPAGENT_YOLO") == "1":
         return execute_bash_command(cmd, cwd=cwd)
 
@@ -187,6 +317,8 @@ def create(
             " Instead, ask the user for the correct path or permission to search."
             "Do not stop after reading initial files when the task includes required execution steps."
             " Continue with the next required step, or explicitly ask one blocking clarification question."
+            "Avoid repeated reasoning loops: do not propose the same command or same analysis repeatedly."
+            " Keep THOUGHT concise and action-oriented."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
