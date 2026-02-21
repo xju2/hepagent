@@ -1,4 +1,7 @@
 import hepagent.agents.bash as bash
+import json
+import asyncio
+from agents.tool import ToolContext
 
 
 def test_create_uses_execute_bash_tool(monkeypatch):
@@ -243,3 +246,37 @@ def test_classify_tool_result():
     assert bash._classify_tool_result({"output": "Tool calling is cancelled by user.", "returncode": 1}) == "rejected_by_user"
     assert bash._classify_tool_result({"output": "blocked", "returncode": 2}) == "blocked_guard"
     assert bash._classify_tool_result({"output": "x", "returncode": 3}) == "failed"
+
+
+def test_yolo_records_progress_guard_state_for_manifest_scope(monkeypatch):
+    bash._reset_progress_guard_for_tests()
+    monkeypatch.setenv("HEPAGENT_YOLO", "1")
+
+    manifest_like_output = (
+        "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n"
+        "downstream_manifest: runs/pipeline_demo_001/cosmicic_manifest.yaml\n"
+    )
+
+    monkeypatch.setattr(
+        bash,
+        "execute_bash_command",
+        lambda cmd, cwd="": {"output": manifest_like_output, "returncode": 0},
+    )
+
+    payload = json.dumps(
+        {
+            "cmd": "cat orchestrator/example_manifest.yaml",
+            "cwd": ".",
+            "thought": "read manifest",
+        }
+    )
+    ctx = ToolContext(
+        tool_name=getattr(bash.execute_bash_command_with_confirmation, "name", ""),
+        tool_call_id="test-call",
+        tool_arguments=payload,
+        context=None,
+    )
+    r = asyncio.run(bash.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
+    assert r["returncode"] == 0
+    # Scope extracted from command output should allow scoped runs subpath checks.
+    assert bash._PROGRESS_GUARD.evaluate("ls runs/pipeline_demo_001/cosmicic_manifest.yaml", "check path") is None

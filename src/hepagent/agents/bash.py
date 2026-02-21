@@ -564,6 +564,9 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
 
     if os.getenv("HEPAGENT_YOLO") == "1":
         results = execute_bash_command(cmd, cwd=cwd)
+        _PROGRESS_GUARD.record_result(
+            cmd, int(results.get("returncode", 1)), str(results.get("output", ""))
+        )
         _append_execution_journal(
             cmd=cmd, cwd=cwd or "", returncode=int(results.get("returncode", 1)), status=_classify_tool_result(results)
         )
