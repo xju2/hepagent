@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
@@ -111,11 +112,92 @@ def _broad_scan_reason(cmd: str) -> str | None:
     return None
 
 
+def _normalize_rel_path(path: str) -> str:
+    p = path.strip().strip("\"'`")
+    while p.startswith("./"):
+        p = p[2:]
+    if p.endswith("/") and p != "/":
+        p = p[:-1]
+    return p
+
+
+def _extract_runs_paths(text: str) -> set[str]:
+    found = set()
+    for m in re.finditer(r"(?<![A-Za-z0-9_./-])(runs/[^\s\"'`;,]+)", text):
+        raw = m.group(1).rstrip(".)]:")
+        norm = _normalize_rel_path(raw)
+        if norm.startswith("runs/"):
+            found.add(norm)
+    return found
+
+
+def _expand_runs_scopes(paths: set[str]) -> set[str]:
+    scopes: set[str] = set()
+    for p in paths:
+        norm = _normalize_rel_path(p)
+        if not norm.startswith("runs/"):
+            continue
+        scopes.add(norm)
+        cur = PurePosixPath(norm)
+        while True:
+            parent = str(cur.parent)
+            if parent in {".", "", "runs"}:
+                break
+            scopes.add(parent)
+            cur = PurePosixPath(parent)
+    return scopes
+
+
+def _runs_scan_reason(cmd: str, allowed_scopes: set[str]) -> str | None:
+    for segment in _split_command_segments(cmd):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        cmd_name = tokens[0]
+        if cmd_name not in {"ls", "find", "rg"}:
+            continue
+
+        path_args = _extract_path_args(cmd_name, tokens)
+        if cmd_name == "rg":
+            # Only care about file listing probes.
+            if "--files" not in tokens:
+                continue
+
+        if not path_args:
+            continue
+
+        for raw in path_args:
+            p = _normalize_rel_path(raw)
+            if p not in {"runs", "runs/"} and not p.startswith("runs/"):
+                continue
+
+            if p in {"runs", "runs/"}:
+                return "top-level 'runs/' discovery is disallowed without an explicit manifest-scoped subpath"
+
+            is_allowed = any(
+                scope == p or scope.startswith(p + "/") or p.startswith(scope + "/") for scope in allowed_scopes
+            )
+            if not is_allowed:
+                return (
+                    "command targets a runs/ subpath that is not in the active manifest scope; "
+                    "ask for exact path or permission to search"
+                )
+    return None
+
+
 def _overread_reason(cmd: str) -> str | None:
     normalized = " ".join(cmd.strip().split())
 
-    # Allow heredoc-style file creation (e.g. `cat <<EOF > file`) used for writes.
-    if re.search(r"(^|[;&|]\s*)cat\s+<<", normalized):
+    # Allow heredoc-style file creation used for writes.
+    # Supported forms:
+    # - cat <<EOF > file
+    # - cat > file <<EOF
+    if re.search(r"(^|[;&|]\s*)cat\s+<<\S+", normalized):
+        return None
+    if re.search(r"(^|[;&|]\s*)cat\s+>>?\s*\S+\s+<<\S+", normalized):
         return None
 
     # Avoid reading many files at once with raw `cat`; prefer bounded reads.
@@ -270,9 +352,10 @@ class _ProgressGuardState:
         self.last_thought = ""
         self.same_thought_streak = 0
         self.pending_clarification_blocks = 0
+        self.active_runs_scopes: set[str] = set()
 
     def _limits(self) -> tuple[int, int, int, int]:
-        mode = os.getenv("HEPAGENT_POLICY_MODE", "balanced").strip().lower()
+        mode = os.getenv("HEPAGENT_POLICY_MODE", "conservative").strip().lower()
         if mode == "conservative":
             return (4, 1, 1, 800)
         if mode == "exploratory":
@@ -291,12 +374,16 @@ class _ProgressGuardState:
         normalized_cmd = _normalize_text(cmd)
         normalized_thought = _normalize_text(thought or "")
 
-        if self.pending_clarification_blocks > 0 and _is_read_only_command(cmd):
+        if self.pending_clarification_blocks > 0:
             self.pending_clarification_blocks -= 1
             return (
                 "Progress guard: previous step hit a missing-path error. "
-                "Ask exactly one blocking clarification question before additional reads."
+                "Ask exactly one blocking clarification question now before any further tool calls."
             )
+
+        runs_reason = _runs_scan_reason(cmd, self.active_runs_scopes)
+        if runs_reason:
+            return f"Progress guard: {runs_reason}."
 
         if len(thought or "") > max_thought_chars:
             return (
@@ -349,6 +436,10 @@ class _ProgressGuardState:
                 # Force one clarification turn before more read-only probing.
                 self.pending_clarification_blocks = 1
             return
+        if output:
+            discovered = _extract_runs_paths(output)
+            if discovered:
+                self.active_runs_scopes.update(_expand_runs_scopes(discovered))
         if self.bootstrap_mode and _is_read_only_command(cmd):
             self.successful_bootstrap_reads += 1
             if not _is_bootstrap_read_command(cmd):
@@ -544,6 +635,8 @@ def create(
             " Keep THOUGHT concise and action-oriented."
             "When reporting executed commands, call `get_execution_journal` first and only report entries "
             "present in that journal. Never invent commands or paths."
+            "If a command is blocked by policy, your next response must propose exactly one safer replacement "
+            "command (in-scope and bounded), not additional exploratory reads."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),

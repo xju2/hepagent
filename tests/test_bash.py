@@ -88,6 +88,18 @@ def test_execute_bash_command_allows_heredoc_cat_write(monkeypatch):
     assert result["returncode"] == 0
 
 
+def test_execute_bash_command_allows_heredoc_cat_write_redirect_first(monkeypatch):
+    class DummyProc:
+        def __init__(self):
+            self.stdout = "ok"
+            self.returncode = 0
+
+    monkeypatch.delenv("HEPAGENT_ALLOW_BROAD_SCAN", raising=False)
+    monkeypatch.setattr(bash.subprocess, "run", lambda *args, **kwargs: DummyProc())
+    result = bash.execute_bash_command("cat > x.txt <<EOF\nhello\nEOF", cwd="")
+    assert result["returncode"] == 0
+
+
 def test_execute_bash_command_blocks_fragile_sed_i(monkeypatch):
     def fail_run(*_args, **_kwargs):
         raise AssertionError("subprocess.run should not be called for blocked commands")
@@ -139,7 +151,7 @@ def test_progress_guard_ignores_bootstrap_reads(monkeypatch):
 
     first = guard.evaluate("cat hepagent_instruction.txt", "bootstrap read")
     guard.record_result("cat hepagent_instruction.txt", 0)
-    second = guard.evaluate("cat registry.yaml", "bootstrap read")
+    second = guard.evaluate("cat registry.yaml", "bootstrap read step 2")
 
     assert first is None
     assert second is None
@@ -151,6 +163,31 @@ def test_progress_guard_requires_clarification_after_missing_path(monkeypatch):
     blocked = guard.evaluate("sed -n '1,50p' AGENTS.md", "read again")
     assert blocked is not None
     assert "missing-path error" in blocked
+
+
+def test_progress_guard_requires_clarification_after_missing_path_for_any_tool(monkeypatch):
+    guard = bash._ProgressGuardState()
+    guard.record_result("ls -F missing/path", 1, "ls: missing/path: No such file or directory")
+    blocked = guard.evaluate("python3 orchestrator/run.py --config x.yaml", "execute")
+    assert blocked is not None
+    assert "blocking clarification question now" in blocked
+
+
+def test_progress_guard_blocks_runs_root_discovery_without_scope():
+    guard = bash._ProgressGuardState()
+    blocked = guard.evaluate("ls -F runs/", "discover")
+    assert blocked is not None
+    assert "top-level 'runs/' discovery" in blocked
+
+
+def test_progress_guard_allows_scoped_runs_subpath_after_manifest_read():
+    guard = bash._ProgressGuardState()
+    manifest_output = (
+        "output_report: runs/pipeline_demo_001/orchestrator/preflight.json\n"
+        "upstream_data: runs/pipeline_demo_001/class/class_out_tk.dat\n"
+    )
+    guard.record_result("cat orchestrator/example_manifest.yaml", 0, manifest_output)
+    assert guard.evaluate("ls -F runs/pipeline_demo_001/", "inspect scoped path") is None
 
 
 def test_progress_guard_policy_mode_defaults(monkeypatch):
@@ -179,6 +216,7 @@ def test_progress_guard_blocks_excessive_bootstrap_reads(monkeypatch):
 def test_progress_guard_exits_bootstrap_mode_after_action(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", "1")
+    monkeypatch.setenv("HEPAGENT_MAX_SAME_COMMAND_STREAK", "2")
 
     assert guard.evaluate("cat hepagent_instruction.txt", "bootstrap") is None
     guard.record_result("cat hepagent_instruction.txt", 0, "ok")

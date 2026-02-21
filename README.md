@@ -58,7 +58,7 @@ The bash agent supports these environment variables:
   - If set to `1`, disables anti-overthinking progress guardrails.
 
 - `HEPAGENT_POLICY_MODE`
-  - Default: `balanced`
+  - Default: `conservative`
   - One of: `conservative`, `balanced`, `exploratory`.
   - Sets default guard thresholds; explicit `HEPAGENT_MAX_*` vars override these defaults.
   - `conservative`: tighter limits for production-like workflows.
