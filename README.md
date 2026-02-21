@@ -64,6 +64,11 @@ The bash agent supports these environment variables:
   - Maximum consecutive successful read-only commands before the progress guard blocks further read-only steps.
   - Bootstrap reads (for example instruction/registry/contract files) are exempt from this counter.
 
+- `HEPAGENT_MAX_BOOTSTRAP_READ_STEPS`
+  - Default: `6`
+  - Maximum successful read-only steps allowed in initial bootstrap mode.
+  - After this limit, the agent must execute a concrete action or ask one blocking clarification question.
+
 - `HEPAGENT_MAX_SAME_COMMAND_STREAK`
   - Default: `2`
   - Maximum repeated proposals of the same normalized command before blocking.

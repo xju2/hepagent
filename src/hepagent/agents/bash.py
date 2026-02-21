@@ -216,6 +216,8 @@ def _is_bootstrap_read_command(cmd: str) -> bool:
 class _ProgressGuardState:
     def __init__(self) -> None:
         self.successful_read_since_nonread = 0
+        self.successful_bootstrap_reads = 0
+        self.bootstrap_mode = True
         self.last_cmd = ""
         self.same_cmd_streak = 0
         self.last_thought = ""
@@ -234,6 +236,7 @@ class _ProgressGuardState:
     def evaluate(self, cmd: str, thought: str) -> str | None:
         default_read, default_cmd_streak, default_thought_streak, default_thought_chars = self._limits()
         max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", default_read)
+        max_bootstrap_reads = _get_int_env("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", 6)
         max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", default_cmd_streak)
         max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", default_thought_streak)
         max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", default_thought_chars)
@@ -277,6 +280,13 @@ class _ProgressGuardState:
                 "Proceed with one concrete action or ask one blocking clarification question."
             )
 
+        if self.bootstrap_mode and _is_read_only_command(cmd):
+            if self.successful_bootstrap_reads >= max_bootstrap_reads:
+                return (
+                    "Progress guard: bootstrap reading budget reached. "
+                    "Execute the next required action, or ask one blocking clarification question."
+                )
+
         if _is_read_only_command(cmd) and not _is_bootstrap_read_command(cmd):
             if self.successful_read_since_nonread >= max_read_steps:
                 return (
@@ -292,11 +302,18 @@ class _ProgressGuardState:
                 # Force one clarification turn before more read-only probing.
                 self.pending_clarification_blocks = 1
             return
+        if self.bootstrap_mode and _is_read_only_command(cmd):
+            self.successful_bootstrap_reads += 1
+            if not _is_bootstrap_read_command(cmd):
+                self.successful_read_since_nonread += 1
+            return
         if _is_read_only_command(cmd):
             if _is_bootstrap_read_command(cmd):
                 return
             self.successful_read_since_nonread += 1
             return
+        self.bootstrap_mode = False
+        self.successful_bootstrap_reads = 0
         self.successful_read_since_nonread = 0
 
 

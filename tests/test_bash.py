@@ -149,3 +149,30 @@ def test_progress_guard_policy_mode_defaults(monkeypatch):
     assert guard._limits() == (8, 2, 2, 1200)
     monkeypatch.setenv("HEPAGENT_POLICY_MODE", "exploratory")
     assert guard._limits() == (14, 3, 3, 1800)
+
+
+def test_progress_guard_blocks_excessive_bootstrap_reads(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", "2")
+
+    assert guard.evaluate("cat hepagent_instruction.txt", "bootstrap 1") is None
+    guard.record_result("cat hepagent_instruction.txt", 0, "ok")
+    assert guard.evaluate("cat registry.yaml", "bootstrap 2") is None
+    guard.record_result("cat registry.yaml", 0, "ok")
+    blocked = guard.evaluate("cat AGENTS.md", "bootstrap 3")
+    assert blocked is not None
+    assert "bootstrap reading budget reached" in blocked
+
+
+def test_progress_guard_exits_bootstrap_mode_after_action(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", "1")
+
+    assert guard.evaluate("cat hepagent_instruction.txt", "bootstrap") is None
+    guard.record_result("cat hepagent_instruction.txt", 0, "ok")
+    blocked = guard.evaluate("cat registry.yaml", "bootstrap")
+    assert blocked is not None
+    # Successful non-read action exits bootstrap mode.
+    guard.record_result("python3 orchestrator/run.py --config x.yaml", 0, "ok")
+    assert guard.bootstrap_mode is False
+    assert guard.evaluate("cat registry.yaml", "follow-up read") is None
