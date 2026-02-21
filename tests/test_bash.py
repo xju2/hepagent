@@ -20,11 +20,11 @@ def test_create_uses_execute_bash_tool(monkeypatch):
     assert isinstance(agent, StubAgent)
     assert captured["name"] == "Bash Agent"
     assert captured["model"] is sentinel_model
-    # Check that we have a bash command execution tool
-    assert len(captured["tools"]) == 1
-    tool = captured["tools"][0]
-    assert hasattr(tool, "name")
-    assert "execute_bash_command" in tool.name
+    # Check that we have bash execution and journal tools.
+    assert len(captured["tools"]) == 2
+    tool_names = [getattr(t, "name", "") for t in captured["tools"]]
+    assert any("execute_bash_command" in n for n in tool_names)
+    assert any("get_execution_journal" in n for n in tool_names)
     assert "THOUGHT" in captured["instructions"]
 
 
@@ -176,3 +176,20 @@ def test_progress_guard_exits_bootstrap_mode_after_action(monkeypatch):
     guard.record_result("python3 orchestrator/run.py --config x.yaml", 0, "ok")
     assert guard.bootstrap_mode is False
     assert guard.evaluate("cat registry.yaml", "follow-up read") is None
+
+
+def test_execution_journal_append_and_snapshot():
+    bash._reset_execution_journal_for_tests()
+    bash._append_execution_journal("ls -F", ".", 0, "executed")
+    bash._append_execution_journal("cat x", ".", 2, "blocked_guard")
+    entries = bash._snapshot_execution_journal(10)
+    assert len(entries) == 2
+    assert entries[0]["cmd"] == "ls -F"
+    assert entries[1]["status"] == "blocked_guard"
+
+
+def test_classify_tool_result():
+    assert bash._classify_tool_result({"output": "ok", "returncode": 0}) == "executed"
+    assert bash._classify_tool_result({"output": "Tool calling is cancelled by user.", "returncode": 1}) == "rejected_by_user"
+    assert bash._classify_tool_result({"output": "blocked", "returncode": 2}) == "blocked_guard"
+    assert bash._classify_tool_result({"output": "x", "returncode": 3}) == "failed"

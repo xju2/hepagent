@@ -7,6 +7,8 @@ import os
 import re
 import shlex
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -20,6 +22,35 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int = 30
+
+
+_EXECUTION_JOURNAL: list[dict[str, object]] = []
+_EXECUTION_JOURNAL_LOCK = threading.Lock()
+
+
+def _append_execution_journal(cmd: str, cwd: str, returncode: int, status: str) -> None:
+    with _EXECUTION_JOURNAL_LOCK:
+        _EXECUTION_JOURNAL.append(
+            {
+                "timestamp": time.time(),
+                "cmd": cmd,
+                "cwd": cwd,
+                "returncode": int(returncode),
+                "status": status,
+            }
+        )
+
+
+def _snapshot_execution_journal(limit: int = 50) -> list[dict[str, object]]:
+    with _EXECUTION_JOURNAL_LOCK:
+        if limit <= 0:
+            return []
+        return list(_EXECUTION_JOURNAL[-limit:])
+
+
+def _reset_execution_journal_for_tests() -> None:
+    with _EXECUTION_JOURNAL_LOCK:
+        _EXECUTION_JOURNAL.clear()
 
 
 def _get_int_env(name: str, default: int, min_value: int = 1) -> int:
@@ -103,6 +134,18 @@ def _portability_reason(cmd: str) -> str | None:
             if t == "-i" or t.startswith("-i"):
                 return "in-place 'sed -i' is platform-fragile (GNU/BSD differences)"
     return None
+
+
+def _classify_tool_result(result: dict) -> str:
+    output = str(result.get("output", ""))
+    rc = int(result.get("returncode", 1))
+    if rc == 0:
+        return "executed"
+    if rc == 1 and output.startswith("Tool calling is cancelled by user"):
+        return "rejected_by_user"
+    if rc == 2:
+        return "blocked_guard"
+    return "failed"
 
 
 READ_ONLY_COMMANDS = {
@@ -325,6 +368,17 @@ def _reset_progress_guard_for_tests() -> None:
     _PROGRESS_GUARD = _ProgressGuardState()
 
 
+@function_tool
+def get_execution_journal(limit: int = 50) -> dict:
+    """Return recent command execution journal entries for grounded reporting."""
+    safe_limit = max(1, min(int(limit), 200))
+    entries = _snapshot_execution_journal(safe_limit)
+    return {
+        "count": len(entries),
+        "entries": entries,
+    }
+
+
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
@@ -402,7 +456,7 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     if os.getenv("HEPAGENT_DISABLE_PROGRESS_GUARD") != "1":
         guard_reason = _PROGRESS_GUARD.evaluate(cmd, thought)
         if guard_reason:
-            return {
+            blocked = {
                 "output": (
                     f"{guard_reason}\n"
                     "If path/context is missing, ask the user for exact scope instead of further probing.\n"
@@ -410,9 +464,15 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
                 ),
                 "returncode": 2,
             }
+            _append_execution_journal(cmd=cmd, cwd=cwd or "", returncode=2, status="blocked_guard")
+            return blocked
 
     if os.getenv("HEPAGENT_YOLO") == "1":
-        return execute_bash_command(cmd, cwd=cwd)
+        results = execute_bash_command(cmd, cwd=cwd)
+        _append_execution_journal(
+            cmd=cmd, cwd=cwd or "", returncode=int(results.get("returncode", 1)), status=_classify_tool_result(results)
+        )
+        return results
 
     prompt = (
         "⚠️ Agent called tool in HUMAN mode. Allow?\n(Enter 'y' to allow, type reason to reject): "
@@ -427,11 +487,19 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
         except OSError:
             confirmation = ""
     if confirmation.lower() != "y":
-        return {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
+        cancelled = {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
+        _append_execution_journal(cmd=cmd, cwd=cwd or "", returncode=1, status="rejected_by_user")
+        return cancelled
 
     results = execute_bash_command(cmd, cwd=cwd)
     _PROGRESS_GUARD.record_result(
         cmd, int(results.get("returncode", 1)), str(results.get("output", ""))
+    )
+    _append_execution_journal(
+        cmd=cmd,
+        cwd=cwd or "",
+        returncode=int(results.get("returncode", 1)),
+        status=_classify_tool_result(results),
     )
     print(f"Command return code:\t{results['returncode']}")
     return results
@@ -470,10 +538,12 @@ def create(
             " Continue with the next required step, or explicitly ask one blocking clarification question."
             "Avoid repeated reasoning loops: do not propose the same command or same analysis repeatedly."
             " Keep THOUGHT concise and action-oriented."
+            "When reporting executed commands, call `get_execution_journal` first and only report entries "
+            "present in that journal. Never invent commands or paths."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[execute_bash_command_with_confirmation],
+        tools=[execute_bash_command_with_confirmation, get_execution_journal],
     )
     return agent
 
