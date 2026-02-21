@@ -76,6 +76,30 @@ def test_execute_bash_command_blocks_multifile_cat(monkeypatch):
     assert "Blocked command policy:" in result["output"]
 
 
+def test_execute_bash_command_blocks_fragile_sed_i(monkeypatch):
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("subprocess.run should not be called for blocked commands")
+
+    monkeypatch.delenv("HEPAGENT_ALLOW_FRAGILE_EDIT", raising=False)
+    monkeypatch.setattr(bash.subprocess, "run", fail_run)
+
+    result = bash.execute_bash_command("sed -i 's/a/b/g' x.txt", cwd="")
+    assert result["returncode"] == 2
+    assert "platform-fragile" in result["output"]
+
+
+def test_execute_bash_command_allows_fragile_sed_i_with_override(monkeypatch):
+    class DummyProc:
+        def __init__(self):
+            self.stdout = "ok"
+            self.returncode = 0
+
+    monkeypatch.setenv("HEPAGENT_ALLOW_FRAGILE_EDIT", "1")
+    monkeypatch.setattr(bash.subprocess, "run", lambda *args, **kwargs: DummyProc())
+    result = bash.execute_bash_command("sed -i 's/a/b/g' x.txt", cwd="")
+    assert result["returncode"] == 0
+
+
 def test_progress_guard_blocks_repeated_command(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_SAME_COMMAND_STREAK", "1")

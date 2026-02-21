@@ -76,6 +76,11 @@ The bash agent supports these environment variables:
   - Default: `1200`
   - Maximum thought length accepted before requiring a shorter, action-oriented thought.
 
+- `HEPAGENT_ALLOW_FRAGILE_EDIT`
+  - Default: unset (`0` behavior)
+  - If set to `1`, allows platform-fragile edit commands (for example `sed -i`).
+  - By default, these are blocked to avoid GNU/BSD portability pitfalls during autonomous runs.
+
 List available models for a platform:
 ```bash
 uv run hepagent list-models --platform cborg

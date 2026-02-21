@@ -90,6 +90,21 @@ def _overread_reason(cmd: str) -> str | None:
     return None
 
 
+def _portability_reason(cmd: str) -> str | None:
+    # BSD/macOS and GNU sed differ on -i behavior; avoid fragile one-liners in agent loops.
+    for segment in _split_command_segments(cmd):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if not tokens or tokens[0] != "sed":
+            continue
+        for t in tokens[1:]:
+            if t == "-i" or t.startswith("-i"):
+                return "in-place 'sed -i' is platform-fragile (GNU/BSD differences)"
+    return None
+
+
 READ_ONLY_COMMANDS = {
     "ls",
     "cat",
@@ -319,6 +334,18 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
                 ),
                 "returncode": 2,
             }
+
+    portability = _portability_reason(cmd)
+    if portability and os.getenv("HEPAGENT_ALLOW_FRAGILE_EDIT") != "1":
+        return {
+            "output": (
+                f"Command blocked by safety guard: {portability}.\n"
+                "Use a portable file-write/edit approach (rewrite file content directly, "
+                "or use a non-fragile script).\n"
+                f"{BLOCKED_RETRY_HINT}"
+            ),
+            "returncode": 2,
+        }
 
     result = subprocess.run(
         cmd,
