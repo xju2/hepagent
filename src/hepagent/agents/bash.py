@@ -161,6 +161,9 @@ def create(
             " 'find .' without -maxdepth, and 'rg --files' at repo root."
             "Always scope discovery to a specific path and limit output, for example with"
             " '-maxdepth' or '| head -n N'."
+            "If a required path is missing or a command returns 'No such file or directory',"
+            " do not probe sibling/top-level directories to guess."
+            " Instead, ask the user for the correct path or permission to search."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
