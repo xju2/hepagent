@@ -216,6 +216,25 @@ def test_progress_guard_blocks_excessive_bootstrap_reads(monkeypatch):
     assert "bootstrap reading budget reached" in blocked
 
 
+def test_progress_guard_bootstrap_budget_not_consumed_by_nonbootstrap_read(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", "2")
+
+    assert guard.evaluate("cat hepagent_instruction.txt", "bootstrap 1") is None
+    guard.record_result("cat hepagent_instruction.txt", 0, "ok")
+    assert guard.evaluate("cat registry.yaml", "bootstrap 2") is None
+    guard.record_result("cat registry.yaml", 0, "ok")
+
+    # Non-bootstrap read in bootstrap mode should not consume bootstrap budget.
+    assert guard.evaluate("ls -F orchestrator/", "non-bootstrap read") is None
+    guard.record_result("ls -F orchestrator/", 0, "ok")
+
+    # A third bootstrap read should now be blocked (budget was 2).
+    blocked = guard.evaluate("cat AGENTS.md", "bootstrap 3")
+    assert blocked is not None
+    assert "bootstrap reading budget reached" in blocked
+
+
 def test_progress_guard_exits_bootstrap_mode_after_action(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", "1")

@@ -414,7 +414,7 @@ class _ProgressGuardState:
                 "Proceed with one concrete action or ask one blocking clarification question."
             )
 
-        if self.bootstrap_mode and _is_read_only_command(cmd):
+        if self.bootstrap_mode and _is_bootstrap_read_command(cmd):
             if self.successful_bootstrap_reads >= max_bootstrap_reads:
                 return (
                     "Progress guard: bootstrap reading budget reached. "
@@ -441,9 +441,11 @@ class _ProgressGuardState:
             if discovered:
                 self.active_runs_scopes.update(_expand_runs_scopes(discovered))
         if self.bootstrap_mode and _is_read_only_command(cmd):
-            self.successful_bootstrap_reads += 1
-            if not _is_bootstrap_read_command(cmd):
-                self.successful_read_since_nonread += 1
+            if _is_bootstrap_read_command(cmd):
+                self.successful_bootstrap_reads += 1
+                return
+            # Non-bootstrap reads should be governed by the regular read-streak budget.
+            self.successful_read_since_nonread += 1
             return
         if _is_read_only_command(cmd):
             if _is_bootstrap_read_command(cmd):
