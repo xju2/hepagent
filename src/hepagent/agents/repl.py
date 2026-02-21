@@ -1,8 +1,6 @@
 """Taken from OpenAI SDK agents/repl.py, but add max-turns limit."""
 
 from __future__ import annotations
-
-import sys
 from typing import Any
 
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
@@ -33,14 +31,7 @@ def _configure_readline() -> None:
 
 
 def _read_user_input(prompt_text: str) -> str:
-    """Read user input using robust TTY backends with graceful fallback."""
-    if sys.stdin.isatty() and sys.stdout.isatty():
-        try:
-            from prompt_toolkit import prompt as pt_prompt
-
-            return pt_prompt(prompt_text)
-        except Exception:
-            pass
+    """Read user input with readline-backed builtin input()."""
     return input(prompt_text)
 
 

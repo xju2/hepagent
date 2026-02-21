@@ -29,6 +29,25 @@ YOLO mode (auto-approve all bash commands):
 uv run hepagent --agent "hep_physicist" --task "your task here" --yolo
 ```
 
+### Bash Agent Environment Flags
+
+The bash agent supports these environment variables:
+
+- `HEPAGENT_YOLO`
+  - Default: unset (`0` behavior)
+  - If set to `1`, auto-approves bash tool execution in the non-Textual REPL confirmation flow.
+
+- `HEPAGENT_ALLOW_BROAD_SCAN`
+  - Default: unset (`0` behavior)
+  - If set to `1`, disables broad-scan guardrails in bash execution.
+  - By default, potentially unbounded filesystem discovery commands are blocked (for example:
+    `ls -R`, `find .` without `-maxdepth`, `rg --files` at repo root, `tree` without depth limit).
+
+- `HEPAGENT_OUTPUT_CHAR_LIMIT`
+  - Default: `8000` (minimum effective limit is aligned with internal truncation safeguards)
+  - Caps characters returned from each bash command to keep context bounded.
+  - When truncated, output includes a marker showing omitted character count.
+
 List available models for a platform:
 ```bash
 uv run hepagent list-models --platform cborg
