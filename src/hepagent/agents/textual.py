@@ -39,6 +39,8 @@ Integration Example:
     exit_status, result = app.run(task="List files in current directory")
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
@@ -76,14 +78,14 @@ class AddLogEmitCallback(logging.Handler):
 class ToolWrapper(Protocol):
     """Protocol for wrapping agent tools for UI behavior."""
 
-    def wrap_tools(self, tools: list, adapter: AgentAdapter) -> list:
+    def wrap_tools(self, tools: list, adapter: "AgentAdapter") -> list:
         """Return a list of tools to attach to the wrapped agent."""
 
 
 class NoopToolWrapper:
     """Default wrapper that leaves tools unchanged."""
 
-    def wrap_tools(self, tools: list, adapter: AgentAdapter) -> list:
+    def wrap_tools(self, tools: list, adapter: "AgentAdapter") -> list:
         return list(tools)
 
 
