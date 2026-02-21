@@ -16,7 +16,7 @@ from hepagent.model_providers import get_model_provider
 class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
-    timeout: int = 30
+    timeout: int | None = None
 
 
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
