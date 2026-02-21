@@ -114,6 +114,10 @@ def _broad_scan_reason(cmd: str) -> str | None:
 def _overread_reason(cmd: str) -> str | None:
     normalized = " ".join(cmd.strip().split())
 
+    # Allow heredoc-style file creation (e.g. `cat <<EOF > file`) used for writes.
+    if re.search(r"(^|[;&|]\s*)cat\s+<<", normalized):
+        return None
+
     # Avoid reading many files at once with raw `cat`; prefer bounded reads.
     if re.search(r"(^|[;&|]\s*)cat\s+\S+\s+\S+", normalized):
         return "multi-file 'cat' is usually over-broad; read one file at a time with bounded output"

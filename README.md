@@ -37,6 +37,11 @@ The bash agent supports these environment variables:
   - Default: unset (`0` behavior)
   - If set to `1`, auto-approves bash tool execution in the non-Textual REPL confirmation flow.
 
+- `HEPAGENT_MAX_TURNS`
+  - Default: `40` (for `python scripts/bash_repl.py`)
+  - Maximum turns per user request in the non-Textual REPL.
+  - If exceeded, the REPL now stays alive and prints a concise message instead of crashing.
+
 - `HEPAGENT_ALLOW_BROAD_SCAN`
   - Default: unset (`0` behavior)
   - If set to `1`, disables broad-scan guardrails in bash execution.
@@ -114,6 +119,10 @@ source .venv/bin/activate
 ### Interactive Bash Agent with REPL
 ```
 python scripts/bash_repl.py
+```
+With custom turn budget:
+```
+HEPAGENT_MAX_TURNS=80 python scripts/bash_repl.py
 ```
 
 ### Interactive Bash Agent with TextualAgent

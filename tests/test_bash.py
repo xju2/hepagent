@@ -76,6 +76,18 @@ def test_execute_bash_command_blocks_multifile_cat(monkeypatch):
     assert "Blocked command policy:" in result["output"]
 
 
+def test_execute_bash_command_allows_heredoc_cat_write(monkeypatch):
+    class DummyProc:
+        def __init__(self):
+            self.stdout = "ok"
+            self.returncode = 0
+
+    monkeypatch.delenv("HEPAGENT_ALLOW_BROAD_SCAN", raising=False)
+    monkeypatch.setattr(bash.subprocess, "run", lambda *args, **kwargs: DummyProc())
+    result = bash.execute_bash_command("cat <<EOF > x.txt\nhello\nEOF", cwd="")
+    assert result["returncode"] == 0
+
+
 def test_execute_bash_command_blocks_fragile_sed_i(monkeypatch):
     def fail_run(*_args, **_kwargs):
         raise AssertionError("subprocess.run should not be called for blocked commands")

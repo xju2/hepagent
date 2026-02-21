@@ -7,6 +7,7 @@ from typing import Any
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 
 from agents import Agent
+from agents.exceptions import MaxTurnsExceeded
 from agents.items import TResponseInputItem
 from agents.result import RunResultBase
 from agents.run import Runner
@@ -87,35 +88,44 @@ async def run_demo_loop(
         input_items.append({"role": "user", "content": user_input})
 
         result: RunResultBase
-        if stream:
-            result = Runner.run_streamed(
-                current_agent, input=input_items, context=context, max_turns=max_turns
-            )
-            saw_text = False
-            async for event in result.stream_events():
-                if isinstance(event, RawResponsesStreamEvent):
-                    if isinstance(event.data, ResponseTextDeltaEvent):
-                        saw_text = True
-                        print(event.data.delta, end="", flush=True)
-                elif isinstance(event, RunItemStreamEvent):
-                    if event.item.type == "tool_call_item":
-                        print("\n[tool called]", flush=True)
-                    elif event.item.type == "tool_call_output_item":
-                        print(f"\n[tool output: {_format_tool_output(event.item.output)}]", flush=True)
-                elif isinstance(event, AgentUpdatedStreamEvent):
-                    print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
-            if not saw_text:
-                print(
-                    "[no assistant text output this turn; likely waiting on missing inputs or blocked by policy]",
-                    flush=True,
+        try:
+            if stream:
+                result = Runner.run_streamed(
+                    current_agent, input=input_items, context=context, max_turns=max_turns
                 )
-            print()
-        else:
-            result = await Runner.run(
-                current_agent, input_items, context=context, max_turns=max_turns
+                saw_text = False
+                async for event in result.stream_events():
+                    if isinstance(event, RawResponsesStreamEvent):
+                        if isinstance(event.data, ResponseTextDeltaEvent):
+                            saw_text = True
+                            print(event.data.delta, end="", flush=True)
+                    elif isinstance(event, RunItemStreamEvent):
+                        if event.item.type == "tool_call_item":
+                            print("\n[tool called]", flush=True)
+                        elif event.item.type == "tool_call_output_item":
+                            print(f"\n[tool output: {_format_tool_output(event.item.output)}]", flush=True)
+                    elif isinstance(event, AgentUpdatedStreamEvent):
+                        print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
+                if not saw_text:
+                    print(
+                        "[no assistant text output this turn; likely waiting on missing inputs or blocked by policy]",
+                        flush=True,
+                    )
+                print()
+            else:
+                result = await Runner.run(
+                    current_agent, input_items, context=context, max_turns=max_turns
+                )
+                if result.final_output is not None:
+                    print(result.final_output)
+        except MaxTurnsExceeded:
+            # Keep the REPL alive and ask for a narrower follow-up.
+            input_items.pop()
+            print(
+                f"[max turns exceeded: {max_turns}. Narrow the task or raise HEPAGENT_MAX_TURNS.]",
+                flush=True,
             )
-            if result.final_output is not None:
-                print(result.final_output)
+            continue
 
         current_agent = result.last_agent
         input_items = result.to_input_list()
