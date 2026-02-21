@@ -53,8 +53,9 @@ The bash agent supports these environment variables:
   - If set to `1`, disables anti-overthinking progress guardrails.
 
 - `HEPAGENT_MAX_READ_STEPS`
-  - Default: `6`
-  - Maximum consecutive read-only commands before the progress guard blocks further read-only steps.
+  - Default: `8`
+  - Maximum consecutive successful read-only commands before the progress guard blocks further read-only steps.
+  - Bootstrap reads (for example instruction/registry/contract files) are exempt from this counter.
 
 - `HEPAGENT_MAX_SAME_COMMAND_STREAK`
   - Default: `2`

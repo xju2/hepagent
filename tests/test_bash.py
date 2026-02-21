@@ -87,8 +87,21 @@ def test_progress_guard_blocks_repeated_command(monkeypatch):
 def test_progress_guard_blocks_excessive_read_only_streak(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_READ_STEPS", "1")
-    first = guard.evaluate("ls -F .", "inspect")
+    first = guard.evaluate("ls -F class/", "inspect")
+    guard.record_result("ls -F class/", 0)
     second = guard.evaluate("cat README.md", "inspect next")
     assert first is None
     assert second is not None
     assert "too many read-only steps" in second
+
+
+def test_progress_guard_ignores_bootstrap_reads(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_MAX_READ_STEPS", "1")
+
+    first = guard.evaluate("cat hepagent_instruction.txt", "bootstrap read")
+    guard.record_result("cat hepagent_instruction.txt", 0)
+    second = guard.evaluate("cat registry.yaml", "bootstrap read")
+
+    assert first is None
+    assert second is None

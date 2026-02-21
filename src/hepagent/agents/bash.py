@@ -104,6 +104,19 @@ READ_ONLY_COMMANDS = {
     "grep",
 }
 
+BOOTSTRAP_READ_PATHS = {
+    "hepagent_instruction.txt",
+    "registry.yaml",
+    "AGENTS.md",
+    "orchestrator/contract.yaml",
+    "class/contract.yaml",
+    "cosmicic/contract.yaml",
+    "nyx/contract.yaml",
+    "growth/contract.yaml",
+    "gimlet/contract.yaml",
+    "orchestrator/example_manifest.yaml",
+}
+
 
 def _normalize_text(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9\s]+", " ", text.lower()).split())
@@ -130,16 +143,71 @@ def _is_read_only_command(cmd: str) -> bool:
     return True
 
 
+def _extract_path_args(cmd_name: str, tokens: list[str]) -> list[str]:
+    if len(tokens) <= 1:
+        return []
+    args = tokens[1:]
+    if cmd_name == "sed":
+        # For sed, first non-option token is usually the script expression.
+        script_consumed = False
+        out: list[str] = []
+        for t in args:
+            if not script_consumed:
+                if t.startswith("-"):
+                    continue
+                script_consumed = True
+                continue
+            if t.startswith("-"):
+                continue
+            out.append(t)
+        return out
+
+    out = []
+    for t in args:
+        if t.startswith("-"):
+            continue
+        out.append(t)
+    return out
+
+
+def _normalize_path_token(token: str) -> str:
+    if token.startswith("./"):
+        token = token[2:]
+    return token
+
+
+def _is_bootstrap_read_command(cmd: str) -> bool:
+    segments = _split_command_segments(cmd)
+    if not segments:
+        return False
+    for segment in segments:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            return False
+        if not tokens:
+            return False
+        cmd_name = tokens[0]
+        if cmd_name not in READ_ONLY_COMMANDS:
+            return False
+        path_args = _extract_path_args(cmd_name, tokens)
+        if not path_args:
+            return False
+        if not all(_normalize_path_token(p) in BOOTSTRAP_READ_PATHS for p in path_args):
+            return False
+    return True
+
+
 class _ProgressGuardState:
     def __init__(self) -> None:
-        self.read_since_nonread = 0
+        self.successful_read_since_nonread = 0
         self.last_cmd = ""
         self.same_cmd_streak = 0
         self.last_thought = ""
         self.same_thought_streak = 0
 
     def evaluate(self, cmd: str, thought: str) -> str | None:
-        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", 6)
+        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", 8)
         max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", 2)
         max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", 2)
         max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", 1200)
@@ -176,17 +244,24 @@ class _ProgressGuardState:
                 "Proceed with one concrete action or ask one blocking clarification question."
             )
 
-        if _is_read_only_command(cmd):
-            self.read_since_nonread += 1
-            if self.read_since_nonread > max_read_steps:
+        if _is_read_only_command(cmd) and not _is_bootstrap_read_command(cmd):
+            if self.successful_read_since_nonread >= max_read_steps:
                 return (
                     "Progress guard: too many read-only steps in a row. "
                     "Run the next required execution step, or ask the user one blocking question."
                 )
-        else:
-            self.read_since_nonread = 0
 
         return None
+
+    def record_result(self, cmd: str, returncode: int) -> None:
+        if returncode != 0:
+            return
+        if _is_read_only_command(cmd):
+            if _is_bootstrap_read_command(cmd):
+                return
+            self.successful_read_since_nonread += 1
+            return
+        self.successful_read_since_nonread = 0
 
 
 _PROGRESS_GUARD = _ProgressGuardState()
@@ -282,6 +357,7 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
         return {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
 
     results = execute_bash_command(cmd, cwd=cwd)
+    _PROGRESS_GUARD.record_result(cmd, int(results.get("returncode", 1)))
     print(f"Command return code:\t{results['returncode']}")
     return results
 
