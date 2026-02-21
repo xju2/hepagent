@@ -25,7 +25,7 @@ def create(
             load_skill_details,  # The "Skill Discovery" tool
             read_resource,  # The "Knowledge Retrieval" tool
             ask_user_for_info,  # The "User Interaction" tool
-            create_transfer_function
+            create_transfer_function,
         ],
     )
     return agent
