@@ -45,8 +45,8 @@ async def run_demo_loop(
     """Run a simple REPL loop with the given agent.
 
     This utility allows quick manual testing and debugging of an agent from the
-    command line. Conversation state is preserved across turns. Enter ``exit``
-    or ``quit`` to stop the loop.
+    command line. Conversation state is preserved across turns. Enter ``/exit``
+    or ``/quit`` to stop the loop.
 
     Args:
         agent: The starting agent to run.
@@ -65,7 +65,7 @@ async def run_demo_loop(
         except (EOFError, KeyboardInterrupt):
             print()
             break
-        if user_input.strip().lower() in {"exit", "quit"}:
+        if user_input.strip().lower() in {"/exit", "/quit"}:
             break
         if not user_input:
             continue
