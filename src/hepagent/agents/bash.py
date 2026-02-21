@@ -164,6 +164,8 @@ def create(
             "If a required path is missing or a command returns 'No such file or directory',"
             " do not probe sibling/top-level directories to guess."
             " Instead, ask the user for the correct path or permission to search."
+            "Do not stop after reading initial files when the task includes required execution steps."
+            " Continue with the next required step, or explicitly ask one blocking clarification question."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
