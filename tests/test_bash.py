@@ -38,6 +38,7 @@ def test_execute_bash_command_blocks_broad_scan_by_default(monkeypatch):
     result = bash.execute_bash_command("ls -R", cwd="")
     assert result["returncode"] == 2
     assert "Command blocked by safety guard" in result["output"]
+    assert "Blocked command policy:" in result["output"]
 
 
 def test_execute_bash_command_truncates_large_output(monkeypatch):
@@ -72,6 +73,7 @@ def test_execute_bash_command_blocks_multifile_cat(monkeypatch):
     result = bash.execute_bash_command("cat a.txt b.txt", cwd="")
     assert result["returncode"] == 2
     assert "multi-file 'cat'" in result["output"]
+    assert "Blocked command policy:" in result["output"]
 
 
 def test_progress_guard_blocks_repeated_command(monkeypatch):

@@ -283,7 +283,8 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
             return {
                 "output": (
                     f"Command blocked by safety guard: {reason}.\n"
-                    "Use a narrower command (target specific path, add depth/output limits)."
+                    "Use a narrower command (target specific path, add depth/output limits).\n"
+                    f"{BLOCKED_RETRY_HINT}"
                 ),
                 "returncode": 2,
             }
@@ -292,7 +293,8 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
             return {
                 "output": (
                     f"Command blocked by safety guard: {overread}.\n"
-                    "Use bounded file reads, e.g. `sed -n '1,200p' <file>`."
+                    "Use bounded file reads, e.g. `sed -n '1,200p' <file>`.\n"
+                    f"{BLOCKED_RETRY_HINT}"
                 ),
                 "returncode": 2,
             }
@@ -318,6 +320,11 @@ Stop thinking!
 Tell users what was your plan to justify the tool calling
 and suggest user running the request again if needed."""
 
+BLOCKED_RETRY_HINT = (
+    "Blocked command policy: immediately propose ONE safer replacement command that is in-scope, "
+    "bounded, and advances the task."
+)
+
 
 @function_tool
 def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
@@ -333,7 +340,8 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
             return {
                 "output": (
                     f"{guard_reason}\n"
-                    "If path/context is missing, ask the user for exact scope instead of further probing."
+                    "If path/context is missing, ask the user for exact scope instead of further probing.\n"
+                    f"{BLOCKED_RETRY_HINT}"
                 ),
                 "returncode": 2,
             }
