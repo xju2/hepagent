@@ -68,6 +68,16 @@ def _broad_scan_reason(cmd: str) -> str | None:
     return None
 
 
+def _overread_reason(cmd: str) -> str | None:
+    normalized = " ".join(cmd.strip().split())
+
+    # Avoid reading many files at once with raw `cat`; prefer bounded reads.
+    if re.search(r"(^|[;&|]\s*)cat\s+\S+\s+\S+", normalized):
+        return "multi-file 'cat' is usually over-broad; read one file at a time with bounded output"
+
+    return None
+
+
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
     """Execute a bash command and return the output and return code."""
     config = LocalEnvironmentConfig()
@@ -80,6 +90,15 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
                 "output": (
                     f"Command blocked by safety guard: {reason}.\n"
                     "Use a narrower command (target specific path, add depth/output limits)."
+                ),
+                "returncode": 2,
+            }
+        overread = _overread_reason(cmd)
+        if overread:
+            return {
+                "output": (
+                    f"Command blocked by safety guard: {overread}.\n"
+                    "Use bounded file reads, e.g. `sed -n '1,200p' <file>`."
                 ),
                 "returncode": 2,
             }
@@ -161,6 +180,8 @@ def create(
             " 'find .' without -maxdepth, and 'rg --files' at repo root."
             "Always scope discovery to a specific path and limit output, for example with"
             " '-maxdepth' or '| head -n N'."
+            "When reading files, avoid raw multi-file `cat`; read one file at a time with"
+            " bounded output, for example `sed -n '1,200p' <file>`."
             "If a required path is missing or a command returns 'No such file or directory',"
             " do not probe sibling/top-level directories to guess."
             " Instead, ask the user for the correct path or permission to search."

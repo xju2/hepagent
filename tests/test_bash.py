@@ -60,3 +60,15 @@ def test_execute_bash_command_truncates_large_output(monkeypatch):
     assert result["returncode"] == 0
     assert "output truncated: omitted" in result["output"]
     assert len(result["output"]) < len(big)
+
+
+def test_execute_bash_command_blocks_multifile_cat(monkeypatch):
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("subprocess.run should not be called for blocked commands")
+
+    monkeypatch.delenv("HEPAGENT_ALLOW_BROAD_SCAN", raising=False)
+    monkeypatch.setattr(bash.subprocess, "run", fail_run)
+
+    result = bash.execute_bash_command("cat a.txt b.txt", cwd="")
+    assert result["returncode"] == 2
+    assert "multi-file 'cat'" in result["output"]
