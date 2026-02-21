@@ -1,6 +1,7 @@
 """Taken from OpenAI SDK agents/repl.py, but add max-turns limit."""
 
 from __future__ import annotations
+import json
 from typing import Any
 
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
@@ -15,6 +16,7 @@ from agents.stream_events import (
     RawResponsesStreamEvent,
     RunItemStreamEvent,
 )
+from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
 
 
 def _configure_readline() -> None:
@@ -33,6 +35,18 @@ def _configure_readline() -> None:
 def _read_user_input(prompt_text: str) -> str:
     """Read user input with readline-backed builtin input()."""
     return input(prompt_text)
+
+
+def _format_tool_output(output: Any) -> str:
+    """Bound tool-output display in REPL to keep logs readable."""
+    try:
+        text = json.dumps(output, ensure_ascii=False)
+    except Exception:
+        text = str(output)
+    if len(text) <= OUTPUT_TRUNCATE_LENGTH:
+        return text
+    omitted = len(text) - OUTPUT_TRUNCATE_LENGTH
+    return text[:OUTPUT_TRUNCATE_LENGTH] + f"... [tool output truncated: omitted {omitted} chars]"
 
 
 async def run_demo_loop(
@@ -85,7 +99,7 @@ async def run_demo_loop(
                     if event.item.type == "tool_call_item":
                         print("\n[tool called]", flush=True)
                     elif event.item.type == "tool_call_output_item":
-                        print(f"\n[tool output: {event.item.output}]", flush=True)
+                        print(f"\n[tool output: {_format_tool_output(event.item.output)}]", flush=True)
                 elif isinstance(event, AgentUpdatedStreamEvent):
                     print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
             print()
