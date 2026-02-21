@@ -52,6 +52,13 @@ The bash agent supports these environment variables:
   - Default: unset (`0` behavior)
   - If set to `1`, disables anti-overthinking progress guardrails.
 
+- `HEPAGENT_POLICY_MODE`
+  - Default: `balanced`
+  - One of: `conservative`, `balanced`, `exploratory`.
+  - Sets default guard thresholds; explicit `HEPAGENT_MAX_*` vars override these defaults.
+  - `conservative`: tighter limits for production-like workflows.
+  - `exploratory`: looser limits for open investigation.
+
 - `HEPAGENT_MAX_READ_STEPS`
   - Default: `8`
   - Maximum consecutive successful read-only commands before the progress guard blocks further read-only steps.

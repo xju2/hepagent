@@ -205,15 +205,33 @@ class _ProgressGuardState:
         self.same_cmd_streak = 0
         self.last_thought = ""
         self.same_thought_streak = 0
+        self.pending_clarification_blocks = 0
+
+    def _limits(self) -> tuple[int, int, int, int]:
+        mode = os.getenv("HEPAGENT_POLICY_MODE", "balanced").strip().lower()
+        if mode == "conservative":
+            return (4, 1, 1, 800)
+        if mode == "exploratory":
+            return (14, 3, 3, 1800)
+        # balanced default
+        return (8, 2, 2, 1200)
 
     def evaluate(self, cmd: str, thought: str) -> str | None:
-        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", 8)
-        max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", 2)
-        max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", 2)
-        max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", 1200)
+        default_read, default_cmd_streak, default_thought_streak, default_thought_chars = self._limits()
+        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", default_read)
+        max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", default_cmd_streak)
+        max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", default_thought_streak)
+        max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", default_thought_chars)
 
         normalized_cmd = _normalize_text(cmd)
         normalized_thought = _normalize_text(thought or "")
+
+        if self.pending_clarification_blocks > 0 and _is_read_only_command(cmd):
+            self.pending_clarification_blocks -= 1
+            return (
+                "Progress guard: previous step hit a missing-path error. "
+                "Ask exactly one blocking clarification question before additional reads."
+            )
 
         if len(thought or "") > max_thought_chars:
             return (
@@ -253,8 +271,11 @@ class _ProgressGuardState:
 
         return None
 
-    def record_result(self, cmd: str, returncode: int) -> None:
+    def record_result(self, cmd: str, returncode: int, output: str = "") -> None:
         if returncode != 0:
+            if "No such file or directory" in (output or ""):
+                # Force one clarification turn before more read-only probing.
+                self.pending_clarification_blocks = 1
             return
         if _is_read_only_command(cmd):
             if _is_bootstrap_read_command(cmd):
@@ -365,7 +386,9 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
         return {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
 
     results = execute_bash_command(cmd, cwd=cwd)
-    _PROGRESS_GUARD.record_result(cmd, int(results.get("returncode", 1)))
+    _PROGRESS_GUARD.record_result(
+        cmd, int(results.get("returncode", 1)), str(results.get("output", ""))
+    )
     print(f"Command return code:\t{results['returncode']}")
     return results
 

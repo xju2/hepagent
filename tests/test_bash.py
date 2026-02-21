@@ -107,3 +107,21 @@ def test_progress_guard_ignores_bootstrap_reads(monkeypatch):
 
     assert first is None
     assert second is None
+
+
+def test_progress_guard_requires_clarification_after_missing_path(monkeypatch):
+    guard = bash._ProgressGuardState()
+    guard.record_result("ls -F missing/path", 1, "ls: missing/path: No such file or directory")
+    blocked = guard.evaluate("sed -n '1,50p' AGENTS.md", "read again")
+    assert blocked is not None
+    assert "missing-path error" in blocked
+
+
+def test_progress_guard_policy_mode_defaults(monkeypatch):
+    guard = bash._ProgressGuardState()
+    monkeypatch.setenv("HEPAGENT_POLICY_MODE", "conservative")
+    assert guard._limits() == (4, 1, 1, 800)
+    monkeypatch.setenv("HEPAGENT_POLICY_MODE", "balanced")
+    assert guard._limits() == (8, 2, 2, 1200)
+    monkeypatch.setenv("HEPAGENT_POLICY_MODE", "exploratory")
+    assert guard._limits() == (14, 3, 3, 1800)
