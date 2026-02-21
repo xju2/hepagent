@@ -126,7 +126,7 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
     """
     try:
         if thought:
-            print(f"THOUGHT: {thought}")
+            print(f"THOUGHT for user input: {thought}")
         user_input = input(f"{prompt}: ")
     except EOFError:
         try:

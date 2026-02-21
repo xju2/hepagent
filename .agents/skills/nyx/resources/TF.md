@@ -1,6 +1,6 @@
 # Transfer function for Nyx simulation
 
-Follow the following instructions in your working directory for the given cosmological and runtime parameters.
+Use the user provided tool if possible; otherwise, follow the following instructions in your working directory for the given cosmological and runtime parameters.
 
 ## Instructions
 
