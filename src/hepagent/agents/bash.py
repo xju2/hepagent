@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from agents import Agent, function_tool
 from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
+from hepagent.agents.workflow_policy import build_workflow_policy
 from hepagent.model_providers import get_model_provider
 
 
@@ -129,6 +130,50 @@ def _extract_runs_paths(text: str) -> set[str]:
         if norm.startswith("runs/"):
             found.add(norm)
     return found
+
+
+def _extract_missing_paths(text: str) -> set[str]:
+    found = set()
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if "No such file or directory" not in line:
+            continue
+        # Typical forms:
+        #   ls: runs/x/y: No such file or directory
+        #   cat: ./runs/x: No such file or directory
+        m = re.search(r"^[^:]+:\s+(.+?):\s+No such file or directory$", line)
+        if not m:
+            continue
+        candidate = _normalize_rel_path(m.group(1))
+        if candidate:
+            found.add(candidate)
+    return found
+
+
+def _scoped_setup_suggestion(missing_paths: set[str], active_runs_scopes: set[str]) -> str | None:
+    parent_dirs: set[str] = set()
+    for p in missing_paths:
+        norm = _normalize_rel_path(p)
+        if not norm.startswith("runs/"):
+            continue
+        if not any(
+            scope == norm or norm.startswith(scope + "/") or scope.startswith(norm + "/")
+            for scope in active_runs_scopes
+        ):
+            continue
+        parent = str(PurePosixPath(norm).parent)
+        if parent and parent not in {".", "/"}:
+            parent_dirs.add(parent)
+
+    if not parent_dirs and active_runs_scopes:
+        # Fall back to the shallowest known scope.
+        parent_dirs.add(sorted(active_runs_scopes, key=lambda s: (s.count("/"), len(s)))[0])
+
+    if not parent_dirs:
+        return None
+
+    ordered = " ".join(sorted(parent_dirs))
+    return f"mkdir -p {ordered}"
 
 
 def _expand_runs_scopes(paths: set[str]) -> set[str]:
@@ -248,19 +293,6 @@ READ_ONLY_COMMANDS = {
     "grep",
 }
 
-BOOTSTRAP_READ_PATHS = {
-    "hepagent_instruction.txt",
-    "registry.yaml",
-    "AGENTS.md",
-    "orchestrator/contract.yaml",
-    "class/contract.yaml",
-    "cosmicic/contract.yaml",
-    "nyx/contract.yaml",
-    "growth/contract.yaml",
-    "gimlet/contract.yaml",
-    "orchestrator/example_manifest.yaml",
-}
-
 
 def _normalize_text(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9\s]+", " ", text.lower()).split())
@@ -320,59 +352,98 @@ def _normalize_path_token(token: str) -> str:
     return token
 
 
-def _is_bootstrap_read_command(cmd: str) -> bool:
+def _command_reads_path(cmd: str, target_path: str) -> bool:
+    target_norm = _normalize_path_token(target_path)
+    target_name = Path(target_norm).name
     segments = _split_command_segments(cmd)
-    if not segments:
-        return False
     for segment in segments:
         try:
             tokens = shlex.split(segment)
         except ValueError:
-            return False
+            continue
         if not tokens:
-            return False
-        cmd_name = tokens[0]
-        if cmd_name not in READ_ONLY_COMMANDS:
-            return False
-        path_args = _extract_path_args(cmd_name, tokens)
-        if not path_args:
-            return False
-        if not all(_normalize_path_token(p) in BOOTSTRAP_READ_PATHS for p in path_args):
-            return False
-    return True
+            continue
+        if tokens[0] not in READ_ONLY_COMMANDS:
+            continue
+        for path_arg in _extract_path_args(tokens[0], tokens):
+            candidate = _normalize_path_token(path_arg)
+            if candidate == target_norm or Path(candidate).name == target_name:
+                return True
+    return False
 
 
 class _ProgressGuardState:
     def __init__(self) -> None:
-        self.successful_read_since_nonread = 0
-        self.successful_bootstrap_reads = 0
-        self.bootstrap_mode = True
+        self.no_progress_streak = 0
+        self._seen_successful_reads: set[str] = set()
         self.last_cmd = ""
         self.same_cmd_streak = 0
         self.last_thought = ""
         self.same_thought_streak = 0
         self.pending_clarification_blocks = 0
+        self.pending_scaffold_setup = 0
+        self.pending_scaffold_suggestion: str | None = None
+        self.pending_scaffold_announce = False
         self.active_runs_scopes: set[str] = set()
+        self.workflow_policy = build_workflow_policy()
+
+    def _scaffold_setup_message(self) -> str | None:
+        if self.pending_scaffold_setup <= 0:
+            return None
+        suggestion = self.pending_scaffold_suggestion
+        suggestion_line = (
+            f" Suggested next command: `{suggestion}`."
+            if suggestion
+            else ""
+        )
+        return (
+            "Progress guard: manifest-scoped paths are missing under runs/. "
+            "Execute one in-scope setup action now (for example mkdir/write manifest/run preflight), "
+            "instead of additional probing or asking for path discovery."
+            f"{suggestion_line}"
+        )
+
+    def _is_missing_path_in_active_runs_scope(self, output: str) -> bool:
+        missing_paths = _extract_missing_paths(output)
+        if not missing_paths:
+            return False
+        for p in missing_paths:
+            if not p.startswith("runs/"):
+                continue
+            if any(scope == p or p.startswith(scope + "/") or scope.startswith(p + "/") for scope in self.active_runs_scopes):
+                return True
+        return False
 
     def _limits(self) -> tuple[int, int, int, int]:
-        mode = os.getenv("HEPAGENT_POLICY_MODE", "conservative").strip().lower()
+        mode = os.getenv("HEPAGENT_POLICY_MODE", "balanced").strip().lower()
         if mode == "conservative":
-            return (4, 1, 1, 800)
+            return (6, 1, 1, 800)
         if mode == "exploratory":
-            return (14, 3, 3, 1800)
+            return (16, 3, 3, 1800)
         # balanced default
-        return (8, 2, 2, 1200)
+        return (10, 2, 2, 1200)
 
     def evaluate(self, cmd: str, thought: str) -> str | None:
-        default_read, default_cmd_streak, default_thought_streak, default_thought_chars = self._limits()
-        max_read_steps = _get_int_env("HEPAGENT_MAX_READ_STEPS", default_read)
-        max_bootstrap_reads = _get_int_env("HEPAGENT_MAX_BOOTSTRAP_READ_STEPS", 6)
+        default_no_progress, default_cmd_streak, default_thought_streak, default_thought_chars = self._limits()
+        max_no_progress_steps = _get_int_env("HEPAGENT_MAX_NO_PROGRESS_STEPS", default_no_progress)
         max_same_cmd_streak = _get_int_env("HEPAGENT_MAX_SAME_COMMAND_STREAK", default_cmd_streak)
         max_same_thought_streak = _get_int_env("HEPAGENT_MAX_SAME_THOUGHT_STREAK", default_thought_streak)
         max_thought_chars = _get_int_env("HEPAGENT_MAX_THOUGHT_CHARS", default_thought_chars)
 
         normalized_cmd = _normalize_text(cmd)
         normalized_thought = _normalize_text(thought or "")
+
+        workflow_reason = self.workflow_policy.evaluate(cmd, thought)
+        if workflow_reason:
+            return workflow_reason
+
+        if self.pending_scaffold_setup > 0 and _is_read_only_command(cmd):
+            workflow_report_path = getattr(self.workflow_policy, "report_path", None)
+            if workflow_report_path and _command_reads_path(cmd, workflow_report_path):
+                return None
+            msg = self._scaffold_setup_message()
+            if msg:
+                return msg
 
         if self.pending_clarification_blocks > 0:
             self.pending_clarification_blocks -= 1
@@ -381,9 +452,12 @@ class _ProgressGuardState:
                 "Ask exactly one blocking clarification question now before any further tool calls."
             )
 
-        runs_reason = _runs_scan_reason(cmd, self.active_runs_scopes)
-        if runs_reason:
-            return f"Progress guard: {runs_reason}."
+        # Scope-constrained runs/* discovery is a workflow-specific concern.
+        # Keep default guard behavior generic unless a workflow policy has activated.
+        if getattr(self.workflow_policy, "enabled", False):
+            runs_reason = _runs_scan_reason(cmd, self.active_runs_scopes)
+            if runs_reason:
+                return f"Progress guard: {runs_reason}."
 
         if len(thought or "") > max_thought_chars:
             return (
@@ -414,47 +488,65 @@ class _ProgressGuardState:
                 "Proceed with one concrete action or ask one blocking clarification question."
             )
 
-        if self.bootstrap_mode and _is_bootstrap_read_command(cmd):
-            if self.successful_bootstrap_reads >= max_bootstrap_reads:
-                return (
-                    "Progress guard: bootstrap reading budget reached. "
-                    "Execute the next required action, or ask one blocking clarification question."
-                )
-
-        if _is_read_only_command(cmd) and not _is_bootstrap_read_command(cmd):
-            if self.successful_read_since_nonread >= max_read_steps:
-                return (
-                    "Progress guard: too many read-only steps in a row. "
-                    "Run the next required execution step, or ask the user one blocking question."
-                )
+        if _is_read_only_command(cmd) and self.no_progress_streak >= max_no_progress_steps:
+            return (
+                "Progress guard: repeated low-progress loop detected. "
+                "Run one concrete execution/edit step, or ask one blocking clarification question."
+            )
 
         return None
 
     def record_result(self, cmd: str, returncode: int, output: str = "") -> None:
+        self.workflow_policy.record_result(cmd, returncode, output)
+        if getattr(self.workflow_policy, "report_path", None):
+            # Once preflight has produced a report path, prioritize report-read/finalize flow
+            # over earlier scaffold setup nudges.
+            self.pending_scaffold_setup = 0
+            self.pending_scaffold_suggestion = None
+            self.pending_scaffold_announce = False
+
         if returncode != 0:
             if "No such file or directory" in (output or ""):
-                # Force one clarification turn before more read-only probing.
-                self.pending_clarification_blocks = 1
+                # If the missing path is in known manifest-scoped runs/*,
+                # allow the agent to proceed (for example create scaffold dirs/files).
+                # Otherwise force one clarification turn before more probing.
+                if self._is_missing_path_in_active_runs_scope(output or ""):
+                    # Nudge toward setup actions, not endless reads/questions.
+                    self.pending_scaffold_setup = 1
+                    missing = _extract_missing_paths(output or "")
+                    self.pending_scaffold_suggestion = _scoped_setup_suggestion(
+                        missing_paths=missing,
+                        active_runs_scopes=self.active_runs_scopes,
+                    )
+                    self.pending_scaffold_announce = True
+                else:
+                    self.pending_clarification_blocks = 1
+            self.no_progress_streak += 1
             return
         if output:
             discovered = _extract_runs_paths(output)
             if discovered:
                 self.active_runs_scopes.update(_expand_runs_scopes(discovered))
-        if self.bootstrap_mode and _is_read_only_command(cmd):
-            if _is_bootstrap_read_command(cmd):
-                self.successful_bootstrap_reads += 1
-                return
-            # Non-bootstrap reads should be governed by the regular read-streak budget.
-            self.successful_read_since_nonread += 1
-            return
         if _is_read_only_command(cmd):
-            if _is_bootstrap_read_command(cmd):
-                return
-            self.successful_read_since_nonread += 1
+            normalized_cmd = _normalize_text(cmd)
+            if normalized_cmd in self._seen_successful_reads:
+                self.no_progress_streak += 1
+            else:
+                self._seen_successful_reads.add(normalized_cmd)
+                self.no_progress_streak = max(0, self.no_progress_streak - 1)
             return
-        self.bootstrap_mode = False
-        self.successful_bootstrap_reads = 0
-        self.successful_read_since_nonread = 0
+        # Successful non-read action is considered scaffold progress; clear pending scaffold nudge.
+        self.pending_scaffold_setup = 0
+        self.pending_scaffold_suggestion = None
+        self.pending_scaffold_announce = False
+        self.no_progress_streak = 0
+
+    def consume_immediate_followup_message(self) -> str | None:
+        """Return one-shot guard directive that should be surfaced immediately after a result."""
+        if self.pending_scaffold_setup <= 0 or not self.pending_scaffold_announce:
+            return None
+        self.pending_scaffold_announce = False
+        return self._scaffold_setup_message()
 
 
 _PROGRESS_GUARD = _ProgressGuardState()
@@ -553,15 +645,22 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     if os.getenv("HEPAGENT_DISABLE_PROGRESS_GUARD") != "1":
         guard_reason = _PROGRESS_GUARD.evaluate(cmd, thought)
         if guard_reason:
+            is_finalize = "provide final summary now" in guard_reason.lower()
             blocked = {
                 "output": (
                     f"{guard_reason}\n"
                     "If path/context is missing, ask the user for exact scope instead of further probing.\n"
                     f"{BLOCKED_RETRY_HINT}"
+                    + ("\nFINALIZE_NOW: stop tool-calling and produce the final summary." if is_finalize else "")
                 ),
-                "returncode": 2,
+                "returncode": 0 if is_finalize else 2,
             }
-            _append_execution_journal(cmd=cmd, cwd=cwd or "", returncode=2, status="blocked_guard")
+            _append_execution_journal(
+                cmd=cmd,
+                cwd=cwd or "",
+                returncode=0 if is_finalize else 2,
+                status="blocked_guard",
+            )
             return blocked
 
     if os.getenv("HEPAGENT_YOLO") == "1":
@@ -569,6 +668,20 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
         _PROGRESS_GUARD.record_result(
             cmd, int(results.get("returncode", 1)), str(results.get("output", ""))
         )
+        immediate_guard = _PROGRESS_GUARD.consume_immediate_followup_message()
+        if immediate_guard:
+            blocked = {
+                "output": (
+                    f"{immediate_guard}\n"
+                    "If path/context is missing, ask the user for exact scope instead of further probing.\n"
+                    f"{BLOCKED_RETRY_HINT}"
+                ),
+                "returncode": 2,
+            }
+            _append_execution_journal(
+                cmd=cmd, cwd=cwd or "", returncode=2, status="blocked_guard"
+            )
+            return blocked
         _append_execution_journal(
             cmd=cmd, cwd=cwd or "", returncode=int(results.get("returncode", 1)), status=_classify_tool_result(results)
         )
@@ -595,6 +708,20 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     _PROGRESS_GUARD.record_result(
         cmd, int(results.get("returncode", 1)), str(results.get("output", ""))
     )
+    immediate_guard = _PROGRESS_GUARD.consume_immediate_followup_message()
+    if immediate_guard:
+        blocked = {
+            "output": (
+                f"{immediate_guard}\n"
+                "If path/context is missing, ask the user for exact scope instead of further probing.\n"
+                f"{BLOCKED_RETRY_HINT}"
+            ),
+            "returncode": 2,
+        }
+        _append_execution_journal(
+            cmd=cmd, cwd=cwd or "", returncode=2, status="blocked_guard"
+        )
+        return blocked
     _append_execution_journal(
         cmd=cmd,
         cwd=cwd or "",
@@ -614,8 +741,10 @@ def create(
         instructions=(
             "You are a helpful assistant that can interact multiple times with a computer shell "
             "to solve programming tasks."
-            "Your response must contain exactly ONE bash code block with ONE command (or commands"
-            " connected with && or ||)."
+            "When you need to execute a tool call, your response must contain exactly ONE bash code block "
+            "with ONE command (or commands connected with && or ||)."
+            "When the task is complete, do not emit another command. Provide a concise final summary in plain text."
+            "When blocked by missing critical context/path, ask exactly one blocking clarification question in plain text."
             "Include a THOUGHT section before your command "
             "where you explain your reasoning process."
             "Format your response as shown in <format_example>."
@@ -634,6 +763,10 @@ def create(
             "If a required path is missing or a command returns 'No such file or directory',"
             " do not probe sibling/top-level directories to guess."
             " Instead, ask the user for the correct path or permission to search."
+            " If missing paths are already manifest-scoped under runs/ for an active workflow,"
+            " do not ask for path discovery: perform one in-scope setup step (mkdir/write manifest/preflight)."
+            " If a preflight report fails only because manifest-scoped files are missing,"
+            " propose the minimal in-scope setup action and rerun preflight; do not ask the user to provide alternate paths."
             "Do not stop after reading initial files when the task includes required execution steps."
             " Continue with the next required step, or explicitly ask one blocking clarification question."
             "Avoid repeated reasoning loops: do not propose the same command or same analysis repeatedly."
@@ -642,6 +775,7 @@ def create(
             "present in that journal. Never invent commands or paths."
             "If a command is blocked by policy, your next response must propose exactly one safer replacement "
             "command (in-scope and bounded), not additional exploratory reads."
+            "After reading a required result artifact/report, synthesize findings and stop instead of continuing exploration."
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
