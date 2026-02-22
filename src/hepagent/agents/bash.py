@@ -372,10 +372,24 @@ def _command_reads_path(cmd: str, target_path: str) -> bool:
     return False
 
 
+def _looks_like_instruction_output(text: str) -> bool:
+    out = text or ""
+    return "Task:" in out and "Requirements:" in out
+
+
+def _has_agents_file_in_ancestors() -> bool:
+    cwd = Path.cwd().resolve()
+    for p in (cwd, *cwd.parents):
+        if (p / "AGENTS.md").exists():
+            return True
+    return False
+
+
 class _ProgressGuardState:
     def __init__(self) -> None:
         self.no_progress_streak = 0
         self._seen_successful_reads: set[str] = set()
+        self.successful_commands = 0
         self.last_cmd = ""
         self.same_cmd_streak = 0
         self.last_thought = ""
@@ -386,6 +400,9 @@ class _ProgressGuardState:
         self.pending_scaffold_announce = False
         self.active_runs_scopes: set[str] = set()
         self.workflow_policy = build_workflow_policy()
+        self.agents_file_exists = _has_agents_file_in_ancestors()
+        self.require_early_agents_bootstrap = False
+        self.agents_bootstrapped = False
 
     def _scaffold_setup_message(self) -> str | None:
         if self.pending_scaffold_setup <= 0:
@@ -432,6 +449,17 @@ class _ProgressGuardState:
 
         normalized_cmd = _normalize_text(cmd)
         normalized_thought = _normalize_text(thought or "")
+
+        if (
+            self.require_early_agents_bootstrap
+            and not self.agents_bootstrapped
+            and self.successful_commands >= 2
+            and not _command_reads_path(cmd, "AGENTS.md")
+        ):
+            return (
+                "Progress guard: bootstrap requires reading AGENTS.md early. "
+                "Read AGENTS.md now before further exploration."
+            )
 
         workflow_reason = self.workflow_policy.evaluate(cmd, thought)
         if workflow_reason:
@@ -523,6 +551,11 @@ class _ProgressGuardState:
                     self.pending_clarification_blocks = 1
             self.no_progress_streak += 1
             return
+        self.successful_commands += 1
+        if self.agents_file_exists and _looks_like_instruction_output(output or ""):
+            self.require_early_agents_bootstrap = True
+        if self.agents_file_exists and _command_reads_path(cmd, "AGENTS.md"):
+            self.agents_bootstrapped = True
         if output:
             discovered = _extract_runs_paths(output)
             if discovered:

@@ -155,6 +155,45 @@ def test_progress_guard_allows_new_read_targets_under_no_progress_limit(monkeypa
     assert guard.evaluate("cat registry.yaml", "read next file") is None
 
 
+def test_progress_guard_requires_early_agents_bootstrap_after_instruction(monkeypatch):
+    guard = bash._ProgressGuardState()
+    guard.agents_file_exists = True
+    guard.record_result(
+        "cat hepagent_instruction.txt",
+        0,
+        "Task:\n  X\n\nRequirements:\n  1) Y",
+    )
+    guard.record_result("cat registry.yaml", 0, "ok")
+    blocked = guard.evaluate("cat orchestrator/contract.yaml", "continue")
+    assert blocked is not None
+    assert "reading AGENTS.md early" in blocked
+
+
+def test_progress_guard_allows_agents_read_during_early_bootstrap(monkeypatch):
+    guard = bash._ProgressGuardState()
+    guard.agents_file_exists = True
+    guard.record_result(
+        "cat hepagent_instruction.txt",
+        0,
+        "Task:\n  X\n\nRequirements:\n  1) Y",
+    )
+    guard.record_result("cat registry.yaml", 0, "ok")
+    assert guard.evaluate("sed -n '1,200p' AGENTS.md", "read agents") is None
+
+
+def test_progress_guard_clears_agents_bootstrap_after_successful_agents_read(monkeypatch):
+    guard = bash._ProgressGuardState()
+    guard.agents_file_exists = True
+    guard.record_result(
+        "cat hepagent_instruction.txt",
+        0,
+        "Task:\n  X\n\nRequirements:\n  1) Y",
+    )
+    guard.record_result("cat registry.yaml", 0, "ok")
+    guard.record_result("cat AGENTS.md", 0, "repo guide")
+    assert guard.evaluate("cat orchestrator/contract.yaml", "continue") is None
+
+
 def test_progress_guard_requires_clarification_after_missing_path(monkeypatch):
     guard = bash._ProgressGuardState()
     guard.record_result("ls -F missing/path", 1, "ls: missing/path: No such file or directory")
