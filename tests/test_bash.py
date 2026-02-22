@@ -151,20 +151,20 @@ def test_progress_guard_blocks_repeated_low_progress_loop(monkeypatch):
 def test_progress_guard_allows_new_read_targets_under_no_progress_limit(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_NO_PROGRESS_STEPS", "1")
-    guard.record_result("cat hepagent_instruction.txt", 0)
-    assert guard.evaluate("cat registry.yaml", "read next file") is None
+    guard.record_result("cat instructions.txt", 0)
+    assert guard.evaluate("cat tool_registry.yaml", "read next file") is None
 
 
 def test_progress_guard_requires_early_agents_bootstrap_after_instruction(monkeypatch):
     guard = bash._ProgressGuardState()
     guard.agents_file_exists = True
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\n  X\n\nRequirements:\n  1) Y",
     )
-    guard.record_result("cat registry.yaml", 0, "ok")
-    blocked = guard.evaluate("cat orchestrator/contract.yaml", "continue")
+    guard.record_result("cat tool_registry.yaml", 0, "ok")
+    blocked = guard.evaluate("cat workflow/contract.yaml", "continue")
     assert blocked is not None
     assert "reading AGENTS.md early" in blocked
 
@@ -173,11 +173,11 @@ def test_progress_guard_allows_agents_read_during_early_bootstrap(monkeypatch):
     guard = bash._ProgressGuardState()
     guard.agents_file_exists = True
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\n  X\n\nRequirements:\n  1) Y",
     )
-    guard.record_result("cat registry.yaml", 0, "ok")
+    guard.record_result("cat tool_registry.yaml", 0, "ok")
     assert guard.evaluate("sed -n '1,200p' AGENTS.md", "read agents") is None
 
 
@@ -185,13 +185,13 @@ def test_progress_guard_clears_agents_bootstrap_after_successful_agents_read(mon
     guard = bash._ProgressGuardState()
     guard.agents_file_exists = True
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\n  X\n\nRequirements:\n  1) Y",
     )
-    guard.record_result("cat registry.yaml", 0, "ok")
+    guard.record_result("cat tool_registry.yaml", 0, "ok")
     guard.record_result("cat AGENTS.md", 0, "repo guide")
-    assert guard.evaluate("cat orchestrator/contract.yaml", "continue") is None
+    assert guard.evaluate("cat workflow/contract.yaml", "continue") is None
 
 
 def test_progress_guard_requires_clarification_after_missing_path(monkeypatch):
@@ -217,7 +217,7 @@ def test_progress_guard_allows_missing_manifest_scoped_runs_path_without_forced_
         "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n"
         "downstream_manifest: runs/pipeline_demo_001/cosmicic_manifest.yaml\n"
     )
-    guard.record_result("cat orchestrator/example_manifest.yaml", 0, manifest_output)
+    guard.record_result("cat workflow/example_manifest.yaml", 0, manifest_output)
     # Missing path is within known scoped runs path.
     guard.record_result(
         "ls runs/pipeline_demo_001/cosmicic_manifest.yaml",
@@ -231,7 +231,7 @@ def test_progress_guard_allows_missing_manifest_scoped_runs_path_without_forced_
 def test_progress_guard_requires_setup_action_after_scoped_missing_path():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -239,13 +239,13 @@ def test_progress_guard_requires_setup_action_after_scoped_missing_path():
         "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n"
         "downstream_manifest: runs/pipeline_demo_001/cosmicic_manifest.yaml\n"
     )
-    guard.record_result("cat orchestrator/example_manifest.yaml", 0, manifest_output)
+    guard.record_result("cat workflow/example_manifest.yaml", 0, manifest_output)
     guard.record_result(
         "ls runs/pipeline_demo_001/cosmicic_manifest.yaml",
         1,
         "ls: runs/pipeline_demo_001/cosmicic_manifest.yaml: No such file or directory",
     )
-    blocked = guard.evaluate("cat orchestrator/example_manifest.yaml", "re-read")
+    blocked = guard.evaluate("cat workflow/example_manifest.yaml", "re-read")
     assert blocked is not None
     assert "in-scope setup action" in blocked
     assert "Suggested next command" in blocked
@@ -257,12 +257,12 @@ def test_progress_guard_requires_setup_action_after_scoped_missing_path():
 def test_progress_guard_persists_scaffold_requirement_until_nonread_action():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     guard.record_result(
-        "cat orchestrator/example_manifest.yaml",
+        "cat workflow/example_manifest.yaml",
         0,
         "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n",
     )
@@ -271,16 +271,16 @@ def test_progress_guard_persists_scaffold_requirement_until_nonread_action():
         1,
         "ls: runs/pipeline_demo_001/cosmicic_manifest.yaml: No such file or directory",
     )
-    blocked1 = guard.evaluate("cat class/contract.yaml", "keep reading")
+    blocked1 = guard.evaluate("cat upstream_a/contract.yaml", "keep reading")
     assert blocked1 is not None
     assert "manifest-scoped paths are missing under runs/" in blocked1
-    blocked2 = guard.evaluate("cat nyx/contract.yaml", "keep reading")
+    blocked2 = guard.evaluate("cat downstream/contract.yaml", "keep reading")
     assert blocked2 is not None
     assert "manifest-scoped paths are missing under runs/" in blocked2
     assert guard.evaluate("mkdir -p runs/pipeline_demo_001", "setup") is None
     # After successful non-read action, scaffold block should clear.
     guard.record_result("mkdir -p runs/pipeline_demo_001", 0, "")
-    assert guard.evaluate("cat class/contract.yaml", "continue") is None
+    assert guard.evaluate("cat upstream_a/contract.yaml", "continue") is None
 
 
 def test_progress_guard_does_not_apply_runs_scope_guard_by_default():
@@ -291,7 +291,7 @@ def test_progress_guard_does_not_apply_runs_scope_guard_by_default():
 def test_progress_guard_blocks_runs_root_discovery_in_preflight_workflow():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -303,7 +303,7 @@ def test_progress_guard_blocks_runs_root_discovery_in_preflight_workflow():
 def test_progress_guard_allows_scoped_runs_subpath_after_manifest_read():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -311,7 +311,7 @@ def test_progress_guard_allows_scoped_runs_subpath_after_manifest_read():
         "output_report: runs/pipeline_demo_001/orchestrator/preflight.json\n"
         "upstream_data: runs/pipeline_demo_001/class/class_out_tk.dat\n"
     )
-    guard.record_result("cat orchestrator/example_manifest.yaml", 0, manifest_output)
+    guard.record_result("cat workflow/example_manifest.yaml", 0, manifest_output)
     assert guard.evaluate("ls -F runs/pipeline_demo_001/", "inspect scoped path") is None
 
 
@@ -334,12 +334,12 @@ def test_progress_guard_default_mode_is_balanced(monkeypatch):
 def test_progress_guard_no_progress_resets_after_execution(monkeypatch):
     guard = bash._ProgressGuardState()
     monkeypatch.setenv("HEPAGENT_MAX_NO_PROGRESS_STEPS", "1")
-    guard.record_result("cat hepagent_instruction.txt", 0, "ok")
-    guard.record_result("cat hepagent_instruction.txt", 0, "ok")
-    blocked = guard.evaluate("cat hepagent_instruction.txt", "repeat read")
+    guard.record_result("cat instructions.txt", 0, "ok")
+    guard.record_result("cat instructions.txt", 0, "ok")
+    blocked = guard.evaluate("cat instructions.txt", "repeat read")
     assert blocked is not None
     guard.record_result("python3 orchestrator/run.py --config x.yaml", 0, "ok")
-    assert guard.evaluate("cat registry.yaml", "follow-up read") is None
+    assert guard.evaluate("cat tool_registry.yaml", "follow-up read") is None
 
 
 def test_execution_journal_append_and_snapshot():
@@ -362,7 +362,7 @@ def test_classify_tool_result():
 def test_progress_guard_forces_finalize_after_preflight_report_read():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -379,7 +379,7 @@ def test_progress_guard_forces_finalize_after_preflight_report_read():
 def test_progress_guard_does_not_finalize_after_reading_contract_yaml():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat orchestrator/contract.yaml",
+        "cat workflow/contract.yaml",
         0,
         'provenance_contract:\n  required_fields:\n    - "qa"\n    - "handoff_results"\n',
     )
@@ -403,7 +403,7 @@ def test_yolo_records_progress_guard_state_for_manifest_scope(monkeypatch):
 
     payload = json.dumps(
         {
-            "cmd": "cat orchestrator/example_manifest.yaml",
+            "cmd": "cat workflow/example_manifest.yaml",
             "cwd": ".",
             "thought": "read manifest",
         }
@@ -436,7 +436,7 @@ def test_yolo_surfaces_immediate_scaffold_directive_after_scoped_missing_path(mo
     )
     payload_seed = json.dumps(
         {
-            "cmd": "cat orchestrator/example_manifest.yaml",
+            "cmd": "cat workflow/example_manifest.yaml",
             "cwd": ".",
             "thought": "read manifest",
         }
@@ -483,16 +483,16 @@ def test_yolo_end_to_end_preflight_trajectory_without_path_question(monkeypatch)
     monkeypatch.setenv("HEPAGENT_YOLO", "1")
 
     outputs = {
-        "cat hepagent_instruction.txt": (
+        "cat instructions.txt": (
             "Task:\n"
             "  Prepare a production preflight plan for the canonical chain, but do not run CLASS/CosmicIC/Nyx executors.\n"
             "  5) Run only orchestrator preflight:\n"
             "     python3 orchestrator/run.py --config <your_manifest_path>\n"
         ),
-        "cat registry.yaml": "ok",
-        "sed -n '1,200p' orchestrator/contract.yaml": "ok",
+        "cat tool_registry.yaml": "ok",
+        "sed -n '1,200p' workflow/contract.yaml": "ok",
         "sed -n '1,200p' AGENTS.md": "ok",
-        "cat orchestrator/example_manifest.yaml": (
+        "cat workflow/example_manifest.yaml": (
             "mode: production\n"
             "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n"
             "handoffs:\n"
@@ -538,11 +538,11 @@ def test_yolo_end_to_end_preflight_trajectory_without_path_question(monkeypatch)
         )
         return asyncio.run(bash.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
 
-    assert invoke("cat hepagent_instruction.txt", "read task", "c1")["returncode"] == 0
-    assert invoke("cat registry.yaml", "read registry", "c2")["returncode"] == 0
-    assert invoke("sed -n '1,200p' orchestrator/contract.yaml", "read contract", "c3")["returncode"] == 0
+    assert invoke("cat instructions.txt", "read task", "c1")["returncode"] == 0
+    assert invoke("cat tool_registry.yaml", "read registry", "c2")["returncode"] == 0
+    assert invoke("sed -n '1,200p' workflow/contract.yaml", "read contract", "c3")["returncode"] == 0
     assert invoke("sed -n '1,200p' AGENTS.md", "read agents", "c4")["returncode"] == 0
-    assert invoke("cat orchestrator/example_manifest.yaml", "read manifest", "c5")["returncode"] == 0
+    assert invoke("cat workflow/example_manifest.yaml", "read manifest", "c5")["returncode"] == 0
 
     missing = invoke(
         "ls runs/pipeline_demo_001/cosmicic_manifest.yaml runs/pipeline_demo_001/nyx_manifest.yaml",
@@ -572,7 +572,7 @@ def test_yolo_end_to_end_preflight_trajectory_without_path_question(monkeypatch)
     assert invoke("cat /tmp/preflight_report.json", "read report", "c9")["returncode"] == 0
 
     # After report read, tool-calling should stop and summarize.
-    final_block = invoke("ls orchestrator/", "keep exploring", "c10")
+    final_block = invoke("ls workflow/", "keep exploring", "c10")
     assert final_block["returncode"] == 0
     assert "provide final summary now" in final_block["output"]
     assert "FINALIZE_NOW" in final_block["output"]
@@ -581,15 +581,15 @@ def test_yolo_end_to_end_preflight_trajectory_without_path_question(monkeypatch)
 def test_preflight_workflow_allows_intermediate_steps_before_run():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
-    guard.record_result("cat registry.yaml", 0, "ok")
-    guard.record_result("cat orchestrator/contract.yaml", 0, "ok")
+    guard.record_result("cat tool_registry.yaml", 0, "ok")
+    guard.record_result("cat workflow/contract.yaml", 0, "ok")
     guard.record_result("cat AGENTS.md", 0, "ok")
     # Workflow policy should not hard-pin the exact next command.
-    assert guard.evaluate("ls orchestrator/example_manifest.yaml", "inspect manifest path") is None
+    assert guard.evaluate("ls workflow/example_manifest.yaml", "inspect manifest path") is None
     assert guard.evaluate("sed -n '1,200p' orchestrator/example_manifest.yaml", "read manifest") is None
     assert guard.evaluate("ls class/", "explore more") is None
 
@@ -597,21 +597,21 @@ def test_preflight_workflow_allows_intermediate_steps_before_run():
 def test_preflight_workflow_does_not_block_manifest_reads_after_bootstrap():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
-    guard.record_result("cat registry.yaml", 0, "ok")
-    guard.record_result("cat orchestrator/contract.yaml", 0, "ok")
+    guard.record_result("cat tool_registry.yaml", 0, "ok")
+    guard.record_result("cat workflow/contract.yaml", 0, "ok")
     guard.record_result("cat AGENTS.md", 0, "ok")
-    assert guard.evaluate("ls orchestrator/example_manifest.yaml", "check file") is None
-    assert guard.evaluate("cat orchestrator/example_manifest.yaml", "read manifest") is None
+    assert guard.evaluate("ls workflow/example_manifest.yaml", "check file") is None
+    assert guard.evaluate("cat workflow/example_manifest.yaml", "read manifest") is None
 
 
 def test_preflight_workflow_forces_report_read_after_run():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -620,7 +620,7 @@ def test_preflight_workflow_forces_report_read_after_run():
         1,
         "RuntimeError: Preflight failed. See report: /tmp/preflight.json",
     )
-    blocked = guard.evaluate("ls orchestrator/", "explore")
+    blocked = guard.evaluate("ls workflow/", "explore")
     assert blocked is not None
     assert "Read the preflight JSON report next" in blocked
     assert guard.evaluate("cat /tmp/preflight.json", "read report") is None
@@ -629,7 +629,7 @@ def test_preflight_workflow_forces_report_read_after_run():
 def test_preflight_workflow_blocks_disabling_report_ui_flags():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -648,12 +648,12 @@ def test_preflight_workflow_blocks_disabling_report_ui_flags():
 def test_preflight_workflow_forces_run_after_too_many_reads():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     for _ in range(12):
-        guard.record_result("cat registry.yaml", 0, "ok")
+        guard.record_result("cat tool_registry.yaml", 0, "ok")
     blocked = guard.evaluate("cat AGENTS.md", "keep reading")
     assert blocked is not None
     assert "Run `python3 orchestrator/run.py --config <manifest>` next." in blocked
@@ -662,12 +662,12 @@ def test_preflight_workflow_forces_run_after_too_many_reads():
 def test_preflight_workflow_forces_run_once_manifest_is_ready():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     guard.record_result(
-        "cat orchestrator/example_manifest.yaml",
+        "cat workflow/example_manifest.yaml",
         0,
         (
             "mode: production\n"
@@ -677,7 +677,7 @@ def test_preflight_workflow_forces_run_once_manifest_is_ready():
             "  - name: cosmicic_to_nyx\n"
         ),
     )
-    blocked = guard.evaluate("cat class/contract.yaml", "double-check contract")
+    blocked = guard.evaluate("cat upstream_a/contract.yaml", "double-check contract")
     assert blocked is not None
     assert "preflight manifest is ready" in blocked
     assert "run.py --config <manifest>" in blocked
@@ -686,12 +686,12 @@ def test_preflight_workflow_forces_run_once_manifest_is_ready():
 def test_preflight_workflow_blocks_setup_writes_before_preflight_attempt():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     guard.record_result(
-        "cat orchestrator/example_manifest.yaml",
+        "cat workflow/example_manifest.yaml",
         0,
         (
             "mode: production\n"
@@ -709,17 +709,17 @@ def test_preflight_workflow_blocks_setup_writes_before_preflight_attempt():
 def test_scaffold_or_workflow_nudge_blocks_additional_reads():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     # Trigger the workflow "run preflight now" threshold.
     for _ in range(12):
-        guard.record_result("cat registry.yaml", 0, "ok")
+        guard.record_result("cat tool_registry.yaml", 0, "ok")
 
     # Discover manifest-scoped runs path and then hit missing scoped file.
     guard.record_result(
-        "cat orchestrator/example_manifest.yaml",
+        "cat workflow/example_manifest.yaml",
         0,
         "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n",
     )
@@ -729,7 +729,7 @@ def test_scaffold_or_workflow_nudge_blocks_additional_reads():
         "ls: runs/pipeline_demo_001/cosmicic_manifest.yaml: No such file or directory",
     )
 
-    blocked = guard.evaluate("cat cosmicic/contract.yaml", "read contract")
+    blocked = guard.evaluate("cat upstream_b/contract.yaml", "read contract")
     assert blocked is not None
     assert (
         "manifest-scoped paths are missing under runs/" in blocked
@@ -740,7 +740,7 @@ def test_scaffold_or_workflow_nudge_blocks_additional_reads():
 def test_preflight_workflow_allows_relative_report_read_when_path_in_output_is_absolute():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -765,7 +765,7 @@ def test_preflight_workflow_allows_relative_report_read_when_path_in_output_is_a
 def test_preflight_workflow_finalize_after_report_read():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -779,7 +779,7 @@ def test_preflight_workflow_finalize_after_report_read():
         0,
         '{"qa": {"all_handoffs_valid": false}, "handoff_results": []}',
     )
-    blocked = guard.evaluate("ls orchestrator/", "continue")
+    blocked = guard.evaluate("ls workflow/", "continue")
     assert blocked is not None
     assert "provide final summary now" in blocked
 
@@ -787,12 +787,12 @@ def test_preflight_workflow_finalize_after_report_read():
 def test_scaffold_requirement_does_not_block_report_read_after_preflight():
     guard = bash._ProgressGuardState()
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
     guard.record_result(
-        "cat orchestrator/example_manifest.yaml",
+        "cat workflow/example_manifest.yaml",
         0,
         "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n",
     )
@@ -825,13 +825,13 @@ def test_yolo_scaffold_nudge_clears_once_preflight_report_path_exists(monkeypatc
     monkeypatch.setenv("HEPAGENT_YOLO", "1")
 
     outputs = {
-        "cat hepagent_instruction.txt": (
+        "cat instructions.txt": (
             "Task:\n"
             "  Prepare a production preflight plan for the canonical chain, but do not run CLASS/CosmicIC/Nyx executors.\n"
             "  5) Run only orchestrator preflight:\n"
             "     python3 orchestrator/run.py --config <your_manifest_path>\n"
         ),
-        "cat orchestrator/example_manifest.yaml": (
+        "cat workflow/example_manifest.yaml": (
             "mode: production\n"
             "output_report: runs/pipeline_demo_001/orchestrator/orchestrator_preflight.json\n"
         ),
@@ -865,8 +865,8 @@ def test_yolo_scaffold_nudge_clears_once_preflight_report_path_exists(monkeypatc
         )
         return asyncio.run(bash.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
 
-    assert invoke("cat hepagent_instruction.txt", "read task", "c1")["returncode"] == 0
-    assert invoke("cat orchestrator/example_manifest.yaml", "read manifest", "c2")["returncode"] == 0
+    assert invoke("cat instructions.txt", "read task", "c1")["returncode"] == 0
+    assert invoke("cat workflow/example_manifest.yaml", "read manifest", "c2")["returncode"] == 0
     scoped_missing = invoke("ls runs/pipeline_demo_001/cosmicic_manifest.yaml", "check path", "c3")
     assert scoped_missing["returncode"] == 2
     assert "manifest-scoped paths are missing under runs/" in scoped_missing["output"]
@@ -886,7 +886,7 @@ def test_finalize_guard_emits_finalize_now_signal_in_tool_output(monkeypatch):
 
     guard = bash._PROGRESS_GUARD
     guard.record_result(
-        "cat hepagent_instruction.txt",
+        "cat instructions.txt",
         0,
         "Task:\nPrepare a production preflight plan for the canonical chain\nRun only orchestrator preflight",
     )
@@ -903,7 +903,7 @@ def test_finalize_guard_emits_finalize_now_signal_in_tool_output(monkeypatch):
 
     payload = json.dumps(
         {
-            "cmd": "ls orchestrator/",
+            "cmd": "ls workflow/",
             "cwd": ".",
             "thought": "continue exploring",
         }
