@@ -58,21 +58,16 @@ The bash agent supports these environment variables:
   - If set to `1`, disables anti-overthinking progress guardrails.
 
 - `HEPAGENT_POLICY_MODE`
-  - Default: `conservative`
+  - Default: `balanced`
   - One of: `conservative`, `balanced`, `exploratory`.
   - Sets default guard thresholds; explicit `HEPAGENT_MAX_*` vars override these defaults.
   - `conservative`: tighter limits for production-like workflows.
   - `exploratory`: looser limits for open investigation.
 
-- `HEPAGENT_MAX_READ_STEPS`
-  - Default: `8`
-  - Maximum consecutive successful read-only commands before the progress guard blocks further read-only steps.
-  - Bootstrap reads (for example instruction/registry/contract files) are exempt from this counter.
-
-- `HEPAGENT_MAX_BOOTSTRAP_READ_STEPS`
-  - Default: `6`
-  - Maximum successful read-only steps allowed in initial bootstrap mode.
-  - After this limit, the agent must execute a concrete action or ask one blocking clarification question.
+- `HEPAGENT_MAX_NO_PROGRESS_STEPS`
+  - Default: derived from `HEPAGENT_POLICY_MODE` (`10` in `balanced` mode).
+  - Maximum tolerated low-progress loop streak before blocking another read-only probe.
+  - Low-progress loop means repeated failed commands or repeated successful reads of the same target without advancing.
 
 - `HEPAGENT_MAX_SAME_COMMAND_STREAK`
   - Default: `2`
@@ -90,6 +85,16 @@ The bash agent supports these environment variables:
   - Default: unset (`0` behavior)
   - If set to `1`, allows platform-fragile edit commands (for example `sed -i`).
   - By default, these are blocked to avoid GNU/BSD portability pitfalls during autonomous runs.
+
+- `HEPAGENT_WORKFLOW_POLICY`
+  - Default: `auto`
+  - Controls optional workflow-specific progression policy while keeping core bash guardrails generic.
+  - Policies enforce high-level liveness (for example "read produced report before further probing"),
+    not rigid command-by-command traces.
+  - Values:
+    - `auto`: enable policies that self-activate from task text (default).
+    - `preflight_chain`: force preflight-chain workflow policy.
+    - `off` / `none` / `disabled`: disable workflow policies (generic guardrails only).
 
 List available models for a platform:
 ```bash
