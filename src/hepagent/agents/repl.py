@@ -1,12 +1,13 @@
 """Taken from OpenAI SDK agents/repl.py, but add max-turns limit."""
 
 from __future__ import annotations
-
+import json
 from typing import Any
 
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 
 from agents import Agent
+from agents.exceptions import MaxTurnsExceeded
 from agents.items import TResponseInputItem
 from agents.result import RunResultBase
 from agents.run import Runner
@@ -16,6 +17,52 @@ from agents.stream_events import (
     RawResponsesStreamEvent,
     RunItemStreamEvent,
 )
+from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
+
+DEAD_AIR_RETRY_PROMPT = (
+    "You produced no assistant text in the previous turn. "
+    "Continue the current task now with exactly one next command or a final summary. "
+    "Do not stay silent."
+)
+
+
+def _configure_readline() -> None:
+    """Best-effort readline setup for basic line editing/history on Unix."""
+    try:
+        import readline
+    except Exception:
+        return
+
+    try:
+        readline.parse_and_bind("tab: complete")
+    except Exception:
+        return
+
+
+def _read_user_input(prompt_text: str) -> str:
+    """Read user input with readline-backed builtin input()."""
+    return input(prompt_text)
+
+
+def _format_tool_output(output: Any) -> str:
+    """Bound tool-output display in REPL to keep logs readable."""
+    try:
+        text = json.dumps(output, ensure_ascii=False)
+    except Exception:
+        text = str(output)
+    if len(text) <= OUTPUT_TRUNCATE_LENGTH:
+        return text
+    omitted = len(text) - OUTPUT_TRUNCATE_LENGTH
+    return text[:OUTPUT_TRUNCATE_LENGTH] + f"... [tool output truncated: omitted {omitted} chars]"
+
+
+def _tool_output_contains_finalize_signal(output: Any) -> bool:
+    """Detect explicit finalize markers emitted by guardrails in tool output."""
+    try:
+        text = json.dumps(output, ensure_ascii=False)
+    except Exception:
+        text = str(output)
+    return "FINALIZE_NOW" in text
 
 
 async def run_demo_loop(
@@ -28,8 +75,8 @@ async def run_demo_loop(
     """Run a simple REPL loop with the given agent.
 
     This utility allows quick manual testing and debugging of an agent from the
-    command line. Conversation state is preserved across turns. Enter ``exit``
-    or ``quit`` to stop the loop.
+    command line. Conversation state is preserved across turns. Enter ``/exit``
+    or ``/quit`` to stop the loop.
 
     Args:
         agent: The starting agent to run.
@@ -38,44 +85,104 @@ async def run_demo_loop(
         max_turns: Maximum number of turns to run in the REPL loop.
     """
 
+    _configure_readline()
+
     current_agent = agent
     input_items: list[TResponseInputItem] = []
     while True:
         try:
-            user_input = input(" > ")
+            user_input = _read_user_input(" > ")
         except (EOFError, KeyboardInterrupt):
             print()
             break
-        if user_input.strip().lower() in {"exit", "quit"}:
+        if user_input.strip().lower() in {"/exit", "/quit"}:
             break
         if not user_input:
             continue
 
         input_items.append({"role": "user", "content": user_input})
 
-        result: RunResultBase
-        if stream:
-            result = Runner.run_streamed(
-                current_agent, input=input_items, context=context, max_turns=max_turns
-            )
-            async for event in result.stream_events():
-                if isinstance(event, RawResponsesStreamEvent):
-                    if isinstance(event.data, ResponseTextDeltaEvent):
-                        print(event.data.delta, end="", flush=True)
-                elif isinstance(event, RunItemStreamEvent):
-                    if event.item.type == "tool_call_item":
-                        print("\n[tool called]", flush=True)
-                    elif event.item.type == "tool_call_output_item":
-                        print(f"\n[tool output: {event.item.output}]", flush=True)
-                elif isinstance(event, AgentUpdatedStreamEvent):
-                    print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
-            print()
-        else:
-            result = await Runner.run(
-                current_agent, input_items, context=context, max_turns=max_turns
-            )
-            if result.final_output is not None:
-                print(result.final_output)
+        result: RunResultBase | None = None
+        dead_air_retry_used = False
+        turn_aborted = False
+        while True:
+            try:
+                if stream:
+                    result = Runner.run_streamed(
+                        current_agent, input=input_items, context=context, max_turns=max_turns
+                    )
+                    saw_text = False
+                    saw_finalize_signal = False
+                    async for event in result.stream_events():
+                        if isinstance(event, RawResponsesStreamEvent):
+                            if isinstance(event.data, ResponseTextDeltaEvent):
+                                saw_text = True
+                                print(event.data.delta, end="", flush=True)
+                        elif isinstance(event, RunItemStreamEvent):
+                            if event.item.type == "tool_call_item":
+                                print("\n[tool called]", flush=True)
+                            elif event.item.type == "tool_call_output_item":
+                                if _tool_output_contains_finalize_signal(event.item.output):
+                                    saw_finalize_signal = True
+                                print(f"\n[tool output: {_format_tool_output(event.item.output)}]", flush=True)
+                        elif isinstance(event, AgentUpdatedStreamEvent):
+                            print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
+                    if saw_finalize_signal and not saw_text:
+                        # Force one deterministic final-summary turn when guardrails explicitly
+                        # signal completion but the model failed to emit assistant text.
+                        followup_input = result.to_input_list()
+                        followup_input.append(
+                            {
+                                "role": "user",
+                                "content": "FINALIZE_NOW received. Provide the final summary only; do not call tools.",
+                            }
+                        )
+                        forced = await Runner.run(
+                            result.last_agent, input=followup_input, context=context, max_turns=max_turns
+                        )
+                        if forced.final_output is not None:
+                            print(forced.final_output, flush=True)
+                        result = forced
+                        saw_text = True
+                    if not saw_text:
+                        if not dead_air_retry_used:
+                            print(
+                                "[recovery: no assistant text output; retrying once automatically.]",
+                                flush=True,
+                            )
+                            dead_air_retry_used = True
+                            input_items = result.to_input_list()
+                            input_items.append(
+                                {
+                                    "role": "user",
+                                    "content": DEAD_AIR_RETRY_PROMPT,
+                                }
+                            )
+                            current_agent = result.last_agent
+                            continue
+                        print(
+                            "[no assistant text output after retry; continuing to next prompt.]",
+                            flush=True,
+                        )
+                    print()
+                else:
+                    result = await Runner.run(
+                        current_agent, input_items, context=context, max_turns=max_turns
+                    )
+                    if result.final_output is not None:
+                        print(result.final_output)
+                break
+            except MaxTurnsExceeded:
+                # Keep the REPL alive and ask for a narrower follow-up.
+                input_items.pop()
+                print(
+                    f"[max turns exceeded: {max_turns}. Narrow the task or raise HEPAGENT_MAX_TURNS.]",
+                    flush=True,
+                )
+                turn_aborted = True
+                break
 
+        if turn_aborted or result is None:
+            continue
         current_agent = result.last_agent
         input_items = result.to_input_list()
