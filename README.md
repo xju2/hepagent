@@ -157,7 +157,7 @@ Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_ar
 ```text
 /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v5
 /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic
-- hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. And the runtime parameters are: - np = 256; - box_size = 80.0; - seed = 343240149; - z_in = 200.0;
+- hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. And the runtime parameters are: - np = 32; - box_size = 80.0; - seed = 343240149; - z_in = 200.0;
 
 \sigma_8 = 0.83
 ```
