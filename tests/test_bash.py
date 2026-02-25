@@ -78,7 +78,9 @@ def test_execution_journal_appends_and_snapshots():
 def test_yolo_execute_tool_records_result(monkeypatch):
     bash._reset_execution_journal_for_tests()
     monkeypatch.setenv("HEPAGENT_YOLO", "1")
-    monkeypatch.setattr(bash, "execute_bash_command", lambda cmd, cwd="": {"output": "ok", "returncode": 0})
+    monkeypatch.setattr(
+        bash, "execute_bash_command", lambda cmd, cwd="": {"output": "ok", "returncode": 0}
+    )
 
     result = _invoke_tool("echo hi", "run")
     assert result["returncode"] == 0

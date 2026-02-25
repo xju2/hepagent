@@ -1,6 +1,7 @@
 """Taken from OpenAI SDK agents/repl.py, but add max-turns limit."""
 
 from __future__ import annotations
+
 import json
 from typing import Any
 
@@ -124,7 +125,10 @@ async def run_demo_loop(
                             elif event.item.type == "tool_call_output_item":
                                 if _tool_output_contains_finalize_signal(event.item.output):
                                     saw_finalize_signal = True
-                                print(f"\n[tool output: {_format_tool_output(event.item.output)}]", flush=True)
+                                print(
+                                    f"\n[tool output: {_format_tool_output(event.item.output)}]",
+                                    flush=True,
+                                )
                         elif isinstance(event, AgentUpdatedStreamEvent):
                             print(f"\n[Agent updated: {event.new_agent.name}]", flush=True)
                     if saw_finalize_signal and not saw_text:
@@ -134,11 +138,15 @@ async def run_demo_loop(
                         followup_input.append(
                             {
                                 "role": "user",
-                                "content": "FINALIZE_NOW received. Provide the final summary only; do not call tools.",
+                                "content": "FINALIZE_NOW received."
+                                "Provide the final summary only; do not call tools.",
                             }
                         )
                         forced = await Runner.run(
-                            result.last_agent, input=followup_input, context=context, max_turns=max_turns
+                            result.last_agent,
+                            input=followup_input,
+                            context=context,
+                            max_turns=max_turns,
                         )
                         if forced.final_output is not None:
                             print(forced.final_output, flush=True)
@@ -147,7 +155,7 @@ async def run_demo_loop(
                     if not saw_text:
                         if not dead_air_retry_used:
                             print(
-                                "[recovery: no assistant text output; retrying once automatically.]",
+                                "[recovery: no assistant output; retrying once automatically.]",
                                 flush=True,
                             )
                             dead_air_retry_used = True
@@ -176,7 +184,7 @@ async def run_demo_loop(
                 # Keep the REPL alive and ask for a narrower follow-up.
                 input_items.pop()
                 print(
-                    f"[max turns exceeded: {max_turns}. Narrow the task or raise HEPAGENT_MAX_TURNS.]",
+                    f"[max turns: {max_turns}. Narrow the task or raise HEPAGENT_MAX_TURNS.]",
                     flush=True,
                 )
                 turn_aborted = True
