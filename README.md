@@ -155,11 +155,13 @@ Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_ar
 ```
 
 ```text
-/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v5
+/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v9
 /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic
 - hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. And the runtime parameters are: - np = 32; - box_size = 80.0; - seed = 343240149; - z_in = 200.0;
 
 \sigma_8 = 0.83
 
-Use this executable: /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/Nyx/Exec/LyA/Nyx3d.gnu.TPROF.MPI.CUDA.ex Run the simulation on 1 GPU node with 4 GPUs. Simulate the redshift to z=2.0. Let me know if you have further questions.
+Use this executable: /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/Nyx/Exec/LyA/Nyx3d.gnu.TPROF.MPI.CUDA.ex
+
+Run the simulation with only 1 GPU. Simulate the redshift to z=2.0. Let me know if you have further questions.
 ```
