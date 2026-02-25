@@ -7,7 +7,10 @@ Run the cosmicic code to generate initial conditions for Nyx cosmological simula
 1. If not already in your working directory, make a copy of the cosmicic code, and then compile it.
 2. If the compilation is successful, copy the executable `init` to your working directory.
 3. Create a parameter file named `input.par` based on the default parameters from `cosmicic/input.par`. Modify the cosmological parameters (e.g., Omega_m, Omega_b, h, sigma_8, n_s) and runtime parameters (e.g., box size, number of particles, output redshifts) as needed for your simulation.
-4. After that, write a bash script that users can run the `init` in SLURM.
+4. Use `PrintFormat=5` in the `input.par` file to generate binary particle files.
+4. After that, write a bash script that users can run the `init` in SLURM. Remember to put all output files into a subdirectory named `ic_output` to keep the working directory clean.
+
+```bash
 
 ## Additional notes
 * Note that if the platform is Perlmutter, you need to load these modules first:
