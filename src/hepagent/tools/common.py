@@ -140,26 +140,78 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
 
 
 @function_tool
-def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: str) -> str:
+def wait_for_slurm_job_completion(
+    ctx: RunContextWrapper[AgentContext],
+    job_id: str,
+    timeout_seconds: int = 3600,
+    poll_interval_seconds: int = 30,
+) -> str:
     """
     Use this tool to monitor the status of a SLURM job by its job ID.
     It will periodically check if the job is still in the queue and
-    return a message once it has completed or if there was an error checking the status.
+    return a message once it has completed, if it failed, or if a timeout
+    was reached while waiting.
 
     Args:
         job_id: The SLURM job ID to monitor.
+        timeout_seconds: Maximum time in seconds to wait for the job to leave
+            the queue or reach a terminal state. Defaults to 1 hour.
+        poll_interval_seconds: Interval in seconds between status checks.
+            Defaults to 30 seconds.
 
     Returns:
-        str: A message indicating the job has completed or if it failed.
+        str: A message indicating the job has completed, failed, or if a
+            timeout or error occurred while checking status.
     """
     import subprocess
     import time
 
+    start_time = time.time()
+    job_id_str = str(job_id)
+
+    # Terminal SLURM states that indicate failure or non-successful completion.
+    failure_states = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED"}
+
     while True:
+        # Check for timeout to avoid an infinite wait.
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            return (
+                f"Timed out after {int(elapsed)} seconds while waiting for "
+                f"SLURM job {job_id_str} to complete."
+            )
+
         try:
-            result = subprocess.run(["squeue", "-j", str(job_id)], capture_output=True, text=True)
-            if str(job_id) not in result.stdout:
-                return f"SLURM job {job_id} has completed."
+            # Query just the job state; -h suppresses header.
+            result = subprocess.run(
+                ["squeue", "-h", "-j", job_id_str, "-o", "%T"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            if result.returncode != 0:
+                return (
+                    f"Error checking SLURM job status for {job_id_str}: "
+                    f"{result.stderr.strip() or 'unknown error from squeue'}"
+                )
+
+            # If there is no output, the job is no longer in the queue.
+            output = result.stdout.strip()
+            if not output:
+                return f"SLURM job {job_id_str} is no longer in the queue and is assumed completed."
+
+            # Use the first line as the job state (SLURM states are uppercase).
+            state = output.splitlines()[0].strip().upper()
+
+            if state == "COMPLETED":
+                return f"SLURM job {job_id_str} has completed successfully."
+
+            if state in failure_states:
+                return f"SLURM job {job_id_str} finished with state: {state}."
+
+            # For non-terminal states (e.g., PENDING, RUNNING), continue waiting.
         except Exception as e:
-            return f"Error checking SLURM job status: {e}"
-        time.sleep(30)  # Check every 30 seconds
+            return f"Error checking SLURM job status for {job_id_str}: {e}"
+
+        time.sleep(poll_interval_seconds)
