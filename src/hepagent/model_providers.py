@@ -53,9 +53,6 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
     load_env()
-    base_url_env = cfg.get("base_url_env")
-    if base_url_env:
-        base_url = os.getenv(base_url_env) or base_url
     api_key = os.getenv(api_key_env)
     return ModelProviderSettings(
         base_url=base_url,
