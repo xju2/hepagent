@@ -142,7 +142,7 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
 
 
 @function_tool
-def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: str) -> str:
+def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: int) -> str:
     """
     Use this tool to monitor the status of a SLURM job by its job ID.
     It will periodically check if the job is still in the queue and

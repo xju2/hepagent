@@ -138,7 +138,7 @@ async def run_demo_loop(
                         followup_input.append(
                             {
                                 "role": "user",
-                                "content": "FINALIZE_NOW received."
+                                "content": "FINALIZE_NOW received. "
                                 "Provide the final summary only; do not call tools.",
                             }
                         )

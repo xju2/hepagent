@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 
-OUTPUT_TRUNCATE_LENGTH = 1000  # Max length of command output to display in the UI
+# Max length of bash command output in words,
+# can be overridden by HEPAGENT_OUTPUT_WORD_LIMIT env var
+# str.split() is used to count words.
+OUTPUT_TRUNCATE_LENGTH = 10_000
 
 
 @dataclass

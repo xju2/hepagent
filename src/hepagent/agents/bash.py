@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
+from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
 from hepagent.model_providers import get_model_provider
 
 
@@ -19,6 +20,26 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int | None = None
+
+
+def _get_output_limit() -> int:
+    raw = os.getenv("HEPAGENT_OUTPUT_WORD_LIMIT", "").strip()
+    if raw:
+        try:
+            parsed = int(raw)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    return OUTPUT_TRUNCATE_LENGTH
+
+
+def _truncate_output(output: str, limit: int) -> str:
+    words = output.split()
+    if len(words) <= limit:
+        return output
+    omitted = len(words) - limit
+    return " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
 
 
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
@@ -38,7 +59,10 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    return {"output": result.stdout, "returncode": result.returncode}
+    return {
+        "output": _truncate_output(result.stdout, _get_output_limit()),
+        "returncode": result.returncode,
+    }
 
 
 TOOL_CANCEL_MESSAGE = """Tool calling is cancelled by user.
