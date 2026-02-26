@@ -1,5 +1,7 @@
 import re
+import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
@@ -126,7 +128,7 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
     """
     try:
         if thought:
-            print(f"THOUGHT for user input: {thought}")
+            print(f"THOUGHT: {thought}")
         user_input = input(f"{prompt}: ")
     except EOFError:
         try:
@@ -152,8 +154,6 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
     Returns:
         str: A message indicating the job has completed or if it failed.
     """
-    import subprocess
-    import time
 
     while True:
         try:
