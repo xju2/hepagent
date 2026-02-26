@@ -1,14 +1,11 @@
 import os
-import tomllib
 from dataclasses import dataclass
-from functools import lru_cache
-from importlib import resources
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
-from hepagent.helpers import load_env
+from hepagent.helpers import load_env, load_providers_config
 
 
 @dataclass(frozen=True)
@@ -19,18 +16,8 @@ class ModelProviderSettings:
     default_model: str
 
 
-@lru_cache
-def _load_providers_config() -> dict[str, dict[str, Any]]:
-    path = resources.files("hepagent.config").joinpath("providers.toml")
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    providers = data.get("providers")
-    if not isinstance(providers, dict) or not providers:
-        raise ValueError("No providers configured in providers.toml")
-    return providers
-
-
 def get_supported_model_providers() -> tuple[str, ...]:
-    return tuple(_load_providers_config().keys())
+    return tuple(load_providers_config().keys())
 
 
 SUPPORTED_MODEL_PROVIDERS: tuple[str, ...] = get_supported_model_providers()
@@ -38,7 +25,7 @@ SUPPORTED_MODEL_PROVIDERS: tuple[str, ...] = get_supported_model_providers()
 
 def _get_provider_config(model_provider: str) -> dict[str, Any]:
     provider = model_provider.strip().lower()
-    providers = _load_providers_config()
+    providers = load_providers_config()
     if provider not in providers:
         raise ValueError(f"Unsupported model provider: {model_provider}")
     return providers[provider]
