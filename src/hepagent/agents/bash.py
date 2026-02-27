@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
-from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
+from hepagent.helpers import get_env_var
 from hepagent.model_providers import get_model_provider
 
 
@@ -20,18 +20,6 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int | None = None
-
-
-def _get_output_limit() -> int:
-    raw = os.getenv("HEPAGENT_OUTPUT_WORD_LIMIT", "").strip()
-    if raw:
-        try:
-            parsed = int(raw)
-            if parsed > 0:
-                return parsed
-        except ValueError:
-            pass
-    return OUTPUT_TRUNCATE_LENGTH
 
 
 def _truncate_output(output: str, limit: int) -> str:
@@ -60,7 +48,7 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
         stderr=subprocess.STDOUT,
     )
     return {
-        "output": _truncate_output(result.stdout, _get_output_limit()),
+        "output": _truncate_output(result.stdout, get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", int)),
         "returncode": result.returncode,
     }
 
@@ -79,7 +67,7 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     print(f"THOUGHT:{thought}", flush=True)
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
-    if os.getenv("HEPAGENT_YOLO") == "1":
+    if get_env_var("HEPAGENT_YOLO", bool):
         return execute_bash_command(cmd, cwd=cwd)
 
     prompt = (
