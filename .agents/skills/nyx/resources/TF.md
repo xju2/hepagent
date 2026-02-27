@@ -1,6 +1,6 @@
 # Transfer function for Nyx simulation
 
-Use the user provided tool if possible; otherwise, follow these instructions.
+Use provided tools if possible; otherwise, follow these instructions.
 
 ## Instructions
 
