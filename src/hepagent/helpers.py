@@ -89,7 +89,7 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
                 f"Invalid value for env var {key}={raw_env!r}; cannot convert to {dtype.__name__}"
             ) from e
 
-    # 2) TOML fallback (may already be typed)
+    # 2) TOML fallback
     config = load_env_config()
     if key not in config:
         raise KeyError(f"Configuration key {key!r} not found in Environment or TOML.")

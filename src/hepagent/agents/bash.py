@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
-from hepagent.helpers import get_env_var
+from hepagent.config.env import env_config
 from hepagent.model_providers import get_model_provider
 
 
@@ -48,7 +48,7 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
         stderr=subprocess.STDOUT,
     )
     return {
-        "output": _truncate_output(result.stdout, get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", int)),
+        "output": _truncate_output(result.stdout, env_config.output_word_limit),
         "returncode": result.returncode,
     }
 
@@ -67,7 +67,7 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     print(f"THOUGHT:{thought}", flush=True)
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
-    if get_env_var("HEPAGENT_YOLO", bool):
+    if env_config.yolo_mode:
         return execute_bash_command(cmd, cwd=cwd)
 
     prompt = (
