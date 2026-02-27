@@ -78,14 +78,15 @@ class AddLogEmitCallback(logging.Handler):
 class ToolWrapper(Protocol):
     """Protocol for wrapping agent tools for UI behavior."""
 
-    def wrap_tools(self, tools: list, adapter: "AgentAdapter") -> list:
+    def wrap_tools(self, tools: list[Any], adapter: AgentAdapter) -> list[Any]:
         """Return a list of tools to attach to the wrapped agent."""
+        ...
 
 
 class NoopToolWrapper:
     """Default wrapper that leaves tools unchanged."""
 
-    def wrap_tools(self, tools: list, adapter: "AgentAdapter") -> list:
+    def wrap_tools(self, tools: list[Any], adapter: AgentAdapter) -> list[Any]:
         return list(tools)
 
 

@@ -1,5 +1,7 @@
 import re
+import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
@@ -137,3 +139,27 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
             user_input = ""
 
     return user_input.strip()
+
+
+@function_tool
+def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: int) -> str:
+    """
+    Use this tool to monitor the status of a SLURM job by its job ID.
+    It will periodically check if the job is still in the queue and
+    return a message once it has completed or if there was an error checking the status.
+
+    Args:
+        job_id: The SLURM job ID to monitor.
+
+    Returns:
+        str: A message indicating the job has completed or if it failed.
+    """
+
+    while True:
+        try:
+            result = subprocess.run(["squeue", "-j", str(job_id)], capture_output=True, text=True)
+            if str(job_id) not in result.stdout:
+                return f"SLURM job {job_id} has completed."
+        except Exception as e:
+            return f"Error checking SLURM job status: {e}"
+        time.sleep(30)  # Check every 30 seconds

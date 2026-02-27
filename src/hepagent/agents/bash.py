@@ -1,82 +1,33 @@
-"""Bash agent that solves problems by running shell commands."""
+"""Bash agent that solves problems by running shell commands.
+Adapted from min-swe-agent:
+https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/default.py
+"""
 
 from __future__ import annotations
 
 import os
 import subprocess
-import threading
-import time
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
-from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
+from hepagent.config.env import env_config
 from hepagent.model_providers import get_model_provider
 
 
 class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
-    timeout: int = 30
-
-
-_EXECUTION_JOURNAL: list[dict[str, object]] = []
-_EXECUTION_JOURNAL_LOCK = threading.Lock()
-
-
-def _append_execution_journal(cmd: str, cwd: str, returncode: int, status: str) -> None:
-    with _EXECUTION_JOURNAL_LOCK:
-        _EXECUTION_JOURNAL.append(
-            {
-                "timestamp": time.time(),
-                "cmd": cmd,
-                "cwd": cwd,
-                "returncode": int(returncode),
-                "status": status,
-            }
-        )
-
-
-def _snapshot_execution_journal(limit: int = 50) -> list[dict[str, object]]:
-    with _EXECUTION_JOURNAL_LOCK:
-        if limit <= 0:
-            return []
-        return list(_EXECUTION_JOURNAL[-limit:])
-
-
-def _reset_execution_journal_for_tests() -> None:
-    with _EXECUTION_JOURNAL_LOCK:
-        _EXECUTION_JOURNAL.clear()
-
-
-def _get_output_limit() -> int:
-    raw = os.getenv("HEPAGENT_OUTPUT_CHAR_LIMIT", "").strip()
-    if raw:
-        try:
-            parsed = int(raw)
-            if parsed > 0:
-                return parsed
-        except ValueError:
-            pass
-    return max(OUTPUT_TRUNCATE_LENGTH, 8000)
+    timeout: int | None = None
 
 
 def _truncate_output(output: str, limit: int) -> str:
-    if len(output) <= limit:
+    words = output.split()
+    if len(words) <= limit:
         return output
-    omitted = len(output) - limit
-    return output[:limit] + f"\n\n[output truncated: omitted {omitted} chars]"
-
-
-def _classify_tool_result(result: dict) -> str:
-    code = int(result.get("returncode", 1))
-    out = str(result.get("output", ""))
-    if code == 0:
-        return "executed"
-    if "Tool calling is cancelled by user." in out:
-        return "rejected_by_user"
-    return "failed"
+    omitted = len(words) - limit
+    return " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
 
 
 def execute_bash_command(cmd: str, cwd: str = "") -> dict:
@@ -97,7 +48,7 @@ def execute_bash_command(cmd: str, cwd: str = "") -> dict:
         stderr=subprocess.STDOUT,
     )
     return {
-        "output": _truncate_output(result.stdout, _get_output_limit()),
+        "output": _truncate_output(result.stdout, env_config.output_word_limit),
         "returncode": result.returncode,
     }
 
@@ -109,42 +60,19 @@ Tell users what was your plan to justify the tool calling
 and suggest user running the request again if needed."""
 
 
-def _normalize_escaped_heredoc_newlines(cmd: str) -> str:
-    """Convert literal '\\n' sequences to real newlines for heredoc-shaped commands."""
-    if "\\n" not in cmd or "\n" in cmd:
-        return cmd
-    if "<<" not in cmd:
-        return cmd
-    return cmd.replace("\\n", "\n")
-
-
-@function_tool
-def get_execution_journal(limit: int = 50) -> dict:
-    """Return recent command execution journal entries for grounded reporting."""
-    safe_limit = max(1, min(int(limit), 200))
-    entries = _snapshot_execution_journal(safe_limit)
-    return {"count": len(entries), "entries": entries}
-
-
 @function_tool
 def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str = "") -> dict:
     """Execute a bash command with optional confirmation and return output."""
-    cmd = _normalize_escaped_heredoc_newlines(cmd)
 
     print(f"THOUGHT:{thought}", flush=True)
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
-    if os.getenv("HEPAGENT_YOLO") == "1":
-        results = execute_bash_command(cmd, cwd=cwd)
-        _append_execution_journal(
-            cmd=cmd,
-            cwd=cwd or "",
-            returncode=int(results.get("returncode", 1)),
-            status=_classify_tool_result(results),
-        )
-        return results
+    if env_config.yolo_mode:
+        return execute_bash_command(cmd, cwd=cwd)
 
-    prompt = "⚠️ Agent called tool in HUMAN mode. Allow?\n(Enter 'y' to allow, type reason to reject): "
+    prompt = (
+        "⚠️ Agent called tool in HUMAN mode. Allow?\n(Enter 'y' to allow, type reason to reject): "
+    )
     try:
         confirmation = input(prompt)
     except EOFError:
@@ -156,17 +84,9 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
             confirmation = ""
 
     if confirmation.lower() != "y":
-        cancelled = {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
-        _append_execution_journal(cmd=cmd, cwd=cwd or "", returncode=1, status="rejected_by_user")
-        return cancelled
+        return {"output": TOOL_CANCEL_MESSAGE.format(reason=confirmation), "returncode": 1}
 
     results = execute_bash_command(cmd, cwd=cwd)
-    _append_execution_journal(
-        cmd=cmd,
-        cwd=cwd or "",
-        returncode=int(results.get("returncode", 1)),
-        status=_classify_tool_result(results),
-    )
     print(f"Command return code:\t{results['returncode']}")
     return results
 
@@ -180,11 +100,12 @@ def create(
         instructions=(
             "You are a helpful assistant that can interact multiple times with a computer shell "
             "to solve programming tasks."
-            "When you need to execute a tool call, your response must contain exactly ONE bash code block "
+            "When you need to execute a tool call, "
+            "your response must contain exactly ONE bash code block "
             "with ONE command (or commands connected with && or ||)."
             "When the task is complete, provide a concise final summary in plain text."
             "Read AGENTS.md early when present in the working tree or parents."
-            "Include a THOUGHT section before your command where you explain your reasoning process."
+            "Include a THOUGHT section before your command to explain your reasoning process."
             "Format your response as shown in <format_example>."
             "<format_example>"
             "THOUGHT: Your reasoning and analysis here"
@@ -197,7 +118,7 @@ def create(
             "Failure to follow these rules will cause your response to be rejected."
         ),
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[execute_bash_command_with_confirmation, get_execution_journal],
+        tools=[execute_bash_command_with_confirmation],
     )
     return agent
 

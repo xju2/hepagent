@@ -25,6 +25,7 @@ Write down unexpected errors and critical decisions to the `MEMORY.md` file in t
 
 1. Create the transfer function, see `resources/TF.md`.
 2. Generate initial conditions, see `resources/IC.md`.
+3. Set up and run the Nyx simulation, see `resources/NYX.md`.
 
 
 ## Additional notes

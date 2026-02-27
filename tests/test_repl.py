@@ -1,5 +1,6 @@
-from hepagent.agents import repl
 import asyncio
+
+from hepagent.agents import repl
 
 
 def test_tool_output_contains_finalize_signal_in_string():
@@ -49,4 +50,8 @@ def test_run_demo_loop_retries_once_on_dead_air(monkeypatch):
     # First streamed call is the original task, second is one dead-air retry.
     assert len(calls) >= 2
     assert any(item.get("content") == "task" for item in calls[0] if isinstance(item, dict))
-    assert any(item.get("content") == repl.DEAD_AIR_RETRY_PROMPT for item in calls[1] if isinstance(item, dict))
+    assert any(
+        item.get("content") == repl.DEAD_AIR_RETRY_PROMPT
+        for item in calls[1]
+        if isinstance(item, dict)
+    )
