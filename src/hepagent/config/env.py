@@ -4,7 +4,7 @@ from functools import cached_property
 from hepagent.helpers import get_env_var
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class HepAgentEnvConfig:
     """Configuration for HepAgent environment variables."""
 

@@ -18,7 +18,8 @@ from agents.stream_events import (
     RawResponsesStreamEvent,
     RunItemStreamEvent,
 )
-from hepagent.agents.common import OUTPUT_TRUNCATE_LENGTH
+
+OUTPUT_TRUNCATE_LENGTH = 5000
 
 DEAD_AIR_RETRY_PROMPT = (
     "You produced no assistant text in the previous turn. "
