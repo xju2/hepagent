@@ -3,7 +3,13 @@ from hepagent.agent_helpers import AgentManifestLoader, update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import ask_user_for_info, load_skill_details, read_resource
+from hepagent.tools.common import (
+    ask_user_for_info,
+    load_skill_details,
+    read_resource,
+    wait_for_slurm_job_completion,
+)
+from hepagent.tools.nyx.transfer_function import create_transfer_function
 
 
 def create(
@@ -24,6 +30,8 @@ def create(
             load_skill_details,  # The "Skill Discovery" tool
             read_resource,  # The "Knowledge Retrieval" tool
             ask_user_for_info,  # The "User Interaction" tool
+            create_transfer_function,
+            wait_for_slurm_job_completion,
         ],
     )
     return agent

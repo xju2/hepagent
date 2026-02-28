@@ -42,59 +42,10 @@ The bash agent supports these environment variables:
   - Maximum turns per user request in the non-Textual REPL.
   - If exceeded, the REPL now stays alive and prints a concise message instead of crashing.
 
-- `HEPAGENT_ALLOW_BROAD_SCAN`
-  - Default: unset (`0` behavior)
-  - If set to `1`, disables broad-scan guardrails in bash execution.
-  - By default, potentially unbounded filesystem discovery commands are blocked (for example:
-    `ls -R`, `find .` without `-maxdepth`, `rg --files` at repo root, `tree` without depth limit).
-
 - `HEPAGENT_OUTPUT_CHAR_LIMIT`
   - Default: `8000` (minimum effective limit is aligned with internal truncation safeguards)
   - Caps characters returned from each bash command to keep context bounded.
   - When truncated, output includes a marker showing omitted character count.
-
-- `HEPAGENT_DISABLE_PROGRESS_GUARD`
-  - Default: unset (`0` behavior)
-  - If set to `1`, disables anti-overthinking progress guardrails.
-
-- `HEPAGENT_POLICY_MODE`
-  - Default: `balanced`
-  - One of: `conservative`, `balanced`, `exploratory`.
-  - Sets default guard thresholds; explicit `HEPAGENT_MAX_*` vars override these defaults.
-  - `conservative`: tighter limits for production-like workflows.
-  - `exploratory`: looser limits for open investigation.
-
-- `HEPAGENT_MAX_NO_PROGRESS_STEPS`
-  - Default: derived from `HEPAGENT_POLICY_MODE` (`10` in `balanced` mode).
-  - Maximum tolerated low-progress loop streak before blocking another read-only probe.
-  - Low-progress loop means repeated failed commands or repeated successful reads of the same target without advancing.
-
-- `HEPAGENT_MAX_SAME_COMMAND_STREAK`
-  - Default: `2`
-  - Maximum repeated proposals of the same normalized command before blocking.
-
-- `HEPAGENT_MAX_SAME_THOUGHT_STREAK`
-  - Default: `2`
-  - Maximum repeated normalized reasoning strings before blocking.
-
-- `HEPAGENT_MAX_THOUGHT_CHARS`
-  - Default: `1200`
-  - Maximum thought length accepted before requiring a shorter, action-oriented thought.
-
-- `HEPAGENT_ALLOW_FRAGILE_EDIT`
-  - Default: unset (`0` behavior)
-  - If set to `1`, allows platform-fragile edit commands (for example `sed -i`).
-  - By default, these are blocked to avoid GNU/BSD portability pitfalls during autonomous runs.
-
-- `HEPAGENT_WORKFLOW_POLICY`
-  - Default: `auto`
-  - Controls optional workflow-specific progression policy while keeping core bash guardrails generic.
-  - Policies enforce high-level liveness (for example "read produced report before further probing"),
-    not rigid command-by-command traces.
-  - Values:
-    - `auto`: enable policies that self-activate from task text (default).
-    - `preflight_chain`: force preflight-chain workflow policy.
-    - `off` / `none` / `disabled`: disable workflow policies (generic guardrails only).
 
 List available models for a platform:
 ```bash
@@ -223,4 +174,16 @@ and run `./init input.par cmb.tf output/ics_80mpc_1024`.
 
 ```text
 Your working directory is /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v0. The original cosmicic code is located at /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic. 1. Make a copy of cosmicic code to your working directory, compile it. If the compilation is successful, copy the executable `init` to your working directory. Note that if the platform is Perlmuttter, you need to load these module first: - cray-fftw - cray-hdf5-parallel. 2. Create a parameter file named `input.par` for a cosmological simulation with Nyx. The cosmological parameters are: - hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. And the runtime parameters are: - np = 256; - box_size = 80.0; - seed = 343240149; - z_in = 200.0; - output_file = output/ics_80mpc_256. And the transfer_function is located at `cmb.tf`. 3. Create the cosmic initial conditions for Nyx simulation. You may have to read the `cosmicic/README` file located at your working directory for more details.
+```
+
+```text
+/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/agent_area/v9
+/pscratch/sd/x/xju/FoundationUniverse/nyx_sim/cosmicic
+- hubble = 0.675; - Omega_m = 0.31; - Omega_bar = 0.0487; - n_s = 0.96. And the runtime parameters are: - np = 32; - box_size = 80.0; - seed = 343240149; - z_in = 200.0;
+
+\sigma_8 = 0.83
+
+Use this executable: /pscratch/sd/x/xju/FoundationUniverse/nyx_sim/Nyx/Exec/LyA/Nyx3d.gnu.TPROF.MPI.CUDA.ex
+
+Run the simulation with only 1 GPU. Simulate the redshift to z=2.0. Let me know if you have further questions.
 ```
