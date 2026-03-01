@@ -10,6 +10,7 @@ from hepagent.tools.common import (
     wait_for_slurm_job_completion,
 )
 from hepagent.tools.nyx.transfer_function import create_transfer_function
+from hepagent.tools.user_tools import load_user_function_tools
 
 
 def create(
@@ -20,19 +21,21 @@ def create(
     # It will look in .agents/skills/"agent_name"/ for SOUL.md and WORLD.md
     loader = AgentManifestLoader()
 
+    builtin_tools = [
+        execute_bash_command_with_confirmation,  # The "Bash Command Execution" tool
+        update_logbook,  # The "Learned Lessons Logging" tool
+        load_skill_details,  # The "Skill Discovery" tool
+        read_resource,  # The "Knowledge Retrieval" tool
+        ask_user_for_info,  # The "User Interaction" tool
+        create_transfer_function,
+        wait_for_slurm_job_completion,
+    ]
+
     agent = Agent[AgentContext](
         name="Skilled Agent",
         instructions=loader.get_instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[
-            execute_bash_command_with_confirmation,  # The "Bash Command Execution" tool
-            update_logbook,  # The "Learned Lessons Logging" tool
-            load_skill_details,  # The "Skill Discovery" tool
-            read_resource,  # The "Knowledge Retrieval" tool
-            ask_user_for_info,  # The "User Interaction" tool
-            create_transfer_function,
-            wait_for_slurm_job_completion,
-        ],
+        tools=builtin_tools + load_user_function_tools(),
     )
     return agent
 
