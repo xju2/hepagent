@@ -13,7 +13,6 @@ dependencies = [
     "camb>=1.6.5",
     "click>=8.3.1",
     "matplotlib>=3.10.8",
-    "mlflow>=3.10.0",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",
     "pyyaml>=6.0.3",
@@ -26,6 +25,11 @@ Homepage = "https://github.com/xju2/hepagent"
 
 [project.scripts]
 hepagent = "hepagent.cli.main:main"
+
+[project.optional-dependencies]
+tracing = [
+    "mlflow>=3.10.0",
+]
 
 [tool.uv.workspace]
 members = ["hepagent"]

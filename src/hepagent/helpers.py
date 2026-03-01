@@ -6,7 +6,6 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-import urllib3
 from dotenv import find_dotenv, load_dotenv
 
 
@@ -125,7 +124,7 @@ def _enable_amsc_x_api_key():
     rest_utils.http_request = patched
 
 
-def load_mlflow_for_tracing() -> bool:
+def enable_mlflow_for_tracing() -> bool:
     """Enable and configure MLflow-based tracing if MLflow is available.
 
     This function:
@@ -141,15 +140,25 @@ def load_mlflow_for_tracing() -> bool:
     """
     try:
         import mlflow
+        import urllib3
         from urllib3.exceptions import InsecureRequestWarning
 
-        _enable_amsc_x_api_key()
-        os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
-        urllib3.disable_warnings(InsecureRequestWarning)
+        load_env()
+
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
+        if not tracking_uri:
+            print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
+            return False
+
+        if "american-science-cloud.org" in tracking_uri:
+            _enable_amsc_x_api_key()
+            os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
+            urllib3.disable_warnings(InsecureRequestWarning)
 
         # Optional: Set a tracking URI and an experiment
-        mlflow.set_tracking_uri("https://mlflow.american-science-cloud.org")
-        mlflow.set_experiment("lbnl-hepagent-log-tracing")
+        exp_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "hepagent-log-tracing")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(exp_name)
         return True
     except ImportError:
         return False
