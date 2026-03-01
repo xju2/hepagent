@@ -126,7 +126,19 @@ def _enable_amsc_x_api_key():
 
 
 def load_mlflow_for_tracing() -> bool:
-    """Checks if MLflow is available for tracing."""
+    """Enable and configure MLflow-based tracing if MLflow is available.
+
+    This function:
+    - Imports MLflow and required urllib3 warning classes.
+    - Monkey-patches MLflow's HTTP client to inject the AMSC API key.
+    - Sets environment variables needed for insecure TLS connections.
+    - Disables insecure TLS warnings from urllib3.
+    - Configures the MLflow tracking URI and experiment for log tracing.
+
+    Returns:
+        True if MLflow is successfully imported and tracing is configured;
+        False if MLflow is not installed (ImportError).
+    """
     try:
         import mlflow
         from urllib3.exceptions import InsecureRequestWarning
