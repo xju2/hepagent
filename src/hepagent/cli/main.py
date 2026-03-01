@@ -11,6 +11,7 @@ from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
+from hepagent.config.first_run import maybe_run_setup_wizard
 from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
 
@@ -44,6 +45,8 @@ def main(
     """HepAgent: A framework for building and deploying AI agents in HEP."""
     if ctx.invoked_subcommand is not None:
         return
+
+    maybe_run_setup_wizard()
 
     if not task_prompt:
         raise click.UsageError("Missing required option '--task'.")
