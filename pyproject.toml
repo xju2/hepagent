@@ -13,6 +13,7 @@ dependencies = [
     "camb>=1.6.5",
     "click>=8.3.1",
     "matplotlib>=3.10.8",
+    "mlflow>=3.10.0",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",
     "pyyaml>=6.0.3",

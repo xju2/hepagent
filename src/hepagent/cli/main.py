@@ -11,6 +11,7 @@ from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
+from hepagent.helpers import load_mlflow_for_tracing
 from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
 
@@ -47,6 +48,14 @@ def main(
 
     if not task_prompt:
         raise click.UsageError("Missing required option '--task'.")
+
+    # check if ML flow is available.
+    # If so, use it for log traces.
+    if load_mlflow_for_tracing():
+        click.echo("MLflow found. Using MLflow for tracing.")
+        import mlflow
+
+        mlflow.openai.autolog()
 
     model_provider, model_name = parse_model_spec(model)
     agent = create_skilled_agent(model_provider=model_provider, model_name=model_name)

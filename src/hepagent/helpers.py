@@ -6,6 +6,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+import urllib3
 from dotenv import find_dotenv, load_dotenv
 
 
@@ -102,3 +103,41 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
             f"Invalid TOML value for {key}={raw_toml!r} (type {type(raw_toml).__name__}); "
             f"cannot convert to {dtype.__name__}"
         ) from e
+
+
+def _enable_amsc_x_api_key():
+    load_env()
+
+    import mlflow.utils.rest_utils as rest_utils
+
+    api_key = os.environ["AMSC_MLFLOW_API_KEY"]
+    original_http_request = rest_utils.http_request
+
+    def patched(host_creds, endpoint, method, *args, **kwargs):
+        headers = dict(kwargs.get("extra_headers") or {})
+        if kwargs.get("headers") is not None:
+            headers.update(dict(kwargs["headers"]))
+        headers["X-Api-Key"] = api_key
+        kwargs["extra_headers"] = headers
+        kwargs.pop("headers", None)
+        return original_http_request(host_creds, endpoint, method, *args, **kwargs)
+
+    rest_utils.http_request = patched
+
+
+def load_mlflow_for_tracing() -> bool:
+    """Checks if MLflow is available for tracing."""
+    try:
+        import mlflow
+        from urllib3.exceptions import InsecureRequestWarning
+
+        _enable_amsc_x_api_key()
+        os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
+        urllib3.disable_warnings(InsecureRequestWarning)
+
+        # Optional: Set a tracking URI and an experiment
+        mlflow.set_tracking_uri("https://mlflow.american-science-cloud.org")
+        mlflow.set_experiment("lbnl-hepagent-log-tracing")
+        return True
+    except ImportError:
+        return False
