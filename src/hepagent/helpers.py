@@ -104,12 +104,15 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
         ) from e
 
 
-def _enable_amsc_x_api_key():
+def _enable_amsc_x_api_key() -> bool:
     load_env()
 
     import mlflow.utils.rest_utils as rest_utils
 
-    api_key = os.environ["AMSC_MLFLOW_API_KEY"]
+    api_key = os.getenv("AMSC_MLFLOW_API_KEY", "")
+    if not api_key:
+        return False
+
     original_http_request = rest_utils.http_request
 
     def patched(host_creds, endpoint, method, *args, **kwargs):
@@ -122,6 +125,7 @@ def _enable_amsc_x_api_key():
         return original_http_request(host_creds, endpoint, method, *args, **kwargs)
 
     rest_utils.http_request = patched
+    return True
 
 
 def enable_mlflow_for_tracing() -> bool:
@@ -151,7 +155,12 @@ def enable_mlflow_for_tracing() -> bool:
             return False
 
         if "american-science-cloud.org" in tracking_uri:
-            _enable_amsc_x_api_key()
+            if not _enable_amsc_x_api_key():
+                print(
+                    "AMSC_MLFLOW_API_KEY not set; "
+                    "MLflow tracing to AMSC will fail due to authentication issues."
+                )
+                return False
             os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
             urllib3.disable_warnings(InsecureRequestWarning)
 
