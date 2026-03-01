@@ -4,6 +4,7 @@ import tomllib
 from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
+from importlib.resources.abc import Traversable
 from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
@@ -23,8 +24,35 @@ def get_repo_root() -> pathlib.Path:
     return current.parent  # Fallback
 
 
+def get_config_dir() -> pathlib.Path:
+    """Returns the user-level hepagent config directory (~/.config/hepagent)."""
+    return pathlib.Path.home() / ".config" / "hepagent"
+
+
+def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
+    """Recursively copy a Traversable resource tree to a filesystem path."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        dest_path = dst / item.name
+        if item.is_dir():
+            _copy_traversable(item, dest_path)
+        else:
+            dest_path.write_bytes(item.read_bytes())
+
+
+def ensure_config_initialized() -> None:
+    """Copy bundled agent data to ~/.config/hepagent/.agents if not already present."""
+    agents_dir = get_config_dir() / ".agents"
+    if agents_dir.exists():
+        return
+    pkg_agents: Traversable = resources.files("hepagent").joinpath("data/agents")
+    _copy_traversable(pkg_agents, agents_dir)
+
+
 def get_agent_dir() -> pathlib.Path:
-    return get_repo_root() / ".agents"
+    """Returns the path to the agent registry directory, initializing it if needed."""
+    ensure_config_initialized()
+    return get_config_dir() / ".agents"
 
 
 def read_md(path: pathlib.Path) -> str:
