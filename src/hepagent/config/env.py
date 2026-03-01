@@ -18,5 +18,10 @@ class HepAgentEnvConfig:
         """Check if YOLO mode is enabled via environment variable or env_vars.toml."""
         return get_env_var("HEPAGENT_YOLO", bool)
 
+    @cached_property
+    def use_mlflow_tracing(self) -> bool:
+        """Check if MLflow tracing is enabled via environment variable or env_vars.toml."""
+        return get_env_var("HEPAGENT_USE_MLFLOW_Tracing", bool)
+
 
 env_config = HepAgentEnvConfig()

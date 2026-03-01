@@ -2,6 +2,10 @@
 sync:
 	uv sync --all-extras --all-packages --group dev
 
+.PHONY: install
+install:
+	uv install
+
 .PHONY: format
 format:
 	uv run ruff format

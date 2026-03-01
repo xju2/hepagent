@@ -102,3 +102,72 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
             f"Invalid TOML value for {key}={raw_toml!r} (type {type(raw_toml).__name__}); "
             f"cannot convert to {dtype.__name__}"
         ) from e
+
+
+def _enable_amsc_x_api_key() -> bool:
+    load_env()
+
+    import mlflow.utils.rest_utils as rest_utils
+
+    api_key = os.getenv("AMSC_MLFLOW_API_KEY", "")
+    if not api_key:
+        return False
+
+    original_http_request = rest_utils.http_request
+
+    def patched(host_creds, endpoint, method, *args, **kwargs):
+        headers = dict(kwargs.get("extra_headers") or {})
+        if kwargs.get("headers") is not None:
+            headers.update(dict(kwargs["headers"]))
+        headers["X-Api-Key"] = api_key
+        kwargs["extra_headers"] = headers
+        kwargs.pop("headers", None)
+        return original_http_request(host_creds, endpoint, method, *args, **kwargs)
+
+    rest_utils.http_request = patched
+    return True
+
+
+def enable_mlflow_for_tracing() -> bool:
+    """Enable and configure MLflow-based tracing if MLflow is available.
+
+    This function:
+    - Imports MLflow and required urllib3 warning classes.
+    - Monkey-patches MLflow's HTTP client to inject the AMSC API key.
+    - Sets environment variables needed for insecure TLS connections.
+    - Disables insecure TLS warnings from urllib3.
+    - Configures the MLflow tracking URI and experiment for log tracing.
+
+    Returns:
+        True if MLflow is successfully imported and tracing is configured;
+        False if MLflow is not installed (ImportError).
+    """
+    try:
+        import mlflow
+        import urllib3
+        from urllib3.exceptions import InsecureRequestWarning
+
+        load_env()
+
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
+        if not tracking_uri:
+            print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
+            return False
+
+        if "american-science-cloud.org" in tracking_uri:
+            if not _enable_amsc_x_api_key():
+                print(
+                    "AMSC_MLFLOW_API_KEY not set; "
+                    "MLflow tracing to AMSC will fail due to authentication issues."
+                )
+                return False
+            os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
+            urllib3.disable_warnings(InsecureRequestWarning)
+
+        # Optional: Set a tracking URI and an experiment
+        exp_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "hepagent-log-tracing")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(exp_name)
+        return True
+    except ImportError:
+        return False
