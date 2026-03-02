@@ -27,9 +27,12 @@ Homepage = "https://github.com/xju2/hepagent"
 hepagent = "hepagent.cli.main:main"
 
 [project.optional-dependencies]
-amsc = [
+tracing =[
     "mlflow>=3.10.0",
+]
+amsc = [
     "globus-sdk>=4.4.1",
+    "iri-client>=0.1.4",
 ]
 
 [tool.uv.workspace]
