@@ -1,8 +1,7 @@
 from agents import Agent
-from hepagent.agent_helpers import AgentManifestLoader, update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
-from hepagent.model_providers import get_model_provider
+from hepagent.agents.skilled_manifest_loader import AgentManifestLoader, update_logbook
 from hepagent.tools.common import (
     ask_user_for_info,
     load_skill_details,
@@ -10,6 +9,7 @@ from hepagent.tools.common import (
     wait_for_slurm_job_completion,
 )
 from hepagent.tools.nyx.transfer_function import create_transfer_function
+from hepagent.utils.model_providers import get_model_provider
 
 
 def create(

@@ -954,6 +954,20 @@ wheels = [
 ]
 
 [[package]]
+name = "globus-sdk"
+version = "4.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/26/a1/bc5d03d673ab22bb8d1ca1437b341e0d305d573343ddd6f62b9b531aec55/globus_sdk-4.4.1.tar.gz", hash = "sha256:587bcc941d4f97ca28ea5317713a0987b709fc394ca0229cd158b9d8fdae7bbb", size = 269291, upload-time = "2026-02-27T17:08:33.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/d4/363505476f61f3da72ca09637ff93ba622f2b06b7e80a65a61af6c6f687a/globus_sdk-4.4.1-py3-none-any.whl", hash = "sha256:4a4b782f347f344624bf04b63095d411b75236ece4492802564dbc9fc2046b85", size = 414609, upload-time = "2026-02-27T17:08:30.419Z" },
+]
+
+[[package]]
 name = "google-auth"
 version = "2.48.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1167,6 +1181,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+amsc = [
+    { name = "globus-sdk" },
+]
 tracing = [
     { name = "mlflow" },
 ]
@@ -1186,6 +1203,7 @@ dev = [
 requires-dist = [
     { name = "camb", specifier = ">=1.6.5" },
     { name = "click", specifier = ">=8.3.1" },
+    { name = "globus-sdk", marker = "extra == 'amsc'", specifier = ">=4.4.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "mlflow", marker = "extra == 'tracing'", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.3.5" },
@@ -1193,7 +1211,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "textual", specifier = ">=6.11.0" },
 ]
-provides-extras = ["tracing"]
+provides-extras = ["tracing", "amsc"]
 
 [package.metadata.requires-dev]
 dev = [
