@@ -45,7 +45,7 @@ def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
 def get_agent_dir() -> pathlib.Path:
     """Returns the path to the agent registry directory, initializing it if needed."""
     initialize_user_config()
-    return get_config_dir() / ".agents"
+    return get_config_dir() / "agents"
 
 
 def read_md(path: pathlib.Path) -> str:
