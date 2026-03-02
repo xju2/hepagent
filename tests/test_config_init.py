@@ -17,7 +17,7 @@ def test_ensure_config_initialized_creates_agents_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
 
     config_dir = fake_home / ".config" / "hepagent"
-    agents_dir = config_dir / ".agents"
+    agents_dir = config_dir / "agents"
     assert not agents_dir.exists()
 
     ensure_config_initialized()
@@ -34,7 +34,7 @@ def test_ensure_config_initialized_does_not_overwrite(tmp_path, monkeypatch):
     fake_home.mkdir()
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
 
-    agents_dir = fake_home / ".config" / "hepagent" / ".agents"
+    agents_dir = fake_home / ".config" / "hepagent" / "agents"
     agents_dir.mkdir(parents=True)
     sentinel = agents_dir / "sentinel.txt"
     sentinel.write_text("custom")
@@ -49,7 +49,7 @@ def test_copy_traversable(tmp_path):
     """Verify _copy_traversable correctly mirrors a resource tree to a filesystem path."""
     from importlib import resources
 
-    src = resources.files("hepagent").joinpath("data/agents")
+    src = resources.files("hepagent").joinpath("assets/agents")
     dst = tmp_path / "agents_copy"
     _copy_traversable(src, dst)
 

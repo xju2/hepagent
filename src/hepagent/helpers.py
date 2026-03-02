@@ -9,7 +9,7 @@ from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
 
-from hepagent.utils.config_loader import USER_CONFIG_DIR, initialize_user_config
+from hepagent.utils.config_loader import get_user_config_dir, initialize_user_config
 
 
 def load_env():
@@ -28,7 +28,7 @@ def get_repo_root() -> pathlib.Path:
 
 def get_config_dir() -> pathlib.Path:
     """Returns the user-level hepagent config directory (~/.config/hepagent)."""
-    return USER_CONFIG_DIR
+    return get_user_config_dir()
 
 
 def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
