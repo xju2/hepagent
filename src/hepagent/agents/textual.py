@@ -478,7 +478,7 @@ class TextualAgent(App):
     ]
 
     def __init__(self, model, env, **kwargs):
-        css_path = files("hepagent.assets").joinpath("mini.tcss")
+        css_path = files("hepagent").joinpath("assets/mini.tcss")
         self.__class__.CSS = css_path.read_text()
         super().__init__()
         self.agent_state = "UNINITIALIZED"

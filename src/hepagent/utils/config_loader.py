@@ -8,9 +8,8 @@ def get_user_config_dir() -> Path:
     return Path.home() / ".config" / "hepagent"
 
 def initialize_user_config():
-    user_config_dir = get_user_config_dir()
-
     """Copies default config/agents from the package to ~/.config/hepagent."""
+    user_config_dir = get_user_config_dir()
     if not user_config_dir.exists():
         user_config_dir.mkdir(parents=True, exist_ok=True)
 

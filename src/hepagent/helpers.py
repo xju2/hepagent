@@ -56,7 +56,7 @@ def read_md(path: pathlib.Path) -> str:
 
 
 def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
-    path = resources.files("hepagent.assets").joinpath(filename)
+    path = resources.files("hepagent").joinpath("assets", filename)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     result = data.get(key)
     if not isinstance(result, dict) or not result:
