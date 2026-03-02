@@ -62,7 +62,7 @@ from textual.widgets import Footer, Header, Input, Static, TextArea
 
 from agents import Agent, AgentHooks, Runner
 from agents.run_context import RunContextWrapper
-from hepagent.token_costs import calculate_cost
+from hepagent.utils.token_costs import calculate_cost
 
 
 class AddLogEmitCallback(logging.Handler):

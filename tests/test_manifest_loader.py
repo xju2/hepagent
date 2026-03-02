@@ -1,5 +1,5 @@
-from hepagent.agent_helpers import AgentManifestLoader
 from hepagent.agents.common import AgentContext
+from hepagent.agents.skilled_manifest_loader import AgentManifestLoader
 
 
 def test_get_skill_catalog(mock_agent_env):

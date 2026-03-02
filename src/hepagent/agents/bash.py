@@ -12,8 +12,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, function_tool
-from hepagent.config.env import env_config
-from hepagent.model_providers import get_model_provider
+from hepagent.config import env_config
+from hepagent.utils.model_providers import get_model_provider
 
 
 class LocalEnvironmentConfig(BaseModel):
