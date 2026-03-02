@@ -26,6 +26,11 @@ Homepage = "https://github.com/xju2/hepagent"
 [project.scripts]
 hepagent = "hepagent.cli.main:main"
 
+[project.optional-dependencies]
+tracing = [
+    "mlflow>=3.10.0",
+]
+
 [tool.uv.workspace]
 members = ["hepagent"]
 
