@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import hepagent.agents.textual as textual
 from hepagent.agents.textual import AgentAdapter, TextualAgent
-from hepagent.model_providers import get_model_provider_settings
+from hepagent.utils.model_providers import get_model_provider_settings
 
 
 def test_agent_adapter_integration(monkeypatch):

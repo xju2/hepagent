@@ -1,5 +1,5 @@
 from hepagent.agents.textual import TextualAgent
-from hepagent.model_providers import get_model_provider_settings, parse_model_spec
+from hepagent.utils.model_providers import get_model_provider_settings, parse_model_spec
 
 if __name__ == "__main__":
     import argparse
