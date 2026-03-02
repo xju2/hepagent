@@ -1,6 +1,7 @@
 import pathlib
 
-from hepagent.helpers import _copy_traversable, ensure_config_initialized, get_config_dir
+from hepagent.helpers import _copy_traversable, get_config_dir
+from hepagent.utils.config_loader import initialize_user_config as ensure_config_initialized
 
 
 def test_get_config_dir():

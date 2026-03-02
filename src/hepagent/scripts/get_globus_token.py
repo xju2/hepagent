@@ -9,7 +9,7 @@ from pathlib import Path
 import globus_sdk
 from globus_sdk.exc import GlobusAPIError
 
-CLIENT_ID = "fae5c579-490a-4d76-b6eb-d78f65caeb63" # dingpf iri-nersc
+CLIENT_ID = "fae5c579-490a-4d76-b6eb-d78f65caeb63"  # dingpf iri-nersc
 RESOURCE_SERVER = "auth.globus.org"
 REQUIRED_SCOPES = {
     "openid",
@@ -87,16 +87,12 @@ def interactive_login(client: globus_sdk.NativeAppAuthClient) -> dict:
     return token_response.by_resource_server[RESOURCE_SERVER]
 
 
-def refresh_tokens(
-    client: globus_sdk.NativeAppAuthClient, refresh_token: str
-) -> dict | None:
+def refresh_tokens(client: globus_sdk.NativeAppAuthClient, refresh_token: str) -> dict | None:
     try:
         token_response = client.oauth2_refresh_token(refresh_token)
         return token_response.by_resource_server[RESOURCE_SERVER]
     except GlobusAPIError as exc:
-        print(
-            f"Refresh failed ({exc.http_status}); switching to interactive login."
-        )
+        print(f"Refresh failed ({exc.http_status}); switching to interactive login.")
         return None
 
 

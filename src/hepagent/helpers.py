@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
 
+from hepagent.utils.config_loader import USER_CONFIG_DIR, initialize_user_config
+
 
 def load_env():
     _ = load_dotenv(find_dotenv())
@@ -26,7 +28,7 @@ def get_repo_root() -> pathlib.Path:
 
 def get_config_dir() -> pathlib.Path:
     """Returns the user-level hepagent config directory (~/.config/hepagent)."""
-    return pathlib.Path.home() / ".config" / "hepagent"
+    return USER_CONFIG_DIR
 
 
 def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
@@ -40,18 +42,9 @@ def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
             dest_path.write_bytes(item.read_bytes())
 
 
-def ensure_config_initialized() -> None:
-    """Copy bundled agent data to ~/.config/hepagent/.agents if not already present."""
-    agents_dir = get_config_dir() / ".agents"
-    if agents_dir.exists():
-        return
-    pkg_agents: Traversable = resources.files("hepagent").joinpath("data/agents")
-    _copy_traversable(pkg_agents, agents_dir)
-
-
 def get_agent_dir() -> pathlib.Path:
     """Returns the path to the agent registry directory, initializing it if needed."""
-    ensure_config_initialized()
+    initialize_user_config()
     return get_config_dir() / ".agents"
 
 

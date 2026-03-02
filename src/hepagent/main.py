@@ -76,9 +76,7 @@ def main(
     if yolo:
         app_agent.agent.config.mode = "yolo"
 
-    exit_status, result = app_agent.run_task(
-        task=task_prompt, context=context, max_turns=max_turns
-    )
+    exit_status, result = app_agent.run_task(task=task_prompt, context=context, max_turns=max_turns)
     typer.echo(f"Agent exited with status: {exit_status}, result: {result}")
 
 
@@ -90,7 +88,7 @@ def list_models(
         "-p",
         show_default=True,
         help="Platform to query (cborg, amsc, openai).",
-    )
+    ),
 ) -> None:
     """List available models for a provider."""
     from openai import OpenAI
