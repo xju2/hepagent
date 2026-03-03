@@ -5,14 +5,14 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
-from hepagent.helpers import load_env, load_providers_config
+from hepagent.helpers import load_providers_config
 
 
 @dataclass(frozen=True)
 class ModelProviderSettings:
     base_url: str
     api_key: str | None
-    api_key_env: str
+    api_key_env_name: str
     default_model: str
 
 
@@ -34,17 +34,16 @@ def _get_provider_config(model_provider: str) -> dict[str, Any]:
 def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
     cfg = _get_provider_config(model_provider)
     base_url = cfg.get("base_url")
-    api_key_env = cfg.get("api_key_env")
+    api_key_env = cfg.get("api_key_env_name")
     default_model = cfg.get("default_model")
     if not base_url or not api_key_env or not default_model:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
-    load_env()
     api_key = os.getenv(api_key_env)
     return ModelProviderSettings(
         base_url=base_url,
         api_key=api_key,
-        api_key_env=api_key_env,
+        api_key_env_name=api_key_env,
         default_model=default_model,
     )
 

@@ -7,13 +7,7 @@ from importlib import resources
 from importlib.resources.abc import Traversable
 from typing import Any
 
-from dotenv import find_dotenv, load_dotenv
-
-from hepagent.utils.config_loader import get_user_config_dir, initialize_user_config
-
-
-def load_env():
-    _ = load_dotenv(find_dotenv())
+from hepagent.utils.config_loader import env_config
 
 
 def get_repo_root() -> pathlib.Path:
@@ -28,7 +22,7 @@ def get_repo_root() -> pathlib.Path:
 
 def get_config_dir() -> pathlib.Path:
     """Returns the user-level hepagent config directory (~/.config/hepagent)."""
-    return get_user_config_dir()
+    return env_config.config_path
 
 
 def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
@@ -44,7 +38,6 @@ def _copy_traversable(src: Traversable, dst: pathlib.Path) -> None:
 
 def get_agent_dir() -> pathlib.Path:
     """Returns the path to the agent registry directory, initializing it if needed."""
-    initialize_user_config()
     return get_config_dir() / "agents"
 
 
@@ -65,8 +58,8 @@ def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
 
 
 @lru_cache
-def load_env_config() -> dict[str, Any]:
-    return _load_toml_resource("env_vars.toml", "env_vars")
+def load_config() -> dict[str, Any]:
+    return env_config.config
 
 
 @lru_cache
@@ -111,7 +104,7 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
             ) from e
 
     # 2) TOML fallback
-    config = load_env_config()
+    config = env_config.config
     if key not in config:
         raise KeyError(f"Configuration key {key!r} not found in Environment or TOML.")
 
@@ -126,11 +119,9 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
 
 
 def _enable_amsc_x_api_key() -> bool:
-    load_env()
-
     import mlflow.utils.rest_utils as rest_utils
 
-    api_key = os.getenv("AMSC_MLFLOW_API_KEY", "")
+    api_key = env_config.getenv("AMSC_MLFLOW_API_KEY", str)
     if not api_key:
         return False
 
@@ -168,9 +159,7 @@ def enable_mlflow_for_tracing() -> bool:
         import urllib3
         from urllib3.exceptions import InsecureRequestWarning
 
-        load_env()
-
-        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
+        tracking_uri = env_config.getenv("MLFLOW_TRACKING_URI", str)
         if not tracking_uri:
             print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
             return False
@@ -186,7 +175,7 @@ def enable_mlflow_for_tracing() -> bool:
             urllib3.disable_warnings(InsecureRequestWarning)
 
         # Optional: Set a tracking URI and an experiment
-        exp_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "hepagent-log-tracing")
+        exp_name = env_config.getenv("MLFLOW_EXPERIMENT_NAME", str)
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(exp_name)
         return True
