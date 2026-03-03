@@ -1,11 +1,27 @@
 import os
+import tomllib
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib import resources
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
-from hepagent.helpers import load_providers_config
+
+
+def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
+    path = resources.files("hepagent").joinpath("assets", filename)
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    result = data.get(key)
+    if not isinstance(result, dict) or not result:
+        raise ValueError(f"No {key} configured in {filename}")
+    return result
+
+
+@lru_cache
+def load_providers_config() -> dict[str, dict[str, Any]]:
+    return _load_toml_resource("providers.toml", "providers")
 
 
 @dataclass(frozen=True)
