@@ -8,8 +8,8 @@ from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
-from hepagent.config import env_config
 from hepagent.helpers import enable_mlflow_for_tracing
+from hepagent.utils.config_loader import env_config
 from hepagent.utils.model_providers import get_model_provider_settings, parse_model_spec
 
 app = typer.Typer()
