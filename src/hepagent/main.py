@@ -25,10 +25,8 @@ def main(
         show_default=True,
         help="Agent configuration to use.",
     ),
-    task_prompt: str = typer.Option(
+    task_prompt: str = typer.Argument(
         ...,
-        "--task",
-        "-t",
         help="Task prompt to send to the agent.",
     ),
     yolo: bool = typer.Option(
