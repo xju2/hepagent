@@ -1,4 +1,6 @@
 # Project
+![coverage](https://img.shields.io/badge/coverage-42.6%25-yellow)
+![branch coverage](https://img.shields.io/badge/branch-0%25-red)
 Building a HEP Agent framwork for cosmology simulation and particle physics analysis.
 The framework is based on the `openai-agent-framework` and supports multiple model providers.
 
@@ -17,16 +19,18 @@ uv run hepagent --help
 
 
 ## Instructions
+The CLI expects the task prompt as a required positional argument (Typer enforces it).
 We can run the agent as:
 ```bash
-uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
-uv run hepagent --agent "research_scientist" --task "..." --model "openai:gpt-5-mini"
-uv run hepagent --agent "research_scientist" --task "..." --model "gemini-flash"  # defaults to cborg
+uv run hepagent --agent "research_scientist" "how many python files in this code repository"
+uv run hepagent --agent "research_scientist" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+uv run hepagent --agent "research_scientist" "..." --model "openai:gpt-5-mini"
+uv run hepagent --agent "research_scientist" "..." --model "gemini-flash"  # defaults to cborg
 ```
 
 YOLO mode (auto-approve all bash commands):
 ```bash
-uv run hepagent --agent "hep_physicist" --task "your task here" --yolo
+uv run hepagent --agent "hep_physicist" "your task here" --yolo
 ```
 
 ### Bash Agent Environment Flags
