@@ -1,5 +1,7 @@
 import json
 import os
+from datetime import timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -10,7 +12,7 @@ from hepagent.tools.iri.iri_config import IRI_ACCESS_TOKEN_KEY_NAME, IRI_RESOURC
 
 
 # https://exaworks.org/psij-python/docs/v/0.9.11/.generated/index.html#psij.resource_spec.ResourceSpec
-class ResourceSpecs(BaseModel):
+class ResourceSpec(BaseModel):
     node_count: int = Field(description="Number of nodes to use for the job")
     processes_per_node: int = Field(description="Number of tasks to run on each node")
     cpu_cores_per_process: int = Field(description="Number of CPU cores for each task")
@@ -26,8 +28,8 @@ class AttributeCustom(BaseModel):
     value: str = Field(description="Value of the custom attribute")
 
 
-class AttributeSpecs(BaseModel):
-    duration: int = Field(description="Expected duration of the job in seconds")
+class JobAttributes(BaseModel):
+    duration: timedelta = Field(description="Expected duration of the job in seconds")
     queue_name: str = Field(description="Name of the queue or partition to submit the job to")
     account: str = Field(description="Account or project to charge for the job")
     custom_attributes: list[AttributeCustom] | None = Field(
@@ -38,19 +40,19 @@ class AttributeSpecs(BaseModel):
 class JobSpecs(BaseModel):
     executable: str = Field(description="Path to the executable to run")
     arguments: list[str] | None = Field(description="List of command-line arguments.", default=None)
-    working_dir: str = Field(description="Working directory for the job", default=".")
+    directory: str = Field(description="Working directory for the job", default=".")
     name: str = Field(description="Name of the job", default="iri_test_job")
-    inherit_env: bool = Field(
+    inherit_environment: bool = Field(
         description="Whether to inherit the current environment variables", default=True
     )
-    stdout_path: str | None = Field(description="Path to save standard output", default=None)
-    stderr_path: str | None = Field(description="Path to save standard error", default=None)
-    resources: ResourceSpecs = Field(description="Resource specifications for the job")
-    attributes: AttributeSpecs = Field(description="Job attribute specifications")
-    post_launch: list[str] | None = Field(
-        description="List of shell commands to run after job launch", default=None
+    stdout_path: str | Path | None = Field(description="Path to save standard output", default=None)
+    stderr_path: str | Path | None = Field(description="Path to save standard error", default=None)
+    resources: ResourceSpec = Field(description="Resource requirements for the job")
+    attributes: JobAttributes = Field(description="Job attributes are details about the job.")
+    post_launch: str | Path | None = Field(
+        description="An optional path to a post-launch script", default=None
     )
-    launcher: str = Field(
+    launcher: str | None = Field(
         description="Launcher to use for the job (e.g. srun, aprun, jsrun)", default="srun"
     )
 
