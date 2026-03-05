@@ -8,4 +8,4 @@ def test_cli_requires_task_prompt():
     result = runner.invoke(app, ["--agent", "research_scientist"])
 
     assert result.exit_code == 2
-    assert "Missing argument 'TASK_PROMPT'" in result.stdout
+    assert "Missing argument 'TASK_PROMPT'" in result.stderr
