@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import platform
+from functools import lru_cache
 
 from distro import name as distro_name
 from pydantic import BaseModel
@@ -70,33 +71,35 @@ def _os_name() -> str:
         return "Darwin/MacOS " + platform.mac_ver()[0]
     return current_platform
 
-
-role_agents = {
-    "ShellGPT": RoleAgentConfig(
-        name="ShellGPT",
-        role=DEFAULT_ROLE,
-        variables={"os": _os_name(), "shell": _shell_name()},
-        tools=[],
-    ),
-    "ShellCommandGenerator": RoleAgentConfig(
-        name="Shell Command Generator",
-        role=SHELL_ROLE,
-        variables={"os": _os_name(), "shell": _shell_name()},
-        tools=[],
-    ),
-    "ShellCommandDescriber": RoleAgentConfig(
-        name="Shell Command Describer",
-        role=DESCRIBE_SHELL_ROLE,
-        variables={},
-        tools=[],
-    ),
-    "CodeGenerator": RoleAgentConfig(
-        name="Code Generator",
-        role=CODE_ROLE,
-        variables={},
-        tools=[],
-    ),
-}
+@lru_cache
+def create_role_agents() -> dict[str, RoleAgentConfig]:
+    role_agents = {
+        "ShellGPT": RoleAgentConfig(
+            name="ShellGPT",
+            role=DEFAULT_ROLE,
+            variables={"os": _os_name(), "shell": _shell_name()},
+            tools=[],
+        ),
+        "ShellCommandGenerator": RoleAgentConfig(
+            name="Shell Command Generator",
+            role=SHELL_ROLE,
+            variables={"os": _os_name(), "shell": _shell_name()},
+            tools=[],
+        ),
+        "ShellCommandDescriber": RoleAgentConfig(
+            name="Shell Command Describer",
+            role=DESCRIBE_SHELL_ROLE,
+            variables={},
+            tools=[],
+        ),
+        "CodeGenerator": RoleAgentConfig(
+            name="Code Generator",
+            role=CODE_ROLE,
+            variables={},
+            tools=[],
+        ),
+    }
+    return role_agents
 
 
 def create(
@@ -104,7 +107,7 @@ def create(
     model_provider: str = "cborg",
     model_name: str | None = None,
 ) -> Agent:
-    role_config = role_agents.get(role_name)
+    role_config = create_role_agents().get(role_name)
     if not role_config:
         raise ValueError(f"Role '{role_name}' not found.")
 
