@@ -21,12 +21,17 @@ class ResourceSpecs(BaseModel):
 
 
 # https://exaworks.org/psij-python/docs/v/0.9.11/.generated/index.html#jobattributes
+class AttributeCustom(BaseModel):
+    key: str = Field(description="Name of the custom attribute")
+    value: str = Field(description="Value of the custom attribute")
+
+
 class AttributeSpecs(BaseModel):
     duration: int = Field(description="Expected duration of the job in seconds")
     queue_name: str = Field(description="Name of the queue or partition to submit the job to")
     account: str = Field(description="Account or project to charge for the job")
-    custom_attributes: dict[str, str] | None = Field(
-        description="Additional job attributes", default_factory=dict
+    custom_attributes: list[AttributeCustom] | None = Field(
+        description="Additional job attributes as key/value pairs", default=None
     )
 
 
@@ -67,6 +72,26 @@ def _call_operation_json(
     return json.loads(payload)
 
 
+def _job_payload(job_specs: JobSpecs) -> dict[str, object]:
+    payload = job_specs.model_dump(exclude_none=True)
+    attributes = payload.get("attributes")
+    if isinstance(attributes, dict):
+        custom_attrs = attributes.get("custom_attributes")
+        if isinstance(custom_attrs, list):
+            attr_map = {
+                attr["key"]: attr["value"]
+                for attr in custom_attrs
+                if attr.get("key") and attr.get("value") is not None
+            }
+            if attr_map:
+                attributes["custom_attributes"] = attr_map
+            else:
+                attributes.pop("custom_attributes", None)
+        elif not custom_attrs:
+            attributes.pop("custom_attributes", None)
+    return payload
+
+
 @function_tool
 def submit_job(ctx: RunContextWrapper[AgentContext], job_specs: JobSpecs) -> str:
     """
@@ -95,7 +120,7 @@ def submit_job(ctx: RunContextWrapper[AgentContext], job_specs: JobSpecs) -> str
         client,
         "launchJob",
         path_params={"resource_id": resource_id},
-        body=job_specs.model_dump(exclude_none=True),  # ! may need to drop this option.
+        body=_job_payload(job_specs),
     )
 
     job_id = created_job.get("id")
