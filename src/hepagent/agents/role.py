@@ -71,6 +71,7 @@ def _os_name() -> str:
         return "Darwin/MacOS " + platform.mac_ver()[0]
     return current_platform
 
+
 @lru_cache
 def create_role_agents() -> dict[str, RoleAgentConfig]:
     role_agents = {
@@ -148,7 +149,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run role-based agent")
     parser.add_argument("task", help="Task to perform")
-    parser.add_argument("-s", "--shell", help="Generate and execute shell commands", action="store_true")
+    parser.add_argument(
+        "-s", "--shell", help="Generate and execute shell commands", action="store_true"
+    )
     parser.add_argument("-d", "--describe", help="Describe shell commands", action="store_true")
     parser.add_argument("-c", "--code", help="Generate code snippets", action="store_true")
 
