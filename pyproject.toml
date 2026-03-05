@@ -31,6 +31,17 @@ tracing = [
     "mlflow>=3.10.0",
 ]
 
+[dependency-groups]
+dev = [
+    "coverage>=7.13.4",
+    "ipykernel>=7.1.0",
+    "ipywidgets>=8.1.8",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.14.10",
+]
+
 [tool.uv.workspace]
 members = ["hepagent"]
 
@@ -67,17 +78,6 @@ isort = { combine-as-imports = true, known-first-party = ["agents"] }
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[dependency-groups]
-dev = [
-    "coverage>=7.13.4",
-    "ipykernel>=7.1.0",
-    "ipywidgets>=8.1.8",
-    "pre-commit>=4.5.1",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.14.10",
-]
 
 [tool.coverage.run]
 source = ["src/hepagent"]
