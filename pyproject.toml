@@ -11,12 +11,12 @@ authors = [
 ]
 dependencies = [
     "camb>=1.6.5",
-    "click>=8.3.1",
     "matplotlib>=3.10.8",
     "numpy>=2.3.5",
     "openai-agents[litellm]>=0.6.3",
     "pyyaml>=6.0.3",
     "textual>=6.11.0",
+    "typer>=0.24.1",
 ]
 
 [project.urls]
@@ -24,11 +24,22 @@ Homepage = "https://github.com/xju2/hepagent"
 
 
 [project.scripts]
-hepagent = "hepagent.cli.main:main"
+hepagent = "hepagent.main:app"
 
 [project.optional-dependencies]
 tracing = [
     "mlflow>=3.10.0",
+]
+
+[dependency-groups]
+dev = [
+    "coverage>=7.13.4",
+    "ipykernel>=7.1.0",
+    "ipywidgets>=8.1.8",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.14.10",
 ]
 
 [tool.uv.workspace]
@@ -67,17 +78,6 @@ isort = { combine-as-imports = true, known-first-party = ["agents"] }
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[dependency-groups]
-dev = [
-    "coverage>=7.13.4",
-    "ipykernel>=7.1.0",
-    "ipywidgets>=8.1.8",
-    "pre-commit>=4.5.1",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.14.10",
-]
 
 [tool.coverage.run]
 source = ["src/hepagent"]
