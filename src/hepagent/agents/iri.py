@@ -30,7 +30,15 @@ def create(
 async def main(agent_name: str = "nyx"):
     from agents import Runner
 
-    task_prompt = "Please run the command `dummy.sh triton` at AmSC platform with account of m3443."
+    task_prompt = """Please run the command `dummy.sh triton` at AmSC platform with:
+    - account of m3443.
+    - directory: "."
+    - the executable `dummy.sh` is already in the directory.
+    - time: 60 seconds, queue: "debug".
+    - 1 node, 1 task, 10 cpus per task, no gpus.
+    - save standard output and error to "."
+    - use srun to submit the job.
+    """
     agent = create()
     context = AgentContext(agent_name=agent_name)
     result = await Runner.run(agent, task_prompt, context=context)
