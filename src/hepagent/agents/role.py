@@ -1,4 +1,7 @@
-"""Role-based agent creation."""
+"""Role-based agent creation.
+Adopted from shell_gpt:
+https://github.com/TheR1D/shell_gpt/blob/main/sgpt/role.py
+"""
 
 from __future__ import annotations
 
@@ -14,10 +17,31 @@ from hepagent.model_providers import get_model_provider
 
 class RoleAgentConfig(BaseModel):
     name: str
-    instructions: str
+    role: str
     variables: dict[str, str] | None = None
     tools: list[str] | None = None
 
+
+SHELL_ROLE = """Provide only {shell} commands for {os} without any description.
+If there is a lack of details, provide most logical solution.
+Ensure the output is a valid shell command.
+If multiple steps required try to combine them together using &&.
+Provide only plain text without Markdown formatting.
+Do not provide markdown formatting such as ```.
+"""
+
+DESCRIBE_SHELL_ROLE = """Provide a terse, single sentence description of the given shell command.
+Describe each argument and option of the command.
+Provide short responses in about 80 words.
+APPLY MARKDOWN formatting when possible."""
+# Note that output for all roles containing "APPLY MARKDOWN" will be formatted as Markdown.
+
+CODE_ROLE = """Provide only code as output without any description.
+Provide only code in plain text format without Markdown formatting.
+Do not include symbols such as ``` or ```python.
+If there is a lack of details, provide most logical solution.
+You are not allowed to ask for more details.
+For example if the prompt is "Hello world Python", you should return "print('Hello world')"."""
 
 DEFAULT_ROLE = """You are programming and system administration assistant.
 You are managing {os} operating system with {shell} shell.
@@ -48,17 +72,35 @@ def _os_name() -> str:
 
 
 role_agents = {
-    "system_admin": RoleAgentConfig(
-        name="System Administrator",
-        instructions=ROLE_TEMPLATE.format(name="System Administrator", role=DEFAULT_ROLE),
+    "ShellGPT": RoleAgentConfig(
+        name="ShellGPT",
+        role=DEFAULT_ROLE,
         variables={"os": _os_name(), "shell": _shell_name()},
+        tools=[],
+    ),
+    "ShellCommandGenerator": RoleAgentConfig(
+        name="Shell Command Generator",
+        role=SHELL_ROLE,
+        variables={"os": _os_name(), "shell": _shell_name()},
+        tools=[],
+    ),
+    "ShellCommandDescriber": RoleAgentConfig(
+        name="Shell Command Describer",
+        role=DESCRIBE_SHELL_ROLE,
+        variables={},
+        tools=[],
+    ),
+    "CodeGenerator": RoleAgentConfig(
+        name="Code Generator",
+        role=CODE_ROLE,
+        variables={},
         tools=[],
     ),
 }
 
 
 def create(
-    role_name: str = "system_admin",
+    role_name: str = "ShellGPT",
     model_provider: str = "cborg",
     model_name: str | None = None,
 ) -> Agent:
@@ -66,7 +108,7 @@ def create(
     if not role_config:
         raise ValueError(f"Role '{role_name}' not found.")
 
-    instructions = role_config.instructions
+    instructions = ROLE_TEMPLATE.format(name=role_config.name, role=role_config.role)
     if role_config.variables:
         instructions = instructions.format(**role_config.variables)
 
@@ -89,21 +131,32 @@ def create(
     return agent
 
 
-async def main(task: str):
+async def main(task: str, role_name: str = "ShellGPT"):
     from agents import Runner
 
-    agent = create(role_name="system_admin")
+    agent = create(role_name=role_name)
     result = await Runner.run(agent, task)
     print(result.final_output)
 
 
 if __name__ == "__main__":
+    import argparse
     import asyncio
-    import sys
 
-    if len(sys.argv) != 2:
-        print("Usage: python role.py '<task>'")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Run role-based agent")
+    parser.add_argument("task", help="Task to perform")
+    parser.add_argument("-s", "--shell", help="Generate and execute shell commands", action="store_true")
+    parser.add_argument("-d", "--describe", help="Describe shell commands", action="store_true")
+    parser.add_argument("-c", "--code", help="Generate code snippets", action="store_true")
 
-    task = sys.argv[1]
-    asyncio.run(main(task))
+    args = parser.parse_args()
+
+    role_name = "ShellGPT"
+    if args.shell:
+        role_name = "ShellCommandGenerator"
+    elif args.describe:
+        role_name = "ShellCommandDescriber"
+    elif args.code:
+        role_name = "CodeGenerator"
+    task = args.task
+    asyncio.run(main(task, role_name=role_name))
