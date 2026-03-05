@@ -19,6 +19,7 @@ uv run hepagent --help
 ## Instructions
 We can run the agent as:
 ```bash
+uv run hepagent --agent "research_scientist" --task "how many python files in this code repository"
 uv run hepagent --agent "research_scientist" --task "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
 uv run hepagent --agent "research_scientist" --task "..." --model "openai:gpt-5-mini"
 uv run hepagent --agent "research_scientist" --task "..." --model "gemini-flash"  # defaults to cborg
