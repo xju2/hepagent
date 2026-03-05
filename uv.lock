@@ -1183,6 +1183,7 @@ dependencies = [
 [package.optional-dependencies]
 iri = [
     { name = "globus-sdk" },
+    { name = "iri-client" },
 ]
 tracing = [
     { name = "mlflow" },
@@ -1203,6 +1204,7 @@ dev = [
 requires-dist = [
     { name = "camb", specifier = ">=1.6.5" },
     { name = "globus-sdk", marker = "extra == 'iri'", specifier = ">=4.4.1" },
+    { name = "iri-client", marker = "extra == 'iri'", specifier = ">=0.1.4" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "mlflow", marker = "extra == 'tracing'", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.3.5" },
@@ -1430,6 +1432,29 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4c/ae/c5ce1edc1afe042eadb445e95b0671b03cee61895264357956e61c0d2ac0/ipywidgets-8.1.8.tar.gz", hash = "sha256:61f969306b95f85fba6b6986b7fe45d73124d1d9e3023a8068710d47a22ea668", size = 116739, upload-time = "2025-11-01T21:18:12.393Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/6d/0d9848617b9f753b87f214f1c682592f7ca42de085f564352f10f0843026/ipywidgets-8.1.8-py3-none-any.whl", hash = "sha256:ecaca67aed704a338f88f67b1181b58f821ab5dc89c1f0f5ef99db43c1c2921e", size = 139808, upload-time = "2025-11-01T21:18:10.956Z" },
+]
+
+[[package]]
+name = "iri-client"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/68/483b6ff804990320a04115c74b7e15040a20731422d05e79614dadb05d90/iri_client-0.1.4.tar.gz", hash = "sha256:8196c49feb8e1689841f663501c7dacc45a6eea7c03dbf3e53a50235ab033a3c", size = 46338, upload-time = "2026-02-27T19:57:07.691Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/41/78c5205d04623f7b376f1af04951909fde7eb7a1e94a9a6d2fe57618b580/iri_client-0.1.4-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:6a82b9dbc1e6ad3bd9dea4d239e6703ab27d264eb97ca91328a998c7df546404", size = 2781506, upload-time = "2026-02-27T19:56:59.442Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/26/55989d3f378f6d09aa9612046a443f496e245f402d2b54adb40572389c70/iri_client-0.1.4-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:eaf6e0535ea852d93f54997149c75e710d3891cb79e49dcb2a7de80afafbb53e", size = 2675548, upload-time = "2026-02-27T19:56:53.926Z" },
+    { url = "https://files.pythonhosted.org/packages/55/0c/f8436514ac3685d8fc7bad8477e14e03c1a60bbe0704dde969b5cff5cf50/iri_client-0.1.4-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:38a3c4a2142b72694f6741e1168067c9f34d4f9835a695c0a9c0d8cc062add72", size = 2811970, upload-time = "2026-02-27T19:57:04.828Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/61/cc741bed43e4ace882457b104faa75d1aa2efe4ae38cbab4176b0250a74a/iri_client-0.1.4-cp39-abi3-manylinux_2_28_armv7l.whl", hash = "sha256:19eb7fee7b590b36b52694c4e30d8476afc1af8e83f5be3b0d8a45bf6e2ee063", size = 2410372, upload-time = "2026-02-27T19:57:11.345Z" },
+    { url = "https://files.pythonhosted.org/packages/31/9b/0e049f59f7051c35c25bf9fa3d9d87c588bbfaa43bf10e48b8f652167186/iri_client-0.1.4-cp39-abi3-manylinux_2_28_i686.whl", hash = "sha256:c4d914e794557290af6a42f393e1df94f5bfc5f9879dd0d97cd3f433c490c9da", size = 2662201, upload-time = "2026-02-27T19:57:09.788Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/f9/54cf02902dd3d315261c2f77145cb9040ec3f2b3c019202ccec7c09f642b/iri_client-0.1.4-cp39-abi3-manylinux_2_28_ppc64le.whl", hash = "sha256:50b1da689cb0ae5a357cd8cb1cb89c00460c73675c445c7b1deffde6a998a4bd", size = 3134955, upload-time = "2026-02-27T19:57:03.368Z" },
+    { url = "https://files.pythonhosted.org/packages/00/b2/825a300edea509058696f2f2517db09022c8757834405c808b54f28103e1/iri_client-0.1.4-cp39-abi3-manylinux_2_28_s390x.whl", hash = "sha256:fabc41bca8f1aeb072e11e583b5f73f1baaecab61eac76bac292423459c4e7ee", size = 2504717, upload-time = "2026-02-27T19:57:08.563Z" },
+    { url = "https://files.pythonhosted.org/packages/92/f3/d9d3083fe918d6f124e8c418b3a9f14d86ee6a348ac54f7689d23c1d5f99/iri_client-0.1.4-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:3eb09729becb3e8c48d29e0449fd45a4c1948be0f080e1fef9c6aa14fe387664", size = 2968070, upload-time = "2026-02-27T19:56:52.671Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/65/db13f6179e8a2f6c805f33a826e7ddea58c9ab6b199249a287307e316962/iri_client-0.1.4-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:fd8de5096f91ad6b3dbdcc0213772ff1bee410b77adab14cfcd028c307ddd50b", size = 3006309, upload-time = "2026-02-27T19:57:00.773Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/81/00037e193949f9021013bbea1e8aea000ba6d9ee25df04a230b9960b9ff8/iri_client-0.1.4-cp39-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:8b38f288b988a48e545c6cd2c2411949d0e03a37915f255024530e149e6f2a2b", size = 2600061, upload-time = "2026-02-27T19:56:55.21Z" },
+    { url = "https://files.pythonhosted.org/packages/38/0f/52b3843453386862fce5414ff2e701a3d0084b05119cc9eacbe1a2910362/iri_client-0.1.4-cp39-abi3-musllinux_1_2_i686.whl", hash = "sha256:071d8d1b6271523f8fc05721da38eeb76297d88a05816851b33edec6868805fc", size = 2785435, upload-time = "2026-02-27T19:56:56.72Z" },
+    { url = "https://files.pythonhosted.org/packages/77/dc/14237aab9f2861652a7c599b1ed42fe91a4fb9305239383026f5356682e4/iri_client-0.1.4-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c229bbd7b4c03c9334b89d897206e7df026e68f0c964033a0694d1f77590ea8c", size = 3178883, upload-time = "2026-02-27T19:56:51.135Z" },
+    { url = "https://files.pythonhosted.org/packages/be/01/0e8a0eb6a78100fa216485012441cb431c805b5e8ef7632bc5e2fe8784db/iri_client-0.1.4-cp39-abi3-win32.whl", hash = "sha256:80cf91fb5e0ad1c0270a2eb69b90b43bd4ad6abb9c220f88f430c91eefb1c472", size = 1835949, upload-time = "2026-02-27T19:57:12.575Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/f0/5078bdcb788c4921ff1ad9acb2fe279841814774a3811f788aecf4b2863f/iri_client-0.1.4-cp39-abi3-win_amd64.whl", hash = "sha256:3b0909f9f750f9e6adeae27a8189179097d4efa49e45c5d10331a1f26797b4a5", size = 2221351, upload-time = "2026-02-27T19:57:06.367Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/f7/eff3995492944df00f4854d9eb4ec16979227aa0c20eb32e156c40af4b06/iri_client-0.1.4-cp39-abi3-win_arm64.whl", hash = "sha256:24e569579f374331cedee7b119e32ddc3ad24ffa39629c19d62195df63d5ccb2", size = 2288459, upload-time = "2026-02-27T19:56:58.071Z" },
 ]
 
 [[package]]
