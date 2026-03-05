@@ -73,7 +73,7 @@ def _os_name() -> str:
 
 
 @lru_cache
-def create_role_agents() -> dict[str, RoleAgentConfig]:
+def create_role_cfg() -> dict[str, RoleAgentConfig]:
     role_agents = {
         "ShellGPT": RoleAgentConfig(
             name="ShellGPT",
@@ -108,7 +108,7 @@ def create(
     model_provider: str = "cborg",
     model_name: str | None = None,
 ) -> Agent:
-    role_config = create_role_agents().get(role_name)
+    role_config = create_role_cfg().get(role_name)
     if not role_config:
         raise ValueError(f"Role '{role_name}' not found.")
 
@@ -139,7 +139,7 @@ async def main(task: str, role_name: str = "ShellGPT"):
     from agents import Runner
 
     agent = create(role_name=role_name)
-    result = await Runner.run(agent, task)
+    result = await Runner.run(agent, task, max_turns=2)
     print(result.final_output)
 
 
