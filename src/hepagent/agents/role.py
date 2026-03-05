@@ -50,7 +50,8 @@ Provide short responses in about 100 words, unless you are specifically asked fo
 If you need to store any data, assume it will be stored in the conversation.
 APPLY MARKDOWN formatting when possible."""
 
-ROLE_TEMPLATE = "You are {name}\n{role}"
+ROLE_TEMPLATE = "You are {name}\nYour maximum thinking turns are TWO. "
+"Try to provide final outputs with only one turn.\n{role}"
 
 
 def _shell_name() -> str:
