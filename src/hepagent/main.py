@@ -25,8 +25,8 @@ def main(
         show_default=True,
         help="Agent configuration to use.",
     ),
-    task_prompt: str | None = typer.Option(
-        None,
+    task_prompt: str = typer.Option(
+        ...,
         "--task",
         "-t",
         help="Task prompt to send to the agent.",
@@ -53,10 +53,6 @@ def main(
     """HepAgent: A framework for building and deploying AI agents in HEP."""
     if ctx.invoked_subcommand is not None:
         return
-
-    if not task_prompt:
-        typer.echo("Missing required option '--task'.")
-        raise typer.Exit(code=1)
 
     if env_config.use_mlflow_tracing and enable_mlflow_for_tracing():
         typer.echo("MLflow found. Using MLflow for tracing.")
