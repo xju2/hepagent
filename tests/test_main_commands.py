@@ -1,0 +1,119 @@
+"""Additional tests for hepagent.main (list-models and list-cborg-models commands)."""
+
+import typer
+from unittest.mock import MagicMock, patch
+
+from typer.testing import CliRunner
+
+
+def test_list_cborg_models_no_api_key():
+    """list_models exits with code 1 when API key is not set."""
+    import hepagent.main as main_module
+    from hepagent.model_providers import ModelProviderSettings
+
+    fake_settings = ModelProviderSettings(
+        base_url="https://api.cborg.lbl.gov",
+        api_key=None,
+        api_key_env="CBORG_API_KEY",
+        default_model="openai/gpt-4o-mini",
+    )
+
+    with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings):
+        with patch("builtins.print"):  # suppress output
+            from io import StringIO
+            import typer as typer_mod
+
+            output_parts = []
+            original_echo = typer_mod.echo
+
+            def capture_echo(msg="", **kwargs):
+                output_parts.append(str(msg))
+
+            with patch.object(typer_mod, "echo", side_effect=capture_echo):
+                try:
+                    main_module.list_models("cborg")
+                except typer.Exit as e:
+                    assert e.exit_code == 1
+                except SystemExit as e:
+                    assert e.code == 1
+
+    assert any("CBORG_API_KEY" in s for s in output_parts)
+
+
+def test_list_models_no_api_key_for_platform():
+    """list_models exits with code 1 when the API key for the platform is not set."""
+    import hepagent.main as main_module
+    from hepagent.model_providers import ModelProviderSettings
+    import typer as typer_mod
+
+    fake_settings = ModelProviderSettings(
+        base_url="https://openai-api.example.com",
+        api_key=None,
+        api_key_env="OPENAI_API_KEY",
+        default_model="gpt-4",
+    )
+
+    output_parts = []
+
+    def capture_echo(msg="", **kwargs):
+        output_parts.append(str(msg))
+
+    with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings), \
+         patch.object(typer_mod, "echo", side_effect=capture_echo):
+        try:
+            main_module.list_models("openai")
+        except (typer.Exit, SystemExit):
+            pass
+
+    assert any("OPENAI_API_KEY" in s for s in output_parts)
+
+
+def test_list_models_with_api_key():
+    """list_models lists models when API key is available."""
+    import hepagent.main as main_module
+    from hepagent.model_providers import ModelProviderSettings
+    import typer as typer_mod
+
+    fake_settings = ModelProviderSettings(
+        base_url="https://fake-api.example.com",
+        api_key="fake-key-xyz",
+        api_key_env="FAKE_API_KEY",
+        default_model="model-a",
+    )
+
+    mock_model_a = MagicMock()
+    mock_model_a.id = "model-a"
+    mock_model_b = MagicMock()
+    mock_model_b.id = "model-b"
+
+    mock_models_response = MagicMock()
+    mock_models_response.data = [mock_model_a, mock_model_b]
+
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = mock_models_response
+
+    output_parts = []
+
+    def capture_echo(msg="", **kwargs):
+        output_parts.append(str(msg))
+
+    with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings), \
+         patch("openai.OpenAI", return_value=mock_client), \
+         patch.object(typer_mod, "echo", side_effect=capture_echo):
+        main_module.list_models("cborg")
+
+    all_output = "\n".join(output_parts)
+    assert "model-a" in all_output
+    assert "model-b" in all_output
+
+
+def test_list_cborg_models_delegates_to_list_models():
+    """list_cborg_models delegates to list_models with 'cborg'."""
+    import hepagent.main as main_module
+
+    calls = []
+
+    with patch.object(main_module, "list_models", side_effect=lambda p: calls.append(p)):
+        main_module.list_cborg_models()
+
+    assert calls == ["cborg"]
