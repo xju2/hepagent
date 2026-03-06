@@ -15,7 +15,9 @@ class ResourceSpec(BaseModel):
     node_count: int = Field(description="Number of nodes to use for the job")
     processes_per_node: int = Field(description="Number of tasks to run on each node")
     cpu_cores_per_process: int = Field(description="Number of CPU cores for each task")
-    gpu_cores_per_process: int = Field(description="Number of GPUs per task")
+    gpu_cores_per_process: int | None = Field(
+        description="Number of GPUs per task. Drop the field if no GPU is needed.", default=None
+    )
     exclusive_node_use: bool = Field(
         description="Whether to request exclusive access to nodes", default=True
     )
@@ -37,7 +39,7 @@ class JobAttributes(BaseModel):
 
 
 class JobSpecs(BaseModel):
-    executable: str = Field(description="Path to the executable to run")
+    executable: str = Field(description="Path to the executable to run. Use absolute path.")
     arguments: list[str] | None = Field(description="List of command-line arguments.", default=None)
     directory: str = Field(description="Working directory for the job", default=".")
     name: str = Field(description="Name of the job", default="iri_test_job")
