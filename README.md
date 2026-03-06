@@ -1,6 +1,5 @@
 # Project
-![coverage](https://img.shields.io/badge/coverage-42.6%25-yellow)
-![branch coverage](https://img.shields.io/badge/branch-0%25-red)
+![coverage](https://img.shields.io/badge/coverage-60%25-green)
 
 Building a HEP Agent framwork for cosmology simulation and particle physics analysis.
 The framework is based on the `openai-agent-framework` and supports multiple model providers.
