@@ -30,6 +30,10 @@ hepagent = "hepagent.main:app"
 tracing = [
     "mlflow>=3.10.0",
 ]
+iri = [
+    "globus-sdk>=4.4.1",
+    "iri-client>=0.1.4",
+]
 
 [dependency-groups]
 dev = [
