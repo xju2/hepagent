@@ -15,7 +15,7 @@ class ResourceSpec(BaseModel):
     node_count: int = Field(description="Number of nodes to use for the job")
     processes_per_node: int = Field(description="Number of tasks to run on each node")
     cpu_cores_per_process: int = Field(description="Number of CPU cores for each task")
-    gpu_count: int = Field(description="Number of GPUs per task")
+    gpu_cores_per_process: int = Field(description="Number of GPUs per task")
     exclusive_node_use: bool = Field(
         description="Whether to request exclusive access to nodes", default=True
     )
