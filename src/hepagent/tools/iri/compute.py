@@ -1,6 +1,5 @@
 import json
 import os
-from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,7 +28,7 @@ class AttributeCustom(BaseModel):
 
 
 class JobAttributes(BaseModel):
-    duration: timedelta = Field(description="Expected duration of the job in seconds")
+    duration: int = Field(description="Expected duration of the job in seconds")
     queue_name: str = Field(description="Name of the queue or partition to submit the job to")
     account: str = Field(description="Account or project to charge for the job")
     custom_attributes: list[AttributeCustom] | None = Field(
