@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
+
 """Get Globus Auth tokens with required scopes.
 https://gist.github.com/dingp/347b99840d9b3ff2553ee53f47f0bf07
 """
 
-#!/usr/bin/env python3
 import argparse
 import json
 import os
