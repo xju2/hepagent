@@ -76,7 +76,7 @@ def _call_operation_json(
 
 
 def _job_payload(job_specs: JobSpecs) -> dict[str, object]:
-    payload = job_specs.model_dump(exclude_none=True)
+    payload = job_specs.model_dump(mode="json", exclude_none=True)
     attributes = payload.get("attributes")
     if isinstance(attributes, dict):
         custom_attrs = attributes.get("custom_attributes")
