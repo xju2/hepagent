@@ -32,11 +32,11 @@ async def main(agent_name: str = "nyx"):
 
     task_prompt = """Please run the command `dummy.sh triton` at AmSC platform with:
     - account of m3443.
-    - directory: "."
+    - directory: "/pscratch/sd/x/xju/agent_area"
     - the executable `dummy.sh` is already in the directory.
     - time: 60 seconds, queue: "debug".
     - 1 node, 1 task, 10 cpus per task, no gpus.
-    - save standard output and error to "."
+    - save standard output and error to the same directory with an appropriate name.
     - use srun to submit the job.
     """
     agent = create()
