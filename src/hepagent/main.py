@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import click
 import typer
+from typer.core import TyperGroup
 
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.common import AgentContext
@@ -12,7 +14,26 @@ from hepagent.config.env import env_config
 from hepagent.helpers import enable_mlflow_for_tracing
 from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
-app = typer.Typer()
+
+class DefaultToRunGroup(TyperGroup):
+    """Route unknown first token to the run command for backward compatibility."""
+
+    default_command_name = "run"
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            if args and not args[0].startswith("-"):
+                cmd = self.get_command(ctx, self.default_command_name)
+                if cmd is not None:
+                    return self.default_command_name, cmd, args
+            raise
+
+
+app = typer.Typer(cls=DefaultToRunGroup)
 
 
 @app.callback(invoke_without_command=True)
@@ -24,10 +45,6 @@ def main(
         "-a",
         show_default=True,
         help="Agent configuration to use.",
-    ),
-    task_prompt: str = typer.Argument(
-        ...,
-        help="Task prompt to send to the agent.",
     ),
     yolo: bool = typer.Option(
         False,
@@ -49,8 +66,50 @@ def main(
     ),
 ) -> None:
     """HepAgent: A framework for building and deploying AI agents in HEP."""
-    if ctx.invoked_subcommand is not None:
-        return
+    ctx.obj = {
+        "agent_name": agent_name,
+        "yolo": yolo,
+        "max_turns": max_turns,
+        "model": model,
+    }
+
+
+@app.command("run", hidden=True)
+def run_task(
+    ctx: typer.Context,
+    task_prompt: str = typer.Argument(
+        ...,
+        help="Task prompt to send to the agent.",
+    ),
+    agent_name: str | None = typer.Option(
+        None,
+        "--agent",
+        "-a",
+        help="Agent configuration to use.",
+    ),
+    yolo: bool = typer.Option(
+        False,
+        "--yolo",
+        help="Auto-approve all bash commands.",
+    ),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turn",
+        help="Maximum number of agent turns (defaults to SDK default).",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help='Specify the model as "provider:model" (e.g. "openai:gpt-5-mini") '
+        "or a bare model name (defaults to cborg).",
+    ),
+) -> None:
+    """Run HepAgent with a task prompt."""
+    options = ctx.obj or {}
+    agent_name = agent_name or str(options.get("agent_name", "research_scientist"))
+    yolo = yolo or bool(options.get("yolo", False))
+    max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
+    model = model or options.get("model")
 
     if env_config.use_mlflow_tracing and enable_mlflow_for_tracing():
         typer.echo("MLflow found. Using MLflow for tracing.")
