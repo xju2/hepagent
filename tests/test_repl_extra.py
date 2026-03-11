@@ -1,11 +1,6 @@
 """Additional tests for hepagent.agents.repl module."""
 
 import hepagent.agents.repl as repl
-from hepagent.agents.repl import (
-    RawResponsesStreamEvent,
-    RunItemStreamEvent,
-    AgentUpdatedStreamEvent,
-)
 
 
 def test_configure_readline_does_not_raise():
@@ -169,12 +164,11 @@ def test_tool_output_not_finalize_non_serialisable():
 def test_run_demo_loop_streaming_with_finalize_signal(monkeypatch):
     """Streaming loop triggers forced final summary when FINALIZE_NOW is detected."""
     import asyncio
-
-    from agents.items import ToolCallOutputItem
-    from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
     from unittest.mock import MagicMock
 
     from agents import Agent, OpenAIChatCompletionsModel
+    from agents.items import ToolCallOutputItem
+    from agents.stream_events import RunItemStreamEvent
 
     client = MagicMock()
     model = OpenAIChatCompletionsModel(model="test-model", openai_client=client)
@@ -242,8 +236,9 @@ def test_run_demo_loop_streaming_with_text_output(monkeypatch):
     """Streaming loop processes text events correctly."""
     import asyncio
 
-    from agents.stream_events import RawResponsesStreamEvent
     from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
+
+    from agents.stream_events import RawResponsesStreamEvent
 
     class FakeAgent:
         name = "Agent"
@@ -284,11 +279,12 @@ def test_run_demo_loop_streaming_with_text_output(monkeypatch):
 def test_run_demo_loop_streaming_with_tool_events(monkeypatch):
     """Streaming loop processes tool_call and tool_call_output events."""
     import asyncio
+    from unittest.mock import MagicMock
+
+    from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 
     from agents.items import ToolCallItem, ToolCallOutputItem
     from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
-    from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
-    from unittest.mock import MagicMock
 
     test_agent = _make_agent_and_model()
     raw_item = MagicMock()
@@ -344,8 +340,9 @@ def test_run_demo_loop_streaming_with_agent_updated(monkeypatch):
     """Streaming loop handles AgentUpdatedStreamEvent."""
     import asyncio
 
-    from agents.stream_events import AgentUpdatedStreamEvent, RawResponsesStreamEvent
     from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
+
+    from agents.stream_events import AgentUpdatedStreamEvent, RawResponsesStreamEvent
 
     new_agent_obj = _make_agent_and_model()
     updated_evt = AgentUpdatedStreamEvent(new_agent=new_agent_obj)

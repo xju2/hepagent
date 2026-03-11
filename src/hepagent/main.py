@@ -72,6 +72,10 @@ def main(
         "max_turns": max_turns,
         "model": model,
     }
+    # When invoked without a subcommand, show help instead of silently exiting.
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("run", hidden=True)

@@ -1,5 +1,8 @@
 """Additional tests for hepagent.agents.bash module."""
 
+import asyncio
+import json
+
 import hepagent.agents.bash as bash_module
 
 
@@ -15,7 +18,7 @@ def test_truncate_output_applies_truncation():
     output = "word " * 50  # 50 words
     result = bash_module._truncate_output(output, limit=10)
     assert "output truncated" in result
-    words = result.split()
+    _ = result.split()
     # Should keep exactly the first 10 words before the truncation notice
     assert "word" in result
 
@@ -63,14 +66,16 @@ def test_execute_bash_command_with_confirmation_yolo_mode(monkeypatch):
     monkeypatch.setattr(bash_module.env_config.__class__, "yolo_mode", property(lambda self: True))
     monkeypatch.setattr(bash_module, "execute_bash_command", fake_execute)
 
-    import json
-    import asyncio
     from agents.tool import ToolContext
 
     payload = json.dumps({"cmd": "echo hi", "cwd": "", "thought": "doing it"})
-    ctx = ToolContext(context=None, tool_name="execute_bash_command_with_confirmation",
-                     tool_call_id="t1", tool_arguments=payload)
-    result = asyncio.run(bash_module.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
+    ctx = ToolContext(
+        context=None,
+        tool_name="execute_bash_command_with_confirmation",
+        tool_call_id="t1",
+        tool_arguments=payload,
+    )
+    _ = asyncio.run(bash_module.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
     assert captured.get("cmd") == "echo hi"
 
 
@@ -79,14 +84,18 @@ def test_execute_bash_command_with_confirmation_rejection(monkeypatch):
     monkeypatch.setattr(bash_module.env_config.__class__, "yolo_mode", property(lambda self: False))
     monkeypatch.setattr("builtins.input", lambda _: "no way")
 
-    import json
-    import asyncio
     from agents.tool import ToolContext
 
     payload = json.dumps({"cmd": "rm -rf /", "cwd": "", "thought": ""})
-    ctx = ToolContext(context=None, tool_name="execute_bash_command_with_confirmation",
-                     tool_call_id="t2", tool_arguments=payload)
-    result = asyncio.run(bash_module.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload))
+    ctx = ToolContext(
+        context=None,
+        tool_name="execute_bash_command_with_confirmation",
+        tool_call_id="t2",
+        tool_arguments=payload,
+    )
+    result = asyncio.run(
+        bash_module.execute_bash_command_with_confirmation.on_invoke_tool(ctx, payload)
+    )
     assert isinstance(result, dict)
     assert result["returncode"] == 1
     assert "no way" in result["output"]

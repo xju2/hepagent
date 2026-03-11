@@ -2,7 +2,6 @@
 
 from types import SimpleNamespace
 
-import hepagent.agents.textual_common as textual_common
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 
 
@@ -38,6 +37,7 @@ class _DummyAdapter:
 # ---------------------------------------------------------------------------
 # AskUserToolWrapper
 # ---------------------------------------------------------------------------
+
 
 def test_is_ask_user_tool_true():
     wrapper = AskUserToolWrapper()
@@ -81,6 +81,7 @@ def test_ask_user_tool_calls_adapter(monkeypatch):
     """The created ask_user tool calls adapter.add_message and returns user input."""
     import asyncio
     import json
+
     from agents.tool import ToolContext
 
     adapter = _DummyAdapter(response="  my answer  ")
@@ -88,8 +89,9 @@ def test_ask_user_tool_calls_adapter(monkeypatch):
     tool = wrapper._create_tool(adapter)
 
     payload = json.dumps({"prompt": "What is your name?", "thought": ""})
-    ctx = ToolContext(context=None, tool_name="ask_user_for_info",
-                     tool_call_id="tc1", tool_arguments=payload)
+    ctx = ToolContext(
+        context=None, tool_name="ask_user_for_info", tool_call_id="tc1", tool_arguments=payload
+    )
     result = asyncio.run(tool.on_invoke_tool(ctx, payload))
 
     # The response should be stripped
@@ -102,6 +104,7 @@ def test_ask_user_tool_with_thought(monkeypatch):
     """When thought is non-empty, it is added as a message."""
     import asyncio
     import json
+
     from agents.tool import ToolContext
 
     adapter = _DummyAdapter(response="answer")
@@ -109,8 +112,9 @@ def test_ask_user_tool_with_thought(monkeypatch):
     tool = wrapper._create_tool(adapter)
 
     payload = json.dumps({"prompt": "Question?", "thought": "My reasoning"})
-    ctx = ToolContext(context=None, tool_name="ask_user_for_info",
-                     tool_call_id="tc2", tool_arguments=payload)
+    ctx = ToolContext(
+        context=None, tool_name="ask_user_for_info", tool_call_id="tc2", tool_arguments=payload
+    )
     asyncio.run(tool.on_invoke_tool(ctx, payload))
 
     thought_messages = [m for m in adapter.messages if "My reasoning" in m["content"]]
@@ -120,6 +124,7 @@ def test_ask_user_tool_with_thought(monkeypatch):
 # ---------------------------------------------------------------------------
 # CompositeToolWrapper
 # ---------------------------------------------------------------------------
+
 
 def test_composite_wrapper_applies_wrappers_in_order():
     """CompositeToolWrapper applies each wrapper to the list in sequence."""

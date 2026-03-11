@@ -1,7 +1,5 @@
 """Tests for hepagent.tools.nyx.transfer_function."""
 
-from pathlib import Path
-
 
 def test_transfer_function_input_model():
     """TransferFunctionInput validates fields correctly."""

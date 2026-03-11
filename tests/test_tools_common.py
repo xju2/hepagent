@@ -1,11 +1,8 @@
-"""Tests for hepagent.tools.common (update_memory, load_skill_details, read_resource, ask_user_for_info)."""
+"""Tests for hepagent.tools.common (update_memory,
+load_skill_details, read_resource, ask_user_for_info)."""
 
 import asyncio
 import json
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from agents.tool import ToolContext
 from hepagent.agents.common import AgentContext
@@ -34,6 +31,7 @@ def _invoke(tool, context_val: AgentContext, **kwargs):
 # _get_skill_dir / _get_memory_path
 # ---------------------------------------------------------------------------
 
+
 def test_get_skill_dir_returns_path(mock_agent_env):
     """_get_skill_dir returns a Path under agent_dir/skills/<name>."""
     path = tools_common._get_skill_dir("nyx")
@@ -51,6 +49,7 @@ def test_get_memory_path_returns_path(mock_agent_env):
 # ---------------------------------------------------------------------------
 # update_memory
 # ---------------------------------------------------------------------------
+
 
 def test_update_memory_appends_entry(mock_agent_env):
     """update_memory writes a bullet entry to MEMORY.md."""
@@ -85,6 +84,7 @@ def test_update_memory_without_correction(mock_agent_env):
 # ---------------------------------------------------------------------------
 # load_skill_details
 # ---------------------------------------------------------------------------
+
 
 def test_load_skill_details_existing_skill(mock_agent_env):
     """load_skill_details returns instructions for an existing skill."""
@@ -126,6 +126,7 @@ def test_load_skill_details_with_resources(mock_agent_env, tmp_path):
 # read_resource
 # ---------------------------------------------------------------------------
 
+
 def test_read_resource_no_active_skill(mock_agent_env):
     """read_resource returns an error when no skill is active."""
     ctx_val = _make_ctx("test", active_skill=None)
@@ -156,6 +157,7 @@ def test_read_resource_missing_resource(mock_agent_env):
 # ask_user_for_info
 # ---------------------------------------------------------------------------
 
+
 def test_ask_user_for_info_returns_input(monkeypatch, mock_agent_env):
     """ask_user_for_info returns and strips user's response."""
     monkeypatch.setattr("builtins.input", lambda _: "  user_answer  ")
@@ -170,7 +172,7 @@ def test_ask_user_for_info_with_thought(monkeypatch, mock_agent_env, capsys):
     monkeypatch.setattr("builtins.input", lambda _: "answer")
 
     ctx_val = _make_ctx("test")
-    result = _invoke(
+    _result = _invoke(
         tools_common.ask_user_for_info, ctx_val, prompt="Enter value:", thought="My thought"
     )
     captured = capsys.readouterr()
