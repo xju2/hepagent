@@ -33,7 +33,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - Full targeted test example: `uv run pytest -s tests/test_skilled_agent.py`
 
 ## CLI Usage Rules
-- `TASK_PROMPT` is a required positional argument.
+- For `hepagent run` (and the default-to-run behavior), `TASK_PROMPT` is a required positional argument.
 - Default provider is `cborg`; model spec supports `provider:model` (e.g. `openai:gpt-5-mini`).
 - Example:
   - `uv run hepagent run --agent research_scientist "List repository files"`
