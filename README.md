@@ -22,15 +22,15 @@ uv run hepagent --help
 The CLI expects the task prompt as a required positional argument (Typer enforces it).
 We can run the agent as:
 ```bash
-uv run hepagent --agent "research_scientist" "how many python files in this code repository"
-uv run hepagent --agent "research_scientist" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
-uv run hepagent --agent "research_scientist" "..." --model "openai:gpt-5-mini"
-uv run hepagent --agent "research_scientist" "..." --model "gemini-flash"  # defaults to cborg
+uv run hepagent run --agent "research_scientist" "how many python files in this code repository"
+uv run hepagent run --agent "research_scientist" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+uv run hepagent run --agent "research_scientist" "..." --model "openai:gpt-5-mini"
+uv run hepagent run --agent "research_scientist" "..." --model "gemini-flash"  # defaults to cborg
 ```
 
 YOLO mode (auto-approve all bash commands):
 ```bash
-uv run hepagent --agent "hep_physicist" "your task here" --yolo
+uv run hepagent run --agent "hep_physicist" "your task here" --yolo
 ```
 
 ### Bash Agent Environment Flags

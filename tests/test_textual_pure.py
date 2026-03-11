@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-import hepagent.agents.textual as textual_module
 from hepagent.agents.textual import (
     AddLogEmitCallback,
     AgentConfig,
@@ -15,10 +14,10 @@ from hepagent.agents.textual import (
     _messages_to_steps,
 )
 
-
 # ---------------------------------------------------------------------------
 # AddLogEmitCallback
 # ---------------------------------------------------------------------------
+
 
 def test_add_log_emit_callback_calls_callback():
     """AddLogEmitCallback.emit() invokes the provided callback with the log record."""
@@ -26,8 +25,13 @@ def test_add_log_emit_callback_calls_callback():
     handler = AddLogEmitCallback(callback=received.append)
 
     record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="", lineno=0,
-        msg="hello", args=(), exc_info=None,
+        name="test",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="hello",
+        args=(),
+        exc_info=None,
     )
     handler.emit(record)
     assert received == [record]
@@ -36,6 +40,7 @@ def test_add_log_emit_callback_calls_callback():
 # ---------------------------------------------------------------------------
 # NoopToolWrapper
 # ---------------------------------------------------------------------------
+
 
 def test_noop_tool_wrapper_returns_copy():
     """NoopToolWrapper.wrap_tools() returns a new list with the same tools."""
@@ -51,6 +56,7 @@ def test_noop_tool_wrapper_returns_copy():
 # ---------------------------------------------------------------------------
 # AgentConfig and AgentModel
 # ---------------------------------------------------------------------------
+
 
 def test_agent_config_default_mode():
     cfg = AgentConfig()
@@ -77,6 +83,7 @@ def test_agent_model_with_values():
 # ---------------------------------------------------------------------------
 # _message_header_label
 # ---------------------------------------------------------------------------
+
 
 def test_message_header_label_final():
     msg = {"role": "system", "kind": "final"}
@@ -116,6 +123,7 @@ def test_message_header_label_custom_role():
 # ---------------------------------------------------------------------------
 # _messages_to_steps
 # ---------------------------------------------------------------------------
+
 
 def test_messages_to_steps_empty():
     """Empty list gives empty steps."""
@@ -169,9 +177,9 @@ def test_messages_to_steps_no_split_without_prior_content():
 # DummyAgent
 # ---------------------------------------------------------------------------
 
+
 def test_dummy_agent_run_adds_messages():
     """DummyAgent.run() appends messages to the messages list."""
-    import time
 
     agent = DummyAgent()
 
@@ -187,9 +195,9 @@ def test_dummy_agent_run_adds_messages():
 # AgentAdapter dataclass
 # ---------------------------------------------------------------------------
 
+
 def test_agent_adapter_add_message_while_uninitialized(monkeypatch):
     """AgentAdapter.add_message() does not call call_from_thread when state is UNINITIALIZED."""
-    from types import SimpleNamespace
     from hepagent.agents.textual import AgentAdapter
 
     class StubTextualApp:
@@ -247,6 +255,7 @@ def test_agent_adapter_add_message_when_running():
 # ---------------------------------------------------------------------------
 # LogBashCallAgentHooks
 # ---------------------------------------------------------------------------
+
 
 class _SimpleAdapter:
     """Minimal adapter for LogBashCallAgentHooks testing."""
@@ -315,8 +324,9 @@ def test_log_hooks_on_llm_end_tracks_cost():
     adapter = _SimpleAdapter()
     hooks = LogBashCallAgentHooks(adapter)
 
-    from agents import Usage
     from types import SimpleNamespace
+
+    from agents import Usage
 
     class FakeResponse:
         pass

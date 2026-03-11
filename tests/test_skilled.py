@@ -1,9 +1,5 @@
 """Tests for hepagent.agents.skilled module."""
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 import hepagent.agents.skilled as skilled_module
 
 

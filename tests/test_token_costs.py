@@ -1,7 +1,5 @@
 """Tests for hepagent.token_costs module."""
 
-import pytest
-
 from agents import Usage
 from hepagent.token_costs import TOKEN_COSTS_PER_MILLION, calculate_cost
 
@@ -18,7 +16,10 @@ def test_calculate_cost_exact_match():
     """calculate_cost uses exact model name when available."""
     usage = _make_usage(input_tokens=1_000_000, output_tokens=1_000_000)
     cost = calculate_cost(usage, "openai/gpt-5")
-    expected = TOKEN_COSTS_PER_MILLION["openai/gpt-5"]["input"] + TOKEN_COSTS_PER_MILLION["openai/gpt-5"]["output"]
+    expected = (
+        TOKEN_COSTS_PER_MILLION["openai/gpt-5"]["input"]
+        + TOKEN_COSTS_PER_MILLION["openai/gpt-5"]["output"]
+    )
     assert abs(cost - expected) < 1e-9
 
 
@@ -65,5 +66,8 @@ def test_calculate_cost_grok():
     """calculate_cost correctly handles xai/grok-4."""
     usage = _make_usage(input_tokens=1_000_000, output_tokens=1_000_000)
     cost = calculate_cost(usage, "xai/grok-4")
-    expected = TOKEN_COSTS_PER_MILLION["xai/grok-4"]["input"] + TOKEN_COSTS_PER_MILLION["xai/grok-4"]["output"]
+    expected = (
+        TOKEN_COSTS_PER_MILLION["xai/grok-4"]["input"]
+        + TOKEN_COSTS_PER_MILLION["xai/grok-4"]["output"]
+    )
     assert abs(cost - expected) < 1e-9

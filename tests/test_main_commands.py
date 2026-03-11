@@ -1,9 +1,8 @@
 """Additional tests for hepagent.main (list-models and list-cborg-models commands)."""
 
-import typer
 from unittest.mock import MagicMock, patch
 
-from typer.testing import CliRunner
+import typer
 
 
 def test_list_cborg_models_no_api_key():
@@ -20,11 +19,10 @@ def test_list_cborg_models_no_api_key():
 
     with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings):
         with patch("builtins.print"):  # suppress output
-            from io import StringIO
             import typer as typer_mod
 
             output_parts = []
-            original_echo = typer_mod.echo
+            _original_echo = typer_mod.echo
 
             def capture_echo(msg="", **kwargs):
                 output_parts.append(str(msg))
@@ -42,9 +40,10 @@ def test_list_cborg_models_no_api_key():
 
 def test_list_models_no_api_key_for_platform():
     """list_models exits with code 1 when the API key for the platform is not set."""
+    import typer as typer_mod
+
     import hepagent.main as main_module
     from hepagent.model_providers import ModelProviderSettings
-    import typer as typer_mod
 
     fake_settings = ModelProviderSettings(
         base_url="https://openai-api.example.com",
@@ -58,8 +57,10 @@ def test_list_models_no_api_key_for_platform():
     def capture_echo(msg="", **kwargs):
         output_parts.append(str(msg))
 
-    with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings), \
-         patch.object(typer_mod, "echo", side_effect=capture_echo):
+    with (
+        patch.object(main_module, "get_model_provider_settings", return_value=fake_settings),
+        patch.object(typer_mod, "echo", side_effect=capture_echo),
+    ):
         try:
             main_module.list_models("openai")
         except (typer.Exit, SystemExit):
@@ -70,9 +71,10 @@ def test_list_models_no_api_key_for_platform():
 
 def test_list_models_with_api_key():
     """list_models lists models when API key is available."""
+    import typer as typer_mod
+
     import hepagent.main as main_module
     from hepagent.model_providers import ModelProviderSettings
-    import typer as typer_mod
 
     fake_settings = ModelProviderSettings(
         base_url="https://fake-api.example.com",
@@ -97,9 +99,11 @@ def test_list_models_with_api_key():
     def capture_echo(msg="", **kwargs):
         output_parts.append(str(msg))
 
-    with patch.object(main_module, "get_model_provider_settings", return_value=fake_settings), \
-         patch("openai.OpenAI", return_value=mock_client), \
-         patch.object(typer_mod, "echo", side_effect=capture_echo):
+    with (
+        patch.object(main_module, "get_model_provider_settings", return_value=fake_settings),
+        patch("openai.OpenAI", return_value=mock_client),
+        patch.object(typer_mod, "echo", side_effect=capture_echo),
+    ):
         main_module.list_models("cborg")
 
     all_output = "\n".join(output_parts)

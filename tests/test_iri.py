@@ -1,9 +1,5 @@
 """Tests for hepagent.agents.iri module."""
 
-from unittest.mock import patch
-
-import pytest
-
 import hepagent.agents.iri as iri_module
 
 

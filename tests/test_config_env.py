@@ -1,7 +1,5 @@
 """Tests for hepagent.config.env module."""
 
-import pytest
-
 from hepagent.config.env import HepAgentEnvConfig
 
 

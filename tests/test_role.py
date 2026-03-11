@@ -1,7 +1,6 @@
 """Tests for hepagent.agents.role module."""
 
 import platform
-from unittest.mock import patch
 
 import pytest
 
@@ -14,10 +13,10 @@ from hepagent.agents.role import (
     create_role_cfg,
 )
 
-
 # ---------------------------------------------------------------------------
 # _shell_name
 # ---------------------------------------------------------------------------
+
 
 def test_shell_name_returns_string():
     name = _shell_name()
@@ -54,6 +53,7 @@ def test_shell_name_on_linux(monkeypatch):
 # _os_name
 # ---------------------------------------------------------------------------
 
+
 def test_os_name_returns_string():
     name = _os_name()
     assert isinstance(name, str)
@@ -82,6 +82,7 @@ def test_os_name_on_unknown_platform(monkeypatch):
 # create_role_cfg
 # ---------------------------------------------------------------------------
 
+
 def test_create_role_cfg_contains_expected_roles():
     cfg = create_role_cfg()
     assert "ShellGPT" in cfg
@@ -99,6 +100,7 @@ def test_create_role_cfg_entries_are_role_agent_config():
 # ---------------------------------------------------------------------------
 # create
 # ---------------------------------------------------------------------------
+
 
 def test_create_valid_role(monkeypatch):
     """create() should return an Agent-like object for a known role."""

@@ -3,17 +3,15 @@
 import asyncio
 import json
 
-import pytest
-
 from agents import Usage
 from agents.tool import ToolContext
 from hepagent.agent_helpers import AgentManifestLoader, print_usage
 from hepagent.agents.common import AgentContext
 
-
 # ---------------------------------------------------------------------------
 # print_usage
 # ---------------------------------------------------------------------------
+
 
 def test_print_usage_without_model_name(capsys):
     """print_usage prints token counts and omits cost section when no model specified."""
@@ -39,14 +37,19 @@ def test_print_usage_with_model_name(capsys):
 # update_logbook
 # ---------------------------------------------------------------------------
 
-def _invoke_logbook(category: str, observation: str, correction: str = "", active_skill: str | None = None):
+
+def _invoke_logbook(
+    category: str, observation: str, correction: str = "", active_skill: str | None = None
+):
     """Helper to call update_logbook via its on_invoke_tool coroutine."""
     from hepagent.agent_helpers import update_logbook
 
     ctx_val = AgentContext(agent_name="test")
     ctx_val.active_skill = active_skill
 
-    payload = json.dumps({"category": category, "observation": observation, "correction": correction})
+    payload = json.dumps(
+        {"category": category, "observation": observation, "correction": correction}
+    )
     ctx = ToolContext(
         context=ctx_val,
         tool_name="update_logbook",
@@ -97,6 +100,7 @@ def test_update_logbook_with_correction(mock_agent_env):
 # ---------------------------------------------------------------------------
 # AgentManifestLoader
 # ---------------------------------------------------------------------------
+
 
 def test_manifest_loader_get_skill_catalog_nonempty(mock_agent_env):
     """get_skill_catalog returns a non-empty string when skills exist."""
