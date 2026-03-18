@@ -89,7 +89,15 @@ def bootstrap_hepagent_home() -> None:
     if not agents_dest.exists():
         repo_agents = get_repo_root() / ".agents"
         if repo_agents.exists():
+            # In a source/dev environment, copy the bundled .agents directory.
             shutil.copytree(repo_agents, agents_dest)
+        else:
+            # In an installed (wheel) environment, .agents may not be present
+            # in the repo. Ensure a minimal agents directory structure exists
+            # to avoid first-run failures.
+            for subdir in ("", "common", "storage", "skills"):
+                target = agents_dest if not subdir else agents_dest / subdir
+                target.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
