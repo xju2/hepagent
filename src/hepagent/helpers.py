@@ -57,7 +57,7 @@ def read_md(path: pathlib.Path) -> str:
 
 
 def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
-    user_config = get_hepagent_home() / filename
+    user_config = get_hepagent_home() / "config" / filename
     if user_config.exists():
         data = tomllib.loads(user_config.read_text(encoding="utf-8"))
     else:
@@ -80,8 +80,10 @@ def bootstrap_hepagent_home() -> None:
     home.mkdir(parents=True, exist_ok=True)
 
     # --- TOML config files from package resources ---
+    config_dir = home / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
     for filename in ("providers.toml", "env_vars.toml"):
-        dest = home / filename
+        dest = config_dir / filename
         if not dest.exists():
             src = resources.files("hepagent.config").joinpath(filename)
             dest.write_bytes(src.read_bytes())

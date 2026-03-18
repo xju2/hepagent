@@ -40,6 +40,13 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
     api_key = os.getenv(api_key_env)
+    if not api_key:
+        raise ValueError(
+            f"API key not found. Please set the environment variable '{api_key_env}' "
+            f"or modify your configuration $HOME/.hepagent/config/env_vars.toml "
+            f"to add the API key for provider '{model_provider}'."
+        )
+
     return ModelProviderSettings(
         base_url=base_url,
         api_key=api_key,
