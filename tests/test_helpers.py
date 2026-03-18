@@ -6,8 +6,10 @@ from unittest.mock import patch
 import pytest
 
 from hepagent.helpers import (
+    bootstrap_hepagent_home,
     get_agent_dir,
     get_env_var,
+    get_hepagent_home,
     get_repo_root,
     load_env_config,
     read_md,
@@ -21,11 +23,54 @@ def test_get_repo_root_returns_path_with_pyproject_toml():
     assert (root / "pyproject.toml").exists()
 
 
-def test_get_agent_dir_is_child_of_repo_root():
-    """get_agent_dir should be .agents under the repo root."""
-    agent_dir = get_agent_dir()
+def test_get_hepagent_home_returns_home_subdir(tmp_path):
+    """get_hepagent_home should return ~/.hepagent/ without creating it."""
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        home = get_hepagent_home()
+    assert isinstance(home, pathlib.Path)
+    assert home == tmp_path / ".hepagent"
+    assert not home.exists(), "get_hepagent_home must not create the directory"
+
+
+def test_get_agent_dir_falls_back_to_repo_root(tmp_path):
+    """get_agent_dir should fall back to .agents under repo root when ~/.hepagent/agents/ is absent."""
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        agent_dir = get_agent_dir()
     root = get_repo_root()
     assert agent_dir == root / ".agents"
+
+
+def test_get_agent_dir_prefers_hepagent_home(tmp_path):
+    """get_agent_dir should prefer ~/.hepagent/agents/ when it exists."""
+    user_agents = tmp_path / "agents"
+    user_agents.mkdir()
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        agent_dir = get_agent_dir()
+    assert agent_dir == user_agents
+
+
+def test_bootstrap_copies_toml_defaults(tmp_path):
+    """bootstrap_hepagent_home copies bundled TOML files when absent."""
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        bootstrap_hepagent_home()
+    assert (tmp_path / "providers.toml").exists()
+    assert (tmp_path / "env_vars.toml").exists()
+
+
+def test_bootstrap_copies_agents_dir(tmp_path):
+    """bootstrap_hepagent_home copies repo .agents/ to ~/.hepagent/agents/ when absent."""
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        bootstrap_hepagent_home()
+    assert (tmp_path / "agents").exists()
+
+
+def test_bootstrap_does_not_overwrite_existing_files(tmp_path):
+    """bootstrap_hepagent_home skips files that already exist."""
+    sentinel = tmp_path / "providers.toml"
+    sentinel.write_text("# custom", encoding="utf-8")
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        bootstrap_hepagent_home()
+    assert sentinel.read_text(encoding="utf-8") == "# custom"
 
 
 def test_read_md_returns_content_for_existing_file(tmp_path):
