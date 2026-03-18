@@ -37,11 +37,15 @@ def get_repo_root() -> pathlib.Path:
 
 
 def get_agent_dir() -> pathlib.Path:
-    """Returns the agents directory, preferring ~/.hepagent/agents/ over repo .agents/."""
+    """Returns the agents directory, ensuring it exists under ~/.hepagent/agents/."""
     user_agents = get_hepagent_home() / "agents"
-    if user_agents.exists():
-        return user_agents
-    return get_repo_root() / ".agents"
+    if not user_agents.exists():
+        repo_agents = get_repo_root() / ".agents"
+        if repo_agents.exists():
+            shutil.copytree(repo_agents, user_agents)
+        else:
+            user_agents.mkdir(parents=True, exist_ok=True)
+    return user_agents
 
 
 def read_md(path: pathlib.Path) -> str:
