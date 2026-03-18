@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shutil
 import tomllib
 from collections.abc import Callable
 from functools import lru_cache
@@ -9,8 +10,20 @@ from typing import Any
 from dotenv import find_dotenv, load_dotenv
 
 
+def get_hepagent_home() -> pathlib.Path:
+    """Returns the user-level config/data directory: ~/.hepagent/"""
+    home = pathlib.Path.home() / ".hepagent"
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
 def load_env():
-    _ = load_dotenv(find_dotenv())
+    """Loads .env, preferring ~/.hepagent/.env over find_dotenv()."""
+    user_env = get_hepagent_home() / ".env"
+    if user_env.exists():
+        load_dotenv(user_env)
+    else:
+        _ = load_dotenv(find_dotenv())
 
 
 def get_repo_root() -> pathlib.Path:
@@ -24,6 +37,10 @@ def get_repo_root() -> pathlib.Path:
 
 
 def get_agent_dir() -> pathlib.Path:
+    """Returns the agents directory, preferring ~/.hepagent/agents/ over repo .agents/."""
+    user_agents = get_hepagent_home() / "agents"
+    if user_agents.exists():
+        return user_agents
     return get_repo_root() / ".agents"
 
 
@@ -35,12 +52,40 @@ def read_md(path: pathlib.Path) -> str:
 
 
 def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
-    path = resources.files("hepagent.config").joinpath(filename)
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    user_config = get_hepagent_home() / filename
+    if user_config.exists():
+        data = tomllib.loads(user_config.read_text(encoding="utf-8"))
+    else:
+        path = resources.files("hepagent.config").joinpath(filename)
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
     result = data.get(key)
     if not isinstance(result, dict) or not result:
         raise ValueError(f"No {key} configured in {filename}")
     return result
+
+
+def bootstrap_hepagent_home() -> None:
+    """Populate ~/.hepagent/ with default configs on first install or run.
+
+    Copies bundled TOML defaults and the repo .agents/ directory only when
+    the corresponding target does not yet exist, making the operation safe to
+    call on every startup.
+    """
+    home = get_hepagent_home()
+
+    # --- TOML config files from package resources ---
+    for filename in ("providers.toml", "env_vars.toml"):
+        dest = home / filename
+        if not dest.exists():
+            src = resources.files("hepagent.config").joinpath(filename)
+            dest.write_bytes(src.read_bytes())
+
+    # --- agents/ directory from repo root (dev install) ---
+    agents_dest = home / "agents"
+    if not agents_dest.exists():
+        repo_agents = get_repo_root() / ".agents"
+        if repo_agents.exists():
+            shutil.copytree(repo_agents, agents_dest)
 
 
 @lru_cache

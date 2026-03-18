@@ -14,7 +14,7 @@ from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.config.env import env_config
-from hepagent.helpers import enable_mlflow_for_tracing, get_agent_dir
+from hepagent.helpers import bootstrap_hepagent_home, enable_mlflow_for_tracing, get_hepagent_home
 from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
 
@@ -41,7 +41,7 @@ app = typer.Typer(cls=DefaultToRunGroup)
 
 def create_chat_session(conversation_id: str) -> SQLiteSession:
     """Create a persistent SQLite-backed session for a conversation id."""
-    db_dir = get_agent_dir() / "sessions"
+    db_dir = get_hepagent_home() / "sessions"
     db_dir.mkdir(parents=True, exist_ok=True)
     db_path = db_dir / "conversation.db"
     return SQLiteSession(conversation_id, str(db_path))
@@ -82,6 +82,7 @@ def main(
     ),
 ) -> None:
     """HepAgent: A framework for building and deploying AI agents in HEP."""
+    bootstrap_hepagent_home()
     ctx.obj = {
         "agent_name": agent_name,
         "yolo": yolo,
