@@ -24,12 +24,12 @@ def test_get_repo_root_returns_path_with_pyproject_toml():
 
 
 def test_get_hepagent_home_returns_home_subdir(tmp_path):
-    """get_hepagent_home should return ~/.hepagent/ and create it."""
+    """get_hepagent_home should return ~/.hepagent/ without creating it."""
     with patch("pathlib.Path.home", return_value=tmp_path):
         home = get_hepagent_home()
     assert isinstance(home, pathlib.Path)
     assert home == tmp_path / ".hepagent"
-    assert home.exists()
+    assert not home.exists(), "get_hepagent_home must not create the directory"
 
 
 def test_get_agent_dir_falls_back_to_repo_root(tmp_path):

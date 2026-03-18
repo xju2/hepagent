@@ -11,10 +11,14 @@ from dotenv import find_dotenv, load_dotenv
 
 
 def get_hepagent_home() -> pathlib.Path:
-    """Returns the user-level config/data directory: ~/.hepagent/"""
-    home = pathlib.Path.home() / ".hepagent"
-    home.mkdir(parents=True, exist_ok=True)
-    return home
+    """Returns the user-level config/data directory: ~/.hepagent/
+
+    The directory is *not* created here; callers that need to write should
+    create it themselves (or call bootstrap_hepagent_home).  This keeps
+    read-only paths (config lookup, agent-dir resolution) free of side
+    effects, which matters in CI/HPC environments where $HOME is read-only.
+    """
+    return pathlib.Path.home() / ".hepagent"
 
 
 def load_env():
@@ -84,6 +88,7 @@ def bootstrap_hepagent_home() -> None:
     call on every startup.
     """
     home = get_hepagent_home()
+    home.mkdir(parents=True, exist_ok=True)
 
     # --- TOML config files from package resources ---
     for filename in ("providers.toml", "env_vars.toml"):
