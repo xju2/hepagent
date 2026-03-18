@@ -23,11 +23,12 @@ def test_get_repo_root_returns_path_with_pyproject_toml():
     assert (root / "pyproject.toml").exists()
 
 
-def test_get_hepagent_home_returns_home_subdir():
+def test_get_hepagent_home_returns_home_subdir(tmp_path):
     """get_hepagent_home should return ~/.hepagent/ and create it."""
-    home = get_hepagent_home()
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        home = get_hepagent_home()
     assert isinstance(home, pathlib.Path)
-    assert home == pathlib.Path.home() / ".hepagent"
+    assert home == tmp_path / ".hepagent"
     assert home.exists()
 
 
