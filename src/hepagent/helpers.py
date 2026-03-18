@@ -7,8 +7,6 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-from dotenv import find_dotenv, load_dotenv
-
 
 def get_hepagent_home() -> pathlib.Path:
     """Returns the user-level config/data directory: ~/.hepagent/
@@ -19,15 +17,6 @@ def get_hepagent_home() -> pathlib.Path:
     effects, which matters in CI/HPC environments where $HOME is read-only.
     """
     return pathlib.Path.home() / ".hepagent"
-
-
-def load_env():
-    """Loads .env, preferring ~/.hepagent/.env over find_dotenv()."""
-    user_env = get_hepagent_home() / ".env"
-    if user_env.exists():
-        load_dotenv(user_env)
-    else:
-        _ = load_dotenv(find_dotenv())
 
 
 def get_repo_root() -> pathlib.Path:
@@ -123,15 +112,19 @@ def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T](key: str, dtype: type[T] = int) -> T:
+def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None) -> T:
     """Helper to access environment variables with a TOML fallback.
 
     Args:
         key: Environment variable / config key.
         dtype: Target type (int, str, bool, float).
+        default: Optional default value if key is missing from both env and TOML.
+
+    Returns:
+        The value from environment, TOML, or default (if provided).
 
     Raises:
-        KeyError: If key is missing from both env and TOML.
+        KeyError: If key is missing from both env and TOML and no default is provided.
         TypeError: If dtype is unsupported.
         ValueError: If conversion fails.
     """
@@ -161,25 +154,27 @@ def get_env_var[T](key: str, dtype: type[T] = int) -> T:
 
     # 2) TOML fallback
     config = load_env_config()
-    if key not in config:
-        raise KeyError(f"Configuration key {key!r} not found in Environment or TOML.")
+    if key in config:
+        raw_toml = config[key]
+        try:
+            return conv(raw_toml)  # type: ignore[return-value]
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid TOML value for {key}={raw_toml!r} (type {type(raw_toml).__name__}); "
+                f"cannot convert to {dtype.__name__}"
+            ) from e
 
-    raw_toml = config[key]
-    try:
-        return conv(raw_toml)  # type: ignore[return-value]
-    except (TypeError, ValueError) as e:
-        raise ValueError(
-            f"Invalid TOML value for {key}={raw_toml!r} (type {type(raw_toml).__name__}); "
-            f"cannot convert to {dtype.__name__}"
-        ) from e
+    # 3) Use default if provided
+    if default is not None:
+        return default
+
+    raise KeyError(f"Configuration key {key!r} not found in Environment or TOML.")
 
 
 def _enable_amsc_x_api_key() -> bool:
-    load_env()
-
     import mlflow.utils.rest_utils as rest_utils
 
-    api_key = os.getenv("AMSC_MLFLOW_API_KEY", "")
+    api_key = get_env_var("AMSC_MLFLOW_API_KEY", str, default="")
     if not api_key:
         return False
 
@@ -217,9 +212,7 @@ def enable_mlflow_for_tracing() -> bool:
         import urllib3
         from urllib3.exceptions import InsecureRequestWarning
 
-        load_env()
-
-        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
+        tracking_uri = get_env_var("MLFLOW_TRACKING_URI", str, default="")
         if not tracking_uri:
             print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
             return False
@@ -235,7 +228,7 @@ def enable_mlflow_for_tracing() -> bool:
             urllib3.disable_warnings(InsecureRequestWarning)
 
         # Optional: Set a tracking URI and an experiment
-        exp_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "hepagent-log-tracing")
+        exp_name = get_env_var("MLFLOW_EXPERIMENT_NAME", str, default="hepagent-log-tracing")
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(exp_name)
         return True

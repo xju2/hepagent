@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from agents import RunContextWrapper, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import load_env
+from hepagent.helpers import get_env_var
 from hepagent.tools.iri.iri_config import IRI_ACCESS_TOKEN_KEY_NAME, IRI_RESOURCE_ID_KEY_NAME
 
 
@@ -111,8 +111,7 @@ def submit_job(ctx: RunContextWrapper[AgentContext], job_specs: JobSpecs) -> str
     """
     from iri_client import Client
 
-    load_env()
-    access_token = os.getenv(IRI_ACCESS_TOKEN_KEY_NAME, "")
+    access_token = get_env_var(IRI_ACCESS_TOKEN_KEY_NAME, str, default="")
     if not access_token:
         raise RuntimeError(
             f"Access token not found in environment variable '{IRI_ACCESS_TOKEN_KEY_NAME}'. "
@@ -153,13 +152,14 @@ def get_job_status(ctx: RunContextWrapper[AgentContext], job_id: str) -> str:
     """
     from iri_client import Client
 
-    load_env()
-    access_token = os.getenv(IRI_ACCESS_TOKEN_KEY_NAME)
+    access_token = get_env_var(IRI_ACCESS_TOKEN_KEY_NAME, str, default="")
     base_url = "https://api.iri.nersc.gov"
 
     client = Client(base_url=base_url, access_token=access_token)
 
-    resource_id = os.getenv(IRI_RESOURCE_ID_KEY_NAME, "b3af92a7-cf5f-42cf-a4be-6f6554a779e3")
+    resource_id = get_env_var(
+        IRI_RESOURCE_ID_KEY_NAME, str, default="b3af92a7-cf5f-42cf-a4be-6f6554a779e3"
+    )
 
     job_status = _call_operation_json(
         client,
