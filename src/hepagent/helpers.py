@@ -37,14 +37,22 @@ def get_repo_root() -> pathlib.Path:
 
 
 def get_agent_dir() -> pathlib.Path:
-    """Returns the agents directory, ensuring it exists under ~/.hepagent/agents/."""
+    """Returns the active agents directory.
+
+    Preference order:
+    1) ~/.hepagent/agents when present.
+    2) repo-root .agents (dev/source checkout fallback).
+    3) create ~/.hepagent/agents as a minimal fallback.
+    """
     user_agents = get_hepagent_home() / "agents"
-    if not user_agents.exists():
-        repo_agents = get_repo_root() / ".agents"
-        if repo_agents.exists():
-            shutil.copytree(repo_agents, user_agents)
-        else:
-            user_agents.mkdir(parents=True, exist_ok=True)
+    if user_agents.exists():
+        return user_agents
+
+    repo_agents = get_repo_root() / ".agents"
+    if repo_agents.exists():
+        return repo_agents
+
+    user_agents.mkdir(parents=True, exist_ok=True)
     return user_agents
 
 
