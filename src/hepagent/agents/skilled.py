@@ -38,12 +38,14 @@ def create(
 
 
 async def main(agent_name: str = "nyx"):
-    from agents import Runner
+    from agents import Runner, SQLiteSession
 
     task_prompt = "List the files in the current directory and tell me how many there are."
     agent = create()
     context = AgentContext(agent_name=agent_name)
-    result = await Runner.run(agent, task_prompt, context=context)
+    # In-memory database (lost when process ends)
+    session = SQLiteSession("user_123")
+    result = await Runner.run(agent, task_prompt, context=context, session=session)
     print(result.final_output)
 
 

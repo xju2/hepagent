@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import typer
 from typer.core import TyperGroup
 
+from agents import SQLiteSession
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.skilled import create as create_skilled_agent
@@ -11,7 +14,7 @@ from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.config.env import env_config
-from hepagent.helpers import enable_mlflow_for_tracing
+from hepagent.helpers import enable_mlflow_for_tracing, get_agent_dir
 from hepagent.model_providers import get_model_provider_settings, parse_model_spec
 
 
@@ -34,6 +37,14 @@ class DefaultToRunGroup(TyperGroup):
 
 
 app = typer.Typer(cls=DefaultToRunGroup)
+
+
+def create_chat_session(conversation_id: str) -> SQLiteSession:
+    """Create a persistent SQLite-backed session for a conversation id."""
+    db_dir = get_agent_dir() / "sessions"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    db_path = db_dir / "conversation.db"
+    return SQLiteSession(conversation_id, str(db_path))
 
 
 @app.callback(invoke_without_command=True)
@@ -64,6 +75,11 @@ def main(
         "or a bare model name (defaults to cborg).",
         show_default="cborg default",
     ),
+    chat: str | None = typer.Option(
+        None,
+        "--chat",
+        help="Conversation id for persistent SQLite chat history.",
+    ),
 ) -> None:
     """HepAgent: A framework for building and deploying AI agents in HEP."""
     ctx.obj = {
@@ -71,6 +87,7 @@ def main(
         "yolo": yolo,
         "max_turns": max_turns,
         "model": model,
+        "chat": chat,
     }
     # When invoked without a subcommand, show help instead of silently exiting.
     if ctx.invoked_subcommand is None:
@@ -107,6 +124,11 @@ def run_task(
         help='Specify the model as "provider:model" (e.g. "openai:gpt-5-mini") '
         "or a bare model name (defaults to cborg).",
     ),
+    chat: str | None = typer.Option(
+        None,
+        "--chat",
+        help="Conversation id for persistent SQLite chat history.",
+    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
@@ -114,6 +136,7 @@ def run_task(
     yolo = yolo or bool(options.get("yolo", False))
     max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
     model = model or options.get("model")
+    chat = chat or options.get("chat")
 
     if env_config.use_mlflow_tracing and enable_mlflow_for_tracing():
         typer.echo("MLflow found. Using MLflow for tracing.")
@@ -133,7 +156,13 @@ def run_task(
     if yolo:
         app_agent.agent.config.mode = "yolo"
 
-    exit_status, result = app_agent.run_task(task=task_prompt, context=context, max_turns=max_turns)
+    session = create_chat_session(chat) if chat else None
+    exit_status, result = app_agent.run_task(
+        task=task_prompt,
+        context=context,
+        max_turns=max_turns,
+        session=session,
+    )
     typer.echo(f"Agent exited with status: {exit_status}, result: {result}")
 
 

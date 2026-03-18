@@ -359,11 +359,14 @@ class AgentAdapter:
         try:
             context = kwargs.get("context")
             max_turns = kwargs.get("max_turns")
+            session = kwargs.get("session")
             runner_kwargs = {}
             if context is not None:
                 runner_kwargs["context"] = context
             if max_turns is not None:
                 runner_kwargs["max_turns"] = max_turns
+            if session is not None:
+                runner_kwargs["session"] = session
             result = loop.run_until_complete(Runner.run(self.agent, task, **runner_kwargs))
             self.add_message("system", f"✓ Task completed: {result.final_output}", kind="final")
             self.textual_app.call_from_thread(
