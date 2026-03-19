@@ -121,7 +121,6 @@ def get_env_var[T](key: str, *, dtype: type[T] = str, default: T | None = None) 
         key: Environment variable / config key.
         dtype: Target type (int, str, bool, float).
         default: Optional default value if key is missing from both env and TOML.
-        is_secret: Look for key in secret config.
 
     Returns:
         The value from environment, TOML, or default (if provided).
