@@ -110,15 +110,11 @@ def load_env_config() -> dict[str, Any]:
 
 
 @lru_cache
-def load_secret_config() -> dict[str, Any]:
-    return _load_toml_resource("secret_vars.toml", "secrets")
-
-@lru_cache
 def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None, is_secret: bool = False) -> T:
+def get_env_var[T](key: str, *, dtype: type[T] = str, default: T | None = None) -> T:
     """Helper to access environment variables with a TOML fallback.
 
     Args:
@@ -160,7 +156,7 @@ def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None, 
             ) from e
 
     # 2) TOML fallback
-    config = load_secret_config() if is_secret else load_env_config()
+    config = load_env_config()
     if key in config:
         raw_toml = config[key]
         try:
@@ -181,7 +177,7 @@ def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None, 
 def _enable_amsc_x_api_key() -> bool:
     import mlflow.utils.rest_utils as rest_utils
 
-    api_key = get_env_var("AMSC_MLFLOW_API_KEY", str, default="")
+    api_key = get_env_var("AMSC_MLFLOW_API_KEY")
     if not api_key:
         return False
 
@@ -219,7 +215,7 @@ def enable_mlflow_for_tracing() -> bool:
         import urllib3
         from urllib3.exceptions import InsecureRequestWarning
 
-        tracking_uri = get_env_var("MLFLOW_TRACKING_URI", str, default="")
+        tracking_uri = get_env_var("MLFLOW_TRACKING_URI")
         if not tracking_uri:
             print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
             return False
@@ -235,7 +231,7 @@ def enable_mlflow_for_tracing() -> bool:
             urllib3.disable_warnings(InsecureRequestWarning)
 
         # Optional: Set a tracking URI and an experiment
-        exp_name = get_env_var("MLFLOW_EXPERIMENT_NAME", str, default="hepagent-log-tracing")
+        exp_name = get_env_var("MLFLOW_EXPERIMENT_NAME", default="hepagent-tracing")
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(exp_name)
         return True
