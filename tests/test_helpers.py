@@ -53,8 +53,8 @@ def test_bootstrap_copies_toml_defaults(tmp_path):
     """bootstrap_hepagent_home copies bundled TOML files when absent."""
     with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
         bootstrap_hepagent_home()
-    assert (tmp_path / "providers.toml").exists()
-    assert (tmp_path / "env_vars.toml").exists()
+    assert (tmp_path / "config" / "providers.toml").exists()
+    assert (tmp_path / "config" / "env_vars.toml").exists()
 
 
 def test_bootstrap_copies_agents_dir(tmp_path):
@@ -66,7 +66,9 @@ def test_bootstrap_copies_agents_dir(tmp_path):
 
 def test_bootstrap_does_not_overwrite_existing_files(tmp_path):
     """bootstrap_hepagent_home skips files that already exist."""
-    sentinel = tmp_path / "providers.toml"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = config_dir / "providers.toml"
     sentinel.write_text("# custom", encoding="utf-8")
     with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
         bootstrap_hepagent_home()

@@ -106,21 +106,26 @@ def bootstrap_hepagent_home() -> None:
 
 @lru_cache
 def load_env_config() -> dict[str, Any]:
-    return _load_toml_resource("env_vars.toml", "env_vars")
+    return _load_toml_resource("env_vars.toml", "config")
 
+
+@lru_cache
+def load_secret_config() -> dict[str, Any]:
+    return _load_toml_resource("secret_vars.toml", "secrets")
 
 @lru_cache
 def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None) -> T:
+def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None, is_secret: bool = False) -> T:
     """Helper to access environment variables with a TOML fallback.
 
     Args:
         key: Environment variable / config key.
         dtype: Target type (int, str, bool, float).
         default: Optional default value if key is missing from both env and TOML.
+        is_secret: Look for key in secret config.
 
     Returns:
         The value from environment, TOML, or default (if provided).
@@ -155,7 +160,7 @@ def get_env_var[T](key: str, dtype: type[T] = int, *, default: T | None = None) 
             ) from e
 
     # 2) TOML fallback
-    config = load_env_config()
+    config = load_secret_config() if is_secret else load_env_config()
     if key in config:
         raw_toml = config[key]
         try:

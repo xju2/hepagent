@@ -5,7 +5,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
-from hepagent.helpers import load_providers_config
+from hepagent.helpers import load_providers_config, get_env_var
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
     if not base_url or not api_key_env or not default_model:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
-    api_key = os.getenv(api_key_env)
+    api_key = get_env_var(api_key_env)
     if not api_key:
         raise ValueError(
             f"API key not found. Please set the environment variable '{api_key_env}' "
