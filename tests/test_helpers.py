@@ -97,13 +97,13 @@ def test_load_env_config_returns_dict():
 def test_get_env_var_reads_from_environment(monkeypatch):
     """get_env_var should prefer environment variables over TOML defaults."""
     monkeypatch.setenv("HEPAGENT_OUTPUT_WORD_LIMIT", "42")
-    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", int)
+    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=int)
     assert result == 42
 
 
 def test_get_env_var_falls_back_to_toml():
     """get_env_var reads TOML default when env var is absent."""
-    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", int)
+    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=int)
     assert isinstance(result, int)
     assert result > 0
 
@@ -111,32 +111,32 @@ def test_get_env_var_falls_back_to_toml():
 def test_get_env_var_bool_true(monkeypatch):
     """get_env_var correctly converts 'true' string to True."""
     monkeypatch.setenv("HEPAGENT_YOLO", "true")
-    assert get_env_var("HEPAGENT_YOLO", bool) is True
+    assert get_env_var("HEPAGENT_YOLO", dtype=bool) is True
 
 
 def test_get_env_var_bool_false(monkeypatch):
     """get_env_var correctly converts 'false' string to False."""
     monkeypatch.setenv("HEPAGENT_YOLO", "false")
-    assert get_env_var("HEPAGENT_YOLO", bool) is False
+    assert get_env_var("HEPAGENT_YOLO", dtype=bool) is False
 
 
 def test_get_env_var_bool_numeric_one(monkeypatch):
     """get_env_var converts '1' to True for bool dtype."""
     monkeypatch.setenv("HEPAGENT_YOLO", "1")
-    assert get_env_var("HEPAGENT_YOLO", bool) is True
+    assert get_env_var("HEPAGENT_YOLO", dtype=bool) is True
 
 
 def test_get_env_var_str_type(monkeypatch):
     """get_env_var returns string values unchanged."""
     monkeypatch.setenv("HEPAGENT_OUTPUT_WORD_LIMIT", "999")
-    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", str)
+    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=str)
     assert result == "999"
 
 
 def test_get_env_var_float_type(monkeypatch):
     """get_env_var converts values to float when dtype=float."""
     monkeypatch.setenv("HEPAGENT_OUTPUT_WORD_LIMIT", "3.14")
-    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", float)
+    result = get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=float)
     assert isinstance(result, float)
     assert abs(result - 3.14) < 1e-9
 
@@ -144,21 +144,21 @@ def test_get_env_var_float_type(monkeypatch):
 def test_get_env_var_raises_type_error_for_unsupported_dtype():
     """get_env_var raises TypeError for dtypes not in the converters map."""
     with pytest.raises(TypeError, match="Unsupported dtype"):
-        get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", list)  # type: ignore[arg-type]
+        get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=list)  # type: ignore[arg-type]
 
 
 def test_get_env_var_raises_key_error_for_missing_key(monkeypatch):
     """get_env_var raises KeyError when key is absent from both env and TOML."""
     monkeypatch.delenv("TOTALLY_UNKNOWN_KEY_XYZ", raising=False)
     with pytest.raises(KeyError, match="TOTALLY_UNKNOWN_KEY_XYZ"):
-        get_env_var("TOTALLY_UNKNOWN_KEY_XYZ", str)
+        get_env_var("TOTALLY_UNKNOWN_KEY_XYZ", dtype=str)
 
 
 def test_get_env_var_raises_value_error_for_invalid_conversion(monkeypatch):
     """get_env_var raises ValueError when the env value can't be converted."""
     monkeypatch.setenv("HEPAGENT_OUTPUT_WORD_LIMIT", "not_an_int")
     with pytest.raises(ValueError, match="HEPAGENT_OUTPUT_WORD_LIMIT"):
-        get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", int)
+        get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=int)
 
 
 def test_enable_mlflow_for_tracing_returns_false_without_mlflow():
@@ -213,4 +213,4 @@ def test_get_env_var_toml_value_conversion_error(monkeypatch):
     with patch("hepagent.helpers.load_env_config", return_value={"TEST_KEY": "not_an_int"}):
         monkeypatch.delenv("TEST_KEY", raising=False)
         with pytest.raises(ValueError, match="TEST_KEY"):
-            get_env_var("TEST_KEY", int)
+            get_env_var("TEST_KEY", dtype=int)
