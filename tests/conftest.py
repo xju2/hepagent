@@ -79,3 +79,11 @@ def mock_agent_env(agent_registry_temp):
     # Because you used late-binding (import inside function), this works perfectly!
     with patch("hepagent.helpers.get_agent_dir", return_value=agent_registry_temp):
         yield agent_registry_temp
+
+
+@pytest.fixture(autouse=True)
+def fake_api_keys(monkeypatch):
+    """Provide deterministic fake API keys so provider-dependent tests pass in CI."""
+    monkeypatch.setenv("CBORG_API_KEY", "test-cborg-api-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-api-key")
+    monkeypatch.setenv("AMSC_API_KEY", "test-amsc-api-key")

@@ -3,7 +3,6 @@ if __name__ == "__main__":
     import os
     import pprint
 
-    from dotenv import load_dotenv
     from iri_client import Client
 
     from hepagent.tools.iri.iri_config import IRI_ACCESS_TOKEN_KEY_NAME
@@ -35,7 +34,6 @@ if __name__ == "__main__":
     )
 
     # Auth-required operation
-    load_dotenv()
     access_token = os.getenv(IRI_ACCESS_TOKEN_KEY_NAME)
     auth_client = Client(base_url="https://api.iri.nersc.gov", access_token=access_token)
     print("\nAuth-required operation example [getProjects]:")
