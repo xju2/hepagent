@@ -167,6 +167,21 @@ def run_task(
     typer.echo(f"Agent exited with status: {exit_status}, result: {result}")
 
 
+@app.command("list-agents")
+def list_agents() -> None:
+    """List all available agent configurations."""
+    from hepagent.agent_helpers import AgentManifestLoader
+
+    loader = AgentManifestLoader()
+    agents = loader.get_agent_catalog()
+    if not agents:
+        typer.echo("No agents found.")
+        return
+    typer.echo("Available agents:")
+    for agent in agents:
+        typer.echo(f"\t{agent['name']}: {agent['description']}")
+
+
 @app.command("list-models")
 def list_models(
     platform: str = typer.Option(

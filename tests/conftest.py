@@ -69,6 +69,26 @@ def agent_registry_temp(tmp_path_factory):
     storage_dir.mkdir()
     (storage_dir / "MEMORY.md").write_text("Global shared memory.")
 
+    # Setup Agents directory with sample agent manifests
+    agents_subdir = agents_dir / "agents"
+    for agent_name, agent_desc in [
+        ("research_scientist", "General-purpose scientific research assistant."),
+        ("coder", "Software engineer for scientific computing."),
+        ("cosmologist", "Cosmology simulation expert."),
+    ]:
+        agent_dir = agents_subdir / agent_name
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENT.md").write_text(
+            textwrap.dedent(f"""\
+            ---
+            name: {agent_name}
+            description: {agent_desc}
+            ---
+            # {agent_name.replace("_", " ").title()} Instructions
+            You are a {agent_name.replace("_", " ")} agent.
+        """)
+        )
+
     return agents_dir
 
 

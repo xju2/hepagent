@@ -108,6 +108,13 @@ class AgentManifestLoader:
         if memory:
             components.append(f"# SHARED MEMORY\n{memory}")
 
+        # Load agent-specific instructions if an agent name is set in context
+        agent_name = getattr(getattr(context, "context", None), "agent_name", None)
+        if agent_name:
+            agent_instructions = self.get_agent_instructions(agent_name)
+            if agent_instructions:
+                components.append(f"# AGENT ROLE\n{agent_instructions}")
+
         if catalog:
             components.append(
                 f"# AVAILABLE SKILLS\nYou have access to the following specialized skills."
@@ -141,6 +148,43 @@ class AgentManifestLoader:
                     catalog.append(f"- **{skill_name}**: {desc}")
 
         return "\n".join(catalog)
+
+    def get_agent_catalog(self) -> list[dict[str, str]]:
+        """Scans all agent directories and returns their metadata.
+
+        Returns:
+            A list of dicts with 'name' and 'description' keys for each agent.
+        """
+        agents = []
+        agents_root = self.agents_dir / "agents"
+        if not agents_root.exists():
+            return agents
+
+        for agent_dir in sorted(agents_root.iterdir()):
+            if agent_dir.is_dir():
+                agent_file = agent_dir / "AGENT.md"
+                if agent_file.exists():
+                    meta = self._extract_yaml(agent_file)
+                    agents.append(
+                        {
+                            "name": meta.get("name", agent_dir.name),
+                            "description": meta.get("description", "No description provided."),
+                        }
+                    )
+
+        return agents
+
+    def get_agent_instructions(self, agent_name: str) -> str:
+        """Loads agent-specific instructions from the agents registry.
+
+        Args:
+            agent_name: The name of the agent configuration to load.
+
+        Returns:
+            The agent-specific instruction text, or an empty string if not found.
+        """
+        agent_file = self.agents_dir / "agents" / agent_name / "AGENT.md"
+        return read_md(agent_file)
 
     def _extract_yaml(self, path):
         content = read_md(path)
