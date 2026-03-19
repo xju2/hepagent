@@ -110,7 +110,7 @@ def list_available_roles() -> dict[str, str]:
 
 
 def create(
-    role_name: str = "ShellGPT",
+    role_name: str = "shell",
     model_provider: str = "cborg",
     model_name: str | None = None,
 ) -> Agent:

@@ -171,21 +171,21 @@ def run_task(
     context_agent_name = agent_name
     if shell:
         agent = create_role_agent(
-            role_name="ShellGPT",
+            role_name="shell",
             model_provider=model_provider,
             model_name=model_name,
         )
         context_agent_name = "shell"
     elif describe:
         agent = create_role_agent(
-            role_name="ShellDescriber",
+            role_name="shell_describer",
             model_provider=model_provider,
             model_name=model_name,
         )
         context_agent_name = "shell_describer"
     elif code:
         agent = create_role_agent(
-            role_name="CodeGenerator",
+            role_name="coder",
             model_provider=model_provider,
             model_name=model_name,
         )
