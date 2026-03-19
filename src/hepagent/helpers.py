@@ -1,11 +1,14 @@
 import os
 import pathlib
+import re
 import shutil
 import tomllib
 from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
 from typing import Any
+
+import yaml
 
 
 def get_hepagent_home() -> pathlib.Path:
@@ -236,3 +239,16 @@ def enable_mlflow_for_tracing() -> bool:
         return True
     except ImportError:
         return False
+
+
+def extract_yaml(path, no_body: bool = True) -> tuple[dict[str, Any], str] | dict[str, Any]:
+    content = read_md(path)
+    match = re.search(r"^---\s*(.*?)\s*---", content, re.DOTALL)
+    frontmatter = yaml.safe_load(match.group(1)) if match else {}
+    if not isinstance(frontmatter, dict):
+        frontmatter = {}
+
+    body = content[match.end() :] if match else content
+    if no_body:
+        return frontmatter
+    return frontmatter, body

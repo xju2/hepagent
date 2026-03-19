@@ -1,11 +1,10 @@
-import os
 from dataclasses import dataclass
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
-from hepagent.helpers import load_providers_config, get_env_var
+from hepagent.helpers import get_env_var, load_providers_config
 
 
 @dataclass(frozen=True)

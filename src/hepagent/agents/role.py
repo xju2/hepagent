@@ -19,6 +19,7 @@ from hepagent.model_providers import get_model_provider
 class RoleAgentConfig(BaseModel):
     name: str
     role: str
+    description: str
     variables: dict[str, str] | None = None
     tools: list[str] | None = None
 
@@ -26,9 +27,15 @@ class RoleAgentConfig(BaseModel):
 SHELL_ROLE = """Provide only {shell} commands for {os} without any description.
 If there is a lack of details, provide most logical solution.
 Ensure the output is a valid shell command.
+Provide short responses in about 100 words, unless you are specifically asked for more details.
 If multiple steps required try to combine them together using &&.
-Provide only plain text without Markdown formatting.
-Do not provide markdown formatting such as ```.
+* Format your response as shown in <format_example>.
+<format_example>
+THOUGHT: reasoning
+```bash
+command
+```
+</format_example>
 """
 
 DESCRIBE_SHELL_ROLE = """Provide a terse, single sentence description of the given shell command.
@@ -43,12 +50,6 @@ Do not include symbols such as ``` or ```python.
 If there is a lack of details, provide most logical solution.
 You are not allowed to ask for more details.
 For example if the prompt is "Hello world Python", you should return "print('Hello world')"."""
-
-DEFAULT_ROLE = """You are programming and system administration assistant.
-You are managing {os} operating system with {shell} shell.
-Provide short responses in about 100 words, unless you are specifically asked for more details.
-If you need to store any data, assume it will be stored in the conversation.
-APPLY MARKDOWN formatting when possible."""
 
 ROLE_TEMPLATE = """You are {name}
 Your maximum thinking turns are TWO. Try to provide final outputs with only one turn.
@@ -77,32 +78,35 @@ def _os_name() -> str:
 @lru_cache
 def create_role_cfg() -> dict[str, RoleAgentConfig]:
     role_agents = {
-        "ShellGPT": RoleAgentConfig(
+        "shell": RoleAgentConfig(
             name="ShellGPT",
-            role=DEFAULT_ROLE,
-            variables={"os": _os_name(), "shell": _shell_name()},
-            tools=[],
-        ),
-        "ShellCommandGenerator": RoleAgentConfig(
-            name="Shell Command Generator",
+            description="Generates shell commands based on the task prompt.",
             role=SHELL_ROLE,
             variables={"os": _os_name(), "shell": _shell_name()},
             tools=[],
         ),
-        "ShellCommandDescriber": RoleAgentConfig(
+        "shell_describer": RoleAgentConfig(
             name="Shell Command Describer",
+            description="Describes shell commands in a terse, single sentence format.",
             role=DESCRIBE_SHELL_ROLE,
             variables={},
             tools=[],
         ),
-        "CodeGenerator": RoleAgentConfig(
+        "coder": RoleAgentConfig(
             name="Code Generator",
+            description="Generates code snippets based on the task prompt.",
             role=CODE_ROLE,
             variables={},
             tools=[],
         ),
     }
     return role_agents
+
+
+def list_available_roles() -> dict[str, str]:
+    """List available role agents with their descriptions."""
+    role_cfg = create_role_cfg()
+    return {name: cfg.description for name, cfg in role_cfg.items()}
 
 
 def create(

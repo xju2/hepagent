@@ -33,7 +33,8 @@ def test_get_hepagent_home_returns_home_subdir(tmp_path):
 
 
 def test_get_agent_dir_falls_back_to_repo_root(tmp_path):
-    """get_agent_dir should fall back to .agents under repo root when ~/.hepagent/agents/ is absent."""
+    """get_agent_dir should fall back to .agents
+    under repo root when ~/.hepagent/agents/ is absent."""
     with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
         agent_dir = get_agent_dir()
     root = get_repo_root()
