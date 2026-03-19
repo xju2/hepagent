@@ -230,7 +230,7 @@ def enable_mlflow_for_tracing() -> bool:
             urllib3.disable_warnings(InsecureRequestWarning)
 
         # Optional: Set a tracking URI and an experiment
-        exp_name = get_env_var("MLFLOW_EXPERIMENT_NAME", default="hepagent-tracing")
+        exp_name = get_env_var("MLFLOW_EXPERIMENT_NAME", default="hepagent-log-tracing")
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(exp_name)
         return True
