@@ -39,7 +39,7 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
     if not base_url or not api_key_env or not default_model:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
-    api_key = get_env_var(api_key_env)
+    api_key = get_env_var(api_key_env, default="")
     if not api_key:
         raise ValueError(
             f"API key not found. Please set the environment variable '{api_key_env}' "
