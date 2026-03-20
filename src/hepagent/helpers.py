@@ -117,13 +117,24 @@ def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T](key: str, *, dtype: type[T] = str, default: T | None = None) -> T:
+def get_env_var[T](
+    key: str, *, dtype: type[T] = str, default: T | None = None, set_env: bool = True
+) -> T:
     """Helper to access environment variables with a TOML fallback.
+       The lookup order is:
+            1) OS environment variables (`os.getenv`)
+            2) TOML configuration loaded via `load_env_config`
+            3) ``default`` (if provided)
+
+       When a value is found in the TOML config,
+       it will be set as an environment variable for future access
+       if `set_env` is True (default).
 
     Args:
         key: Environment variable / config key.
         dtype: Target type (int, str, bool, float).
         default: Optional default value if key is missing from both env and TOML.
+        set_env: If True, sets the value from TOML into the environment for future access.
 
     Returns:
         The value from environment, TOML, or default (if provided).
@@ -163,8 +174,9 @@ def get_env_var[T](key: str, *, dtype: type[T] = str, default: T | None = None) 
         raw_toml = config[key]
         try:
             values = conv(raw_toml)  # type: ignore[return-value]
-            # declear it as env var for later use.
-            os.environ[key] = str(values)
+            # declare it as env var for later use.
+            if set_env:
+                os.environ[key] = str(values)
             return values
         except (TypeError, ValueError) as e:
             raise ValueError(
@@ -244,7 +256,7 @@ def enable_mlflow_for_tracing() -> bool:
         return False
 
 
-def extract_yaml(path, no_body: bool = True) -> tuple[dict[str, Any], str] | dict[str, Any]:
+def extract_yaml(path) -> tuple[dict[str, Any], str]:
     content = read_md(path)
     match = re.search(r"^---\s*(.*?)\s*---", content, re.DOTALL)
     frontmatter = yaml.safe_load(match.group(1)) if match else {}
@@ -252,6 +264,4 @@ def extract_yaml(path, no_body: bool = True) -> tuple[dict[str, Any], str] | dic
         frontmatter = {}
 
     body = content[match.end() :] if match else content
-    if no_body:
-        return frontmatter
     return frontmatter, body

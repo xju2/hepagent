@@ -36,5 +36,5 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - For `hepagent run` (and the default-to-run behavior), `TASK_PROMPT` is a required positional argument.
 - Default provider is `cborg`; model spec supports `provider:model` (e.g. `openai:gpt-5-mini`).
 - Example:
-  - `uv run hepagent run --agent research_scientist "List repository files"`
-  - `uv run hepagent run --agent research_scientist "..." --model openai:gpt-5-mini`
+  - `uv run hepagent run --agent scientist "List repository files"`
+  - `uv run hepagent run --agent scientist "..." --model openai:gpt-5-mini`

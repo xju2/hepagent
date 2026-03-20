@@ -24,10 +24,8 @@ class RoleAgentConfig(BaseModel):
     tools: list[str] | None = None
 
 
-SHELL_ROLE = """Provide only {shell} commands for {os} without any description.
-If there is a lack of details, provide most logical solution.
-Ensure the output is a valid shell command.
-Provide short responses in about 100 words, unless you are specifically asked for more details.
+SHELL_ROLE = """Provide short responses in about 100 words,
+unless you are specifically asked for more details.
 If multiple steps required try to combine them together using &&.
 * Format your response as shown in <format_example>.
 <format_example>
@@ -36,6 +34,7 @@ THOUGHT: reasoning
 command
 ```
 </format_example>
+If there is a lack of details, provide most logical solution.
 """
 
 DESCRIBE_SHELL_ROLE = """Provide a terse, single sentence description of the given shell command.
@@ -103,12 +102,6 @@ def create_role_cfg() -> dict[str, RoleAgentConfig]:
     return role_agents
 
 
-def list_available_roles() -> dict[str, str]:
-    """List available role agents with their descriptions."""
-    role_cfg = create_role_cfg()
-    return {name: cfg.description for name, cfg in role_cfg.items()}
-
-
 def create(
     role_name: str = "shell",
     model_provider: str = "cborg",
@@ -155,20 +148,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run role-based agent")
     parser.add_argument("task", help="Task to perform")
-    parser.add_argument(
-        "-s", "--shell", help="Generate and execute shell commands", action="store_true"
-    )
     parser.add_argument("-d", "--describe", help="Describe shell commands", action="store_true")
     parser.add_argument("-c", "--code", help="Generate code snippets", action="store_true")
 
     args = parser.parse_args()
 
-    role_name = "ShellGPT"
-    if args.shell:
-        role_name = "ShellCommandGenerator"
-    elif args.describe:
-        role_name = "ShellCommandDescriber"
+    role_name = "shell"  # Default role
+    if args.describe:
+        role_name = "shell_describer"
     elif args.code:
-        role_name = "CodeGenerator"
+        role_name = "coder"
+    else:
+        pass
     task = args.task
     asyncio.run(main(task, role_name=role_name))

@@ -132,7 +132,7 @@ class AgentManifestLoader:
             if skill_dir.is_dir():
                 skill_file = skill_dir / "SKILL.md"
                 if skill_file.exists():
-                    meta = extract_yaml(skill_file)
+                    meta, _ = extract_yaml(skill_file)
                     skill_name = meta.get("name", skill_dir.name)
                     desc = meta.get("description", "No description provided.")
                     catalog.append(f"- **{skill_name}**: {desc}")

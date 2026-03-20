@@ -7,7 +7,7 @@ from typer.core import TyperGroup
 from agents import SQLiteSession
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.common import AgentContext
-from hepagent.agents.role import create as create_role_agent, list_available_roles
+from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
@@ -50,7 +50,7 @@ def create_chat_session(conversation_id: str) -> SQLiteSession:
 def main(
     ctx: typer.Context,
     agent_name: str = typer.Option(
-        "research_scientist",
+        "scientist",
         "--agent",
         "-a",
         show_default=True,
@@ -102,8 +102,8 @@ def run_task(
         ...,
         help="Task prompt to send to the agent.",
     ),
-    agent_name: str | None = typer.Option(
-        None,
+    agent_name: str = typer.Option(
+        "scientist",
         "--agent",
         "-a",
         help="Agent configuration to use.",
@@ -129,37 +129,14 @@ def run_task(
         "--chat",
         help="Conversation id for persistent SQLite chat history.",
     ),
-    shell: bool = typer.Option(
-        False,
-        "--shell",
-        "-s",
-        help="Run with the shell role agent.",
-    ),
-    describe: bool = typer.Option(
-        False,
-        "--describe",
-        "-d",
-        help="Run with the shell describer role agent.",
-    ),
-    code: bool = typer.Option(
-        False,
-        "--code",
-        "-c",
-        help="Run with the coder role agent.",
-    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
-    agent_name = agent_name or str(options.get("agent_name", "research_scientist"))
+    agent_name = agent_name.lower() or str(options.get("agent_name", "scientist"))
     yolo = yolo or bool(options.get("yolo", False))
     max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
     model = model or options.get("model")
     chat = chat or options.get("chat")
-
-    selected_role_count = int(shell) + int(describe) + int(code)
-    if selected_role_count > 1:
-        typer.echo("Provide at most one role flag: --shell, --describe, or --code.")
-        raise typer.Exit(code=2)
 
     if env_config.use_mlflow_tracing and enable_mlflow_for_tracing():
         typer.echo("MLflow found. Using MLflow for tracing.")
@@ -168,32 +145,28 @@ def run_task(
         mlflow.openai.autolog()
 
     model_provider, model_name = parse_model_spec(model)
-    context_agent_name = agent_name
-    if shell:
+    if agent_name == "shell":
         agent = create_role_agent(
             role_name="shell",
             model_provider=model_provider,
             model_name=model_name,
         )
-        context_agent_name = "shell"
-    elif describe:
+    elif agent_name == "shell_describer":
         agent = create_role_agent(
             role_name="shell_describer",
             model_provider=model_provider,
             model_name=model_name,
         )
-        context_agent_name = "shell_describer"
-    elif code:
+    elif agent_name == "coder":
         agent = create_role_agent(
             role_name="coder",
             model_provider=model_provider,
             model_name=model_name,
         )
-        context_agent_name = "coder"
     else:
         agent = create_skilled_agent(model_provider=model_provider, model_name=model_name)
 
-    context = AgentContext(agent_name=context_agent_name)
+    context = AgentContext(agent_name=agent_name)
     display_model = model_name or get_model_provider_settings(model_provider).default_model
     app_agent = TextualAgent(model=display_model, env={})
 
@@ -223,9 +196,9 @@ def list_agents() -> None:
     typer.echo("\tcoder -> --code/-c")
 
     typer.echo("\nAvailable role agents:")
-    roles = list_available_roles()
+    roles = create_role_cfg()
     for role_key in sorted(roles):
-        description = roles[role_key]
+        description = roles[role_key].description
         typer.echo(f"\t{role_key}: {description}")
 
 

@@ -99,7 +99,7 @@ uv run hepagent --help
 
 ```bash
 # Run the skilled agent with a Nyx simulation task
-uv run hepagent --agent "research_scientist" \
+uv run hepagent --agent "scientist" \
     --task "I would like to simulate a cosmology sky with Nyx code." \
     --max-turn 30
 

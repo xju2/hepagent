@@ -96,7 +96,7 @@ def test_run_shell_mode_uses_role_agent(monkeypatch):
     created_apps, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
-    result = runner.invoke(main_module.app, ["run", "-s", "check disk space"])
+    result = runner.invoke(main_module.app, ["run", "-a", "shell", "check disk space"])
 
     assert result.exit_code == 0
     assert len(skilled_calls) == 0
@@ -112,7 +112,7 @@ def test_run_describe_mode_uses_role_agent(monkeypatch):
     created_apps, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
-    result = runner.invoke(main_module.app, ["run", "-d", "ls -la | wc -l"])
+    result = runner.invoke(main_module.app, ["run", "-a", "shell_describer", "ls -la | wc -l"])
 
     assert result.exit_code == 0
     assert len(skilled_calls) == 0
@@ -128,7 +128,7 @@ def test_run_code_mode_uses_role_agent(monkeypatch):
     created_apps, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
-    result = runner.invoke(main_module.app, ["run", "-c", "write python to count xju"])
+    result = runner.invoke(main_module.app, ["run", "-a", "coder", "write python to count xju"])
 
     assert result.exit_code == 0
     assert len(skilled_calls) == 0
@@ -151,24 +151,13 @@ def test_run_default_mode_uses_skilled_agent(monkeypatch):
     assert len(role_calls) == 0
     task, kwargs = created_apps[0].run_task_calls[0]
     assert task == "run a nyx simulation"
-    assert kwargs["context"].agent_name == "research_scientist"
-
-
-def test_run_rejects_multiple_role_flags(monkeypatch):
-    session_sentinel = object()
-    _setup_stubs(monkeypatch, session_sentinel)
-
-    runner = CliRunner()
-    result = runner.invoke(main_module.app, ["run", "hello", "-s", "-d"])
-
-    assert result.exit_code == 2
-    assert "Provide at most one role flag" in result.stdout
+    assert kwargs["context"].agent_name == "scientist"
 
 
 def test_list_agents_includes_roles(monkeypatch):
     monkeypatch.setattr(
         main_module,
-        "list_available_roles",
+        "create_role_cfg",
         lambda: {
             "shell": SimpleNamespace(description="shell role"),
             "coder": SimpleNamespace(description="coder role"),
