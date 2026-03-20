@@ -111,8 +111,7 @@ def test_manifest_loader_get_skill_catalog_nonempty(mock_agent_env):
 
 
 def test_manifest_loader_extract_yaml(mock_agent_env):
-    """_extract_yaml parses frontmatter from a SKILL.md file."""
+    """get_skill_catalog includes skill metadata parsed from SKILL.md frontmatter."""
     loader = AgentManifestLoader()
-    skill_file = mock_agent_env / "skills" / "nyx" / "SKILL.md"
-    meta = loader._extract_yaml(skill_file)
-    assert meta.get("name") == "nyx"
+    catalog = loader.get_skill_catalog()
+    assert "**nyx**" in catalog

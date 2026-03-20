@@ -85,10 +85,9 @@ def test_os_name_on_unknown_platform(monkeypatch):
 
 def test_create_role_cfg_contains_expected_roles():
     cfg = create_role_cfg()
-    assert "ShellGPT" in cfg
-    assert "ShellCommandGenerator" in cfg
-    assert "ShellCommandDescriber" in cfg
-    assert "CodeGenerator" in cfg
+    assert "shell" in cfg
+    assert "shell_describer" in cfg
+    assert "coder" in cfg
 
 
 def test_create_role_cfg_entries_are_role_agent_config():
@@ -117,7 +116,7 @@ def test_create_valid_role(monkeypatch):
     monkeypatch.setattr(role_module, "Agent", StubAgent)
     monkeypatch.setattr(role_module, "get_model_provider", lambda **_: sentinel_model)
 
-    agent = create(role_name="ShellGPT")
+    agent = create(role_name="shell")
 
     assert isinstance(agent, StubAgent)
     assert captured["model"] is sentinel_model
@@ -130,8 +129,8 @@ def test_create_raises_for_unknown_role():
         create(role_name="NonExistentRole")
 
 
-def test_create_shell_command_generator(monkeypatch):
-    """create() works for ShellCommandGenerator role."""
+def test_create_shell_role(monkeypatch):
+    """create() works for shell role key."""
     captured = {}
 
     class StubAgent:
@@ -141,8 +140,8 @@ def test_create_shell_command_generator(monkeypatch):
     monkeypatch.setattr(role_module, "Agent", StubAgent)
     monkeypatch.setattr(role_module, "get_model_provider", lambda **_: object())
 
-    create(role_name="ShellCommandGenerator")
-    assert "Shell Command Generator" in captured["name"]
+    create(role_name="shell")
+    assert "ShellGPT" in captured["name"]
 
 
 def test_create_code_generator(monkeypatch):
@@ -156,5 +155,5 @@ def test_create_code_generator(monkeypatch):
     monkeypatch.setattr(role_module, "Agent", StubAgent)
     monkeypatch.setattr(role_module, "get_model_provider", lambda **_: object())
 
-    create(role_name="CodeGenerator")
+    create(role_name="coder")
     assert "Code Generator" in captured["name"]

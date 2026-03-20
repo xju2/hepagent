@@ -5,7 +5,7 @@ from hepagent.main import app
 
 def test_cli_requires_task_prompt():
     runner = CliRunner()
-    result = runner.invoke(app, ["run", "--agent", "research_scientist"])
+    result = runner.invoke(app, ["run", "--agent", "scientist"])
 
     assert result.exit_code == 2
-    assert "Missing argument 'TASK_PROMPT'" in result.stderr
+    assert "Missing argument 'TASK_PROMPT'" in result.output

@@ -1,12 +1,9 @@
-import re
 import textwrap
 from typing import Literal
 
-import yaml
-
 from agents import Agent, RunContextWrapper, Usage, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import read_md
+from hepagent.helpers import extract_yaml, read_md
 from hepagent.token_costs import calculate_cost
 
 
@@ -135,14 +132,9 @@ class AgentManifestLoader:
             if skill_dir.is_dir():
                 skill_file = skill_dir / "SKILL.md"
                 if skill_file.exists():
-                    meta = self._extract_yaml(skill_file)
+                    meta, _ = extract_yaml(skill_file)
                     skill_name = meta.get("name", skill_dir.name)
                     desc = meta.get("description", "No description provided.")
                     catalog.append(f"- **{skill_name}**: {desc}")
 
         return "\n".join(catalog)
-
-    def _extract_yaml(self, path):
-        content = read_md(path)
-        match = re.search(r"^---\s*(.*?)\s*---", content, re.DOTALL)
-        return yaml.safe_load(match.group(1)) if match else {}
