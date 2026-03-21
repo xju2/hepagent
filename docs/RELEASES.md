@@ -2,6 +2,8 @@
 
 This document is the single source of truth for preparing and publishing a new HepAgent release.
 
+Before running this playbook, read [`AGENTS.md`](../AGENTS.md) for repository-wide agent rules.
+
 ## Goal
 
 Produce a clean, reproducible release by:
