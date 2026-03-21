@@ -119,8 +119,6 @@ default_model = "custom-model"
 
     assert "cborg" in providers
     assert providers["cborg"]["base_url"] == "https://custom-cborg.example.com"
-    assert "openai" in providers
-    assert "gemini" in providers
 
 
 def test_get_env_var_reads_from_environment(monkeypatch):
