@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.3.1] – 2026-03-21
+
+### Overview
+
+Patch release that bumps the version to v0.3.1 and merges the clean-for-v0.3.1 branch into main.
+
+### What's Changed since v0.3.0
+
+- **Version bump** — Package version updated to `0.3.1`.
+
+---
+
 ## [v0.3.0] – 2026-03-20
 
 ### Overview
@@ -135,5 +147,6 @@ uv run hepagent --agent "scientist" \
 uv run hepagent list-models --platform cborg
 ```
 
+[v0.3.1]: https://github.com/xju2/hepagent/releases/tag/v0.3.1
 [v0.3.0]: https://github.com/xju2/hepagent/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/xju2/hepagent/releases/tag/v0.2.0
