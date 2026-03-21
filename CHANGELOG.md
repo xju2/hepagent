@@ -1,5 +1,33 @@
 # Changelog
 
+## [v0.3.0] – 2026-03-20
+
+### Overview
+
+This release adds role-based agents, a Typer-based CLI, persistent chat sessions, IRI job-submission tools, MLflow tracing, and a moved home directory layout. Test coverage increased from 35 % to 62 %.
+
+---
+
+### What's Changed since v0.2.0
+
+#### New Features
+
+- **Role-based agents** — Dedicated `shell`, `shell_describer`, and `coder` agent types selectable via `--agent` / `-a`. Backed by a `create_role_cfg` registry loaded from `.agents/` manifests.
+- **Typer CLI** — Entrypoint fully rewritten with [Typer](https://typer.tiangolo.com/). Supports `run`, `list-agents`, `list-models`, and `list-cborg-models` subcommands. Unknown first tokens default to `run` for backward compatibility.
+- **Persistent chat sessions** — `--chat <id>` flag stores conversation history in an SQLite database (`~/.hepagent/sessions/conversation.db`) via `SQLiteSession`.
+- **IRI job-submission tools** — New `tools/iri/` module with tools to submit and manage compute jobs on the IRI infrastructure.
+- **MLflow tracing** — Automatic OpenAI auto-log via `mlflow.openai.autolog()` when MLflow is detected (`HEPAGENT_USE_MLFLOW_TRACING=true`).
+- **Home directory moved to `.hepagent`** — All runtime state (sessions, logs) now lives under `~/.hepagent/` instead of the previous location.
+- **AGENTS.md auto-generation** — Agent can generate an `AGENTS.md` bootstrap file for new repositories.
+- **API key validation** — Improved early detection and reporting of missing provider API keys.
+
+#### Quality
+
+- Test coverage raised from **35 % → 62 %**.
+- CLI bug fixes for default-command routing and option precedence.
+
+---
+
 ## [v0.2.0] – 2026-02-28
 
 ### Overview
@@ -107,4 +135,5 @@ uv run hepagent --agent "scientist" \
 uv run hepagent list-models --platform cborg
 ```
 
+[v0.3.0]: https://github.com/xju2/hepagent/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/xju2/hepagent/releases/tag/v0.2.0
