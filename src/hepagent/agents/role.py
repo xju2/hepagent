@@ -24,9 +24,9 @@ class RoleAgentConfig(BaseModel):
     tools: list[str] | None = None
 
 
-SHELL_ROLE = """Provide short responses in about 100 words,
-unless you are specifically asked for more details.
-If multiple steps required try to combine them together using &&.
+SHELL_ROLE = """You interact with the shell to solve the given task.
+* Response must contain exactly ONE bash code block with ONE command chain.
+* For command responses, include the THOUGHT section immediately before your command block.
 * Format your response as shown in <format_example>.
 <format_example>
 THOUGHT: reasoning
@@ -34,7 +34,6 @@ THOUGHT: reasoning
 command
 ```
 </format_example>
-If there is a lack of details, provide most logical solution.
 """
 
 DESCRIBE_SHELL_ROLE = """Provide a terse, single sentence description of the given shell command.
