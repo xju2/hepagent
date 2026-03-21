@@ -85,7 +85,7 @@ convention = "google"
 
 [tool.coverage.run]
 source = ["src/hepagent"]
-omit = ["tests/*"]
+omit = ["tests/*", "src/hepagent/scripts/*", "*/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true

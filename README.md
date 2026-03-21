@@ -1,5 +1,5 @@
 # Project
-![coverage](https://img.shields.io/badge/coverage-60%25-green)
+![coverage](https://img.shields.io/badge/coverage-70%25-green)
 
 ## Introduction
 
