@@ -14,7 +14,11 @@ from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.config.env import env_config
 from hepagent.helpers import bootstrap_hepagent_home, enable_mlflow_for_tracing, get_hepagent_home
-from hepagent.model_providers import get_model_provider_settings, parse_model_spec
+from hepagent.model_providers import (
+    get_model_provider_settings,
+    get_supported_model_providers,
+    parse_model_spec,
+)
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -209,7 +213,7 @@ def list_models(
         "--platform",
         "-p",
         show_default=True,
-        help="Platform to query (cborg, amsc, openai).",
+        help=(f"Platform to query ({', '.join(get_supported_model_providers())})."),
     ),
 ) -> None:
     """List available models for a provider."""

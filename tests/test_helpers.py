@@ -12,6 +12,7 @@ from hepagent.helpers import (
     get_hepagent_home,
     get_repo_root,
     load_env_config,
+    load_providers_config,
     read_md,
 )
 
@@ -93,6 +94,33 @@ def test_load_env_config_returns_dict():
     cfg = load_env_config()
     assert isinstance(cfg, dict)
     assert len(cfg) > 0
+
+
+def test_load_providers_config_merges_user_with_defaults(tmp_path):
+    """User provider overrides should merge with bundled defaults."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "providers.toml").write_text(
+        """
+[providers.cborg]
+base_url = "https://custom-cborg.example.com"
+api_key_env = "CBORG_API_KEY"
+default_model = "custom-model"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    load_providers_config.cache_clear()
+    try:
+        with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+            providers = load_providers_config()
+    finally:
+        load_providers_config.cache_clear()
+
+    assert "cborg" in providers
+    assert providers["cborg"]["base_url"] == "https://custom-cborg.example.com"
+    assert "openai" in providers
+    assert "gemini" in providers
 
 
 def test_get_env_var_reads_from_environment(monkeypatch):

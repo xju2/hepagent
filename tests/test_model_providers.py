@@ -46,6 +46,13 @@ def test_parse_model_spec_with_provider_prefix():
     assert model == "gpt-4"
 
 
+def test_parse_model_spec_with_gemini_provider_prefix():
+    """parse_model_spec supports gemini:model format."""
+    provider, model = parse_model_spec("gemini:gemini-2.5-flash")
+    assert provider == "gemini"
+    assert model == "gemini-2.5-flash"
+
+
 def test_parse_model_spec_empty_model_after_colon():
     """parse_model_spec treats 'provider:' (empty model) as model=None."""
     provider, model = parse_model_spec("openai:")
@@ -65,6 +72,13 @@ def test_get_model_provider_settings_returns_settings():
     assert settings.base_url is not None
     assert settings.api_key_env is not None
     assert settings.default_model is not None
+
+
+def test_get_model_provider_settings_normalizes_gemini_base_url(monkeypatch):
+    """Gemini provider uses OpenAI-compatible endpoint path."""
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key")
+    settings = get_model_provider_settings("gemini")
+    assert settings.base_url.endswith("/openai")
 
 
 def test_get_model_provider_settings_unsupported_raises():

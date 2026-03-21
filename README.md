@@ -1,11 +1,17 @@
 # Project
 ![coverage](https://img.shields.io/badge/coverage-60%25-green)
 
-Building a HEP Agent framwork for cosmology simulation and particle physics analysis.
-The framework is based on the `openai-agent-framework` and supports multiple model providers.
-
 ## Introduction
 
+`hepagent` is an AI agent framework tailored for High Energy Physics (HEP) and cosmology workflows. Key features include:
+
+- **Multi-provider LLM support**: seamlessly switch between providers such as `cborg`, `openai`, `amsc`, and `gemini` via a unified CLI (`hepagent run`) or programmatic API, with per-provider configuration managed in `providers.toml`.
+- **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations) that agents load on demand, keeping prompts concise and context-relevant.
+- **Bash and REPL agents**: interactive shell agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
+- **Textual TUI agent**: a rich Terminal User Interface (`TextualAgent`) with real-time display of agent thinking, step navigation, and live cost tracking.
+- **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
+- **Nyx simulation tools**: dedicated tools for setting up transfer functions and other Nyx-specific tasks used in Ly-α forest and large-scale structure studies.
+- **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
 
 ## Installation
 
@@ -14,7 +20,6 @@ uv python install 3.14 (or higher)
 make sync
 source .venv/bin/activate
 uv pip install -e .
-uv run hepagent --help
 ```
 
 
@@ -56,6 +61,7 @@ List available models for a platform:
 uv run hepagent list-models --platform cborg
 uv run hepagent list-models --platform amsc
 uv run hepagent list-models --platform openai
+uv run hepagent list-models --platform gemini
 ```
 
 
@@ -101,6 +107,7 @@ Run with real bash agent (requires provider API key):
 export CBORG_API_KEY="your-api-key"
 export OPENAI_API_KEY="your-api-key"
 export AMSC_API_KEY="your-api-key"
+export GEMINI_API_KEY="your-api-key"
 export OPENAI_AGENTS_DISABLE_TRACING=1
 python3 scripts/bash_textual.py --task "dummy"
 ```
