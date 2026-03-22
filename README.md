@@ -24,12 +24,12 @@ uv run hepagent list-models --platform cborg
 ```
 
 ### Configurations
-after the installation, you can find default configurations at `$HOME/.hepagent`.
+After the installation, you can find default configurations at `$HOME/.hepagent`.
 The environment variables are stored in `$HOME/.hepagent/config/env_vars.toml`.
 
 To use a LLM provider, set the corresponding API keys as environment variables.
 You may also want to set `OPENAI_AGENTS_DISABLE_TRACING=1` to disable the tracing logs,
-especically if you do not have a OPENAI_API_KEY.
+especially if you do not have an OPENAI_API_KEY.
 
 If you don't want to store API keys in the TOML file,
 you can set them to environment variables directly.
@@ -43,8 +43,8 @@ export GEMINI_API_KEY="your-api-key"
 
 ## Instructions
 
-### Chose a platform and model
-We can run the agent as the following examples.
+### Choose a platform and model
+You can run the agent as in the following examples.
 The default model is `cborg:gemini-flash` if not specified.
 
 List available models for a platform:
@@ -60,9 +60,9 @@ uv run hepagent list-models --platform gemini
 
 ```bash
 uv run hepagent run --agent "shell" --model "gemini:models/gemini-flash-lite-latest" "how many python files in this code repository"
-uv run hepagent run --agent "scientist" --model "cborg" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+uv run hepagent run --agent "scientist" --model "cborg:gemini-flash" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
 uv run hepagent run --agent "coder" --model "openai:gpt-5-mini" "Create a worktree for adding a new feature: chunkle."
-uv run hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # defaults to cborg
+uv run hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # uses Gemini provider
 ```
 
 YOLO mode (auto-approve all bash commands):
