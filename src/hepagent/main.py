@@ -95,8 +95,8 @@ def main(
     # check if OPENAI_API_KEY is set. If not, disable tracing.
     open_ai_key_missing = True
     try:
-        openai_key = get_env_var("OPENAI_API_KEY", set_env=True)
-        if openai_key is not None:
+        openai_key = get_env_var("OPENAI_API_KEY", default=None, set_env=True)
+        if openai_key is not None and openai_key.strip() != "":
             open_ai_key_missing = False
     except Exception:
         pass
