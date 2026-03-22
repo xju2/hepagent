@@ -96,8 +96,8 @@ def test_load_env_config_returns_dict():
     assert len(cfg) > 0
 
 
-def test_load_providers_config_merges_user_with_defaults(tmp_path):
-    """User provider overrides should merge with bundled defaults."""
+def test_load_providers_config_uses_user_file_when_present(tmp_path):
+    """User providers.toml should override bundled defaults when present."""
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "providers.toml").write_text(
