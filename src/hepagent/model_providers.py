@@ -30,14 +30,6 @@ def _get_provider_config(model_provider: str) -> dict[str, Any]:
     return providers[provider]
 
 
-def _normalize_base_url(model_provider: str, base_url: str) -> str:
-    """Normalize provider endpoints to OpenAI-compatible paths when needed."""
-    provider = model_provider.strip().lower()
-    if provider == "gemini" and not base_url.rstrip("/").endswith("/openai"):
-        return base_url.rstrip("/") + "/openai"
-    return base_url
-
-
 def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
     cfg = _get_provider_config(model_provider)
     base_url = cfg.get("base_url")
@@ -54,10 +46,8 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
             f"to add the API key for provider '{model_provider}'."
         )
 
-    normalized_base_url = _normalize_base_url(model_provider, base_url)
-
     return ModelProviderSettings(
-        base_url=normalized_base_url,
+        base_url=base_url,
         api_key=api_key,
         api_key_env=api_key_env,
         default_model=default_model,

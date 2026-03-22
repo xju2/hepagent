@@ -14,6 +14,6 @@ api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5-mini"
 
 [providers.gemini]
-base_url = "https://generativelanguage.googleapis.com/v1beta"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-flash"
