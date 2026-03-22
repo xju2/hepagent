@@ -13,8 +13,17 @@ from hepagent.agents.textual import AgentAdapter, TextualAgent
 from hepagent.agents.textual_bash import BashToolWrapper
 from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.config.env import env_config
-from hepagent.helpers import bootstrap_hepagent_home, enable_mlflow_for_tracing, get_hepagent_home
-from hepagent.model_providers import get_model_provider_settings, parse_model_spec
+from hepagent.helpers import (
+    bootstrap_hepagent_home,
+    enable_mlflow_for_tracing,
+    get_env_var,
+    get_hepagent_home,
+)
+from hepagent.model_providers import (
+    get_model_provider_settings,
+    get_supported_model_providers,
+    parse_model_spec,
+)
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -82,6 +91,20 @@ def main(
 ) -> None:
     """HepAgent: A framework for building and deploying AI agents in HEP."""
     bootstrap_hepagent_home()
+
+    # check if OPENAI_API_KEY is set. If not, disable tracing.
+    open_ai_key_missing = True
+    try:
+        openai_key = get_env_var("OPENAI_API_KEY", default=None, set_env=True)
+        if openai_key is not None and openai_key.strip() != "":
+            open_ai_key_missing = False
+    except Exception:
+        pass
+    if open_ai_key_missing:
+        import os
+
+        os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
+
     ctx.obj = {
         "agent_name": agent_name,
         "yolo": yolo,
@@ -202,6 +225,14 @@ def list_agents() -> None:
         typer.echo(f"\t{role_key}: {description}")
 
 
+@app.command("list-platforms")
+def list_platforms() -> None:
+    """List all supported model providers/platforms."""
+    typer.echo("Supported model providers:")
+    for provider in sorted(get_supported_model_providers()):
+        typer.echo(f"\t{provider}")
+
+
 @app.command("list-models")
 def list_models(
     platform: str = typer.Option(
@@ -209,7 +240,7 @@ def list_models(
         "--platform",
         "-p",
         show_default=True,
-        help="Platform to query (cborg, amsc, openai).",
+        help=(f"Platform to query ({', '.join(get_supported_model_providers())})."),
     ),
 ) -> None:
     """List available models for a provider."""
@@ -226,12 +257,6 @@ def list_models(
     names = sorted(model.id for model in models.data)
     for name in names:
         typer.echo("\t" + name)
-
-
-@app.command("list-cborg-models")
-def list_cborg_models() -> None:
-    """List available CBORG models (use list-models instead)."""
-    list_models("cborg")
 
 
 if __name__ == "__main__":

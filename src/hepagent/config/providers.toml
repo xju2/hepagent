@@ -12,3 +12,8 @@ default_model = "gpt-oss-20b"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5-mini"
+
+[providers.gemini]
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+api_key_env = "GEMINI_API_KEY"
+default_model = "gemini-flash"

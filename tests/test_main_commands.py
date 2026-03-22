@@ -109,15 +109,3 @@ def test_list_models_with_api_key():
     all_output = "\n".join(output_parts)
     assert "model-a" in all_output
     assert "model-b" in all_output
-
-
-def test_list_cborg_models_delegates_to_list_models():
-    """list_cborg_models delegates to list_models with 'cborg'."""
-    import hepagent.main as main_module
-
-    calls = []
-
-    with patch.object(main_module, "list_models", side_effect=lambda p: calls.append(p)):
-        main_module.list_cborg_models()
-
-    assert calls == ["cborg"]

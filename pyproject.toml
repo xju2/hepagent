@@ -1,6 +1,6 @@
 [project]
 name = "hepagent"
-version = "0.3.0"
+version = "0.3.1"
 description = "Agent AI for HEP tasks"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -85,7 +85,7 @@ convention = "google"
 
 [tool.coverage.run]
 source = ["src/hepagent"]
-omit = ["tests/*"]
+omit = ["tests/*", "src/hepagent/scripts/*", "*/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true

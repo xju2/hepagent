@@ -28,9 +28,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 ## Local Development
 - Setup: `make sync`
 - Format: `make format`
-- Lint: `make lint`
 - Tests (default): `make tests` (`-k "not skilled_agent"`)
-- Full targeted test example: `uv run pytest -s tests/test_skilled_agent.py`
 
 ## CLI Usage Rules
 - For `hepagent run` (and the default-to-run behavior), `TASK_PROMPT` is a required positional argument.

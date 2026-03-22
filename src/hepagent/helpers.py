@@ -174,10 +174,11 @@ def get_env_var[T](
         raw_toml = config[key]
         try:
             values = conv(raw_toml)  # type: ignore[return-value]
-            # declare it as env var for later use.
-            if set_env:
-                os.environ[key] = str(values)
-            return values
+            is_empty_str = isinstance(values, str) and values.strip() == ""
+            if values is not None and not is_empty_str:
+                if set_env:
+                    os.environ[key] = str(values)
+                return values
         except (TypeError, ValueError) as e:
             raise ValueError(
                 f"Invalid TOML value for {key}={raw_toml!r} (type {type(raw_toml).__name__}); "
