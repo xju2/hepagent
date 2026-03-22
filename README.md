@@ -15,7 +15,7 @@
 ## Installation
 
 ```bash
-uv python install 3.14 (or higher)
+uv python install 3.12 (or higher)
 make sync
 source .venv/bin/activate
 uv pip install -e .
