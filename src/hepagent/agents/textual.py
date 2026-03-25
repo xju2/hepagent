@@ -12,6 +12,7 @@ Features:
     - Step-by-step navigation through agent execution
     - Real-time cost tracking
     - Support for both DummyAgent (testing) and real agents via tool wrappers
+    - Terminal stays alive after task completion to accept new tasks
 
 Usage:
 UI Controls:
@@ -543,10 +544,15 @@ class TextualAgent(App):
                 with Vertical(id="content"):
                     pass
                 yield self.input_container
+            yield Input(
+                placeholder="Enter a new task (Ctrl+Q to quit)...",
+                id="task-input",
+            )
         yield Footer()
 
     def on_mount(self) -> None:
         self._ui_ready = True
+        self.query_one("#task-input", Input).display = False
         self.agent_state = "RUNNING"
         self.update_content()
         self.set_interval(1 / 8, self._update_headers)
@@ -605,8 +611,45 @@ class TextualAgent(App):
         if self._ui_ready:
             self.update_content()
             self.notify(f"Agent finished with status: {exit_status}")
-            self.notify("Press q to quit, ←/→ to inspect steps")
+            task_input = self.query_one("#task-input", Input)
+            task_input.display = True
+            task_input.focus()
             self.refresh()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle new task input submission."""
+        if event.input.id == "task-input":
+            new_task = event.value.strip()
+            if new_task:
+                event.input.display = False
+                event.input.value = ""
+                self._start_new_task(new_task)
+
+    def _start_new_task(self, task: str) -> None:
+        """Reset state and start a new agent run with the given task.
+
+        Resets step navigation and sets agent_state to RUNNING, then launches
+        ``agent.run()`` in a new daemon thread.  The call kwargs (context,
+        max_turns, session, …) stored in ``_task_kwargs`` are reused so that
+        session history and other options are preserved across tasks.
+        """
+        self._task = task
+        self._i_step = 0
+        self.n_steps = 1
+        self.agent_state = "RUNNING"
+
+        def _runner():
+            try:
+                self.agent.run(self._task, **self._task_kwargs)
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                self.call_from_thread(self.on_agent_finished, "error", str(e))
+
+        self._agent_thread = threading.Thread(target=_runner, daemon=True)
+        self._agent_thread.start()
+        self.update_content()
 
     # --- UI update logic ---
 
