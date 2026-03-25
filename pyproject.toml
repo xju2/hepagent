@@ -46,11 +46,6 @@ dev = [
     "ruff>=0.14.10",
 ]
 
-[tool.uv.workspace]
-members = ["hepagent"]
-
-[tool.uv.sources]
-hepagent = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

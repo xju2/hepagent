@@ -1,6 +1,6 @@
 .PHONY: sync
 sync:
-	uv sync --all-extras --all-packages --group dev
+	uv sync --all-extras --group dev
 
 .PHONY: install
 install:
