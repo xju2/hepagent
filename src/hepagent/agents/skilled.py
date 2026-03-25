@@ -6,6 +6,7 @@ from hepagent.model_providers import get_model_provider
 from hepagent.tools.common import (
     ask_user_for_info,
     load_skill_details,
+    make_run_sub_task,
     read_resource,
     wait_for_slurm_job_completion,
 )
@@ -32,6 +33,10 @@ def create(
             ask_user_for_info,  # The "User Interaction" tool
             create_transfer_function,
             wait_for_slurm_job_completion,
+            make_run_sub_task(  # Sub-agent delegation tool (avoids token accumulation)
+                model_provider=model_provider,
+                model_name=model_name,
+            ),
         ],
     )
     return agent

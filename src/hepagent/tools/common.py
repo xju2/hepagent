@@ -163,3 +163,84 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
         except Exception as e:
             return f"Error checking SLURM job status: {e}"
         time.sleep(30)  # Check every 30 seconds
+
+
+def make_run_sub_task(
+    model_provider: str = "cborg",
+    model_name: str | None = None,
+    max_turns: int = 20,
+):
+    """Factory that creates a ``run_sub_task`` tool bound to a specific model configuration.
+
+    The returned tool lets the main agent delegate a single, self-contained step to
+    a freshly-initialised sub-agent.  The sub-agent starts with an empty conversation
+    history, so it never inherits the ever-growing context of the parent conversation.
+    This keeps per-turn token costs bounded when a skill contains many steps.
+
+    Args:
+        model_provider: LLM provider to use for the sub-agent (default: ``"cborg"``).
+        model_name: Optional model name within the provider.
+        max_turns: Maximum number of reasoning turns the sub-agent may take (default: 20).
+
+    Returns:
+        A ``function_tool``-decorated coroutine ready to be added to an agent's tool list.
+    """
+
+    @function_tool
+    async def run_sub_task(
+        ctx: RunContextWrapper[AgentContext],
+        task: str,
+        instructions: str,
+    ) -> str:
+        """Runs an isolated sub-agent to complete one task step without carrying the full
+        conversation history.
+
+        Use this when a skill step can be completed independently to avoid token-cost
+        accumulation.  The sub-agent starts fresh with only the provided *instructions*
+        and *task* — it has no access to the parent's prior conversation turns.
+
+        Args:
+            task: The specific task or step the sub-agent should complete.
+            instructions: System instructions that guide the sub-agent on how to
+                complete the task (e.g. extracted from a skill's step description).
+
+        Returns:
+            The final textual output produced by the sub-agent.
+        """
+        from agents import Agent, Runner
+
+        from hepagent.agent_helpers import update_logbook
+        from hepagent.agents.bash import execute_bash_command_with_confirmation
+        from hepagent.model_providers import get_model_provider
+        from hepagent.tools.nyx.transfer_function import create_transfer_function
+
+        sub_agent: Agent[AgentContext] = Agent[AgentContext](
+            name="Sub-task Agent",
+            instructions=instructions,
+            model=get_model_provider(model_provider=model_provider, model_name=model_name),
+            tools=[
+                execute_bash_command_with_confirmation,
+                update_logbook,
+                read_resource,
+                ask_user_for_info,
+                create_transfer_function,
+                wait_for_slurm_job_completion,
+            ],
+        )
+
+        # Fresh context — copies agent identity and active skill so that read_resource
+        # still works, but carries no accumulated conversation history.
+        sub_context = AgentContext(
+            agent_name=ctx.context.agent_name,
+            active_skill=ctx.context.active_skill,
+        )
+
+        result = await Runner.run(
+            sub_agent,
+            task,
+            context=sub_context,
+            max_turns=max_turns,
+        )
+        return result.final_output or ""
+
+    return run_sub_task

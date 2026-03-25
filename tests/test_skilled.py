@@ -33,6 +33,7 @@ def test_create_returns_agent(monkeypatch):
     assert any("execute_bash_command" in n for n in tool_names)
     assert any("load_skill_details" in n for n in tool_names)
     assert any("update_logbook" in n for n in tool_names)
+    assert any("run_sub_task" in n for n in tool_names)
 
 
 def test_create_with_custom_model(monkeypatch):
@@ -48,3 +49,27 @@ def test_create_with_custom_model(monkeypatch):
 
     agent = skilled_module.create(model_provider="openai", model_name="gpt-4")
     assert agent.model is sentinel_model
+
+
+def test_create_run_sub_task_uses_same_model(monkeypatch):
+    """skilled.create() passes model_provider and model_name to the run_sub_task factory."""
+    StubAgent = _make_stub_agent_cls()
+    received = {}
+
+    def fake_make_run_sub_task(model_provider="cborg", model_name=None, max_turns=20):
+        received["model_provider"] = model_provider
+        received["model_name"] = model_name
+        # Return a minimal stand-in with a .name attribute
+        class _FakeTool:
+            name = "run_sub_task"
+        return _FakeTool()
+
+    monkeypatch.setattr(skilled_module, "Agent", StubAgent)
+    monkeypatch.setattr(skilled_module, "get_model_provider", lambda **_: object())
+    monkeypatch.setattr(skilled_module, "make_run_sub_task", fake_make_run_sub_task)
+
+    skilled_module.create(model_provider="openai", model_name="gpt-4o")
+
+    assert received["model_provider"] == "openai"
+    assert received["model_name"] == "gpt-4o"
+

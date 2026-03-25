@@ -200,3 +200,96 @@ def test_ask_user_for_info_handles_eoferror(monkeypatch, mock_agent_env):
     ctx_val = _make_ctx("test")
     result = _invoke(tools_common.ask_user_for_info, ctx_val, prompt="Enter value:")
     assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# make_run_sub_task
+# ---------------------------------------------------------------------------
+
+
+def test_make_run_sub_task_returns_function_tool(mock_agent_env):
+    """make_run_sub_task returns a FunctionTool with the expected name."""
+    tool = tools_common.make_run_sub_task()
+    assert getattr(tool, "name", "") == "run_sub_task"
+
+
+def test_make_run_sub_task_with_explicit_model(mock_agent_env):
+    """make_run_sub_task accepts model_provider and model_name without error."""
+    tool = tools_common.make_run_sub_task(model_provider="openai", model_name="gpt-4o")
+    assert getattr(tool, "name", "") == "run_sub_task"
+
+
+def test_make_run_sub_task_independent_tools(mock_agent_env):
+    """Two calls to make_run_sub_task produce independent tool objects."""
+    tool_a = tools_common.make_run_sub_task(model_provider="cborg")
+    tool_b = tools_common.make_run_sub_task(model_provider="openai")
+    assert tool_a is not tool_b
+
+
+def test_run_sub_task_invokes_runner(monkeypatch, mock_agent_env):
+    """run_sub_task calls Runner.run with a fresh AgentContext and returns final_output."""
+    captured = {}
+
+    class FakeResult:
+        final_output = "sub-task done"
+
+    async def fake_runner_run(agent, task, context, max_turns):
+        captured["agent_name"] = agent.name
+        captured["task"] = task
+        captured["context_agent"] = context.agent_name
+        captured["context_skill"] = context.active_skill
+        captured["max_turns"] = max_turns
+        return FakeResult()
+
+    # Patch Runner.run inside the tools.common module's namespace
+    import hepagent.tools.common as _tc
+
+    monkeypatch.setattr("agents.Runner.run", fake_runner_run)
+
+    tool = _tc.make_run_sub_task(model_provider="cborg", model_name=None, max_turns=5)
+
+    ctx_val = _make_ctx("scientist", active_skill="nyx")
+    result = _invoke(tool, ctx_val, task="Do the thing.", instructions="Step 1: do it.")
+
+    assert result == "sub-task done"
+    assert captured["task"] == "Do the thing."
+    assert captured["context_agent"] == "scientist"
+    assert captured["context_skill"] == "nyx"
+    assert captured["max_turns"] == 5
+
+
+def test_run_sub_task_propagates_active_skill(monkeypatch, mock_agent_env):
+    """run_sub_task forwards the parent's active_skill to the sub-agent context."""
+    received_skill = {}
+
+    class FakeResult:
+        final_output = "ok"
+
+    async def fake_runner_run(agent, task, context, max_turns):
+        received_skill["active_skill"] = context.active_skill
+        return FakeResult()
+
+    monkeypatch.setattr("agents.Runner.run", fake_runner_run)
+
+    tool = tools_common.make_run_sub_task()
+    ctx_val = _make_ctx("scientist", active_skill="nyx")
+    _invoke(tool, ctx_val, task="A task.", instructions="Some instructions.")
+
+    assert received_skill["active_skill"] == "nyx"
+
+
+def test_run_sub_task_empty_final_output(monkeypatch, mock_agent_env):
+    """run_sub_task returns empty string when final_output is None."""
+
+    class FakeResult:
+        final_output = None
+
+    async def fake_runner_run(agent, task, context, max_turns):
+        return FakeResult()
+
+    monkeypatch.setattr("agents.Runner.run", fake_runner_run)
+
+    tool = tools_common.make_run_sub_task()
+    ctx_val = _make_ctx("test")
+    result = _invoke(tool, ctx_val, task="A task.", instructions="Instructions.")
+    assert result == ""
