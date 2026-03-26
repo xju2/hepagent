@@ -95,3 +95,8 @@ Header.running {
 .final-content {
     color: $text;
 }
+
+#task-input {
+    margin: 1 1 0 1;
+    border: solid $accent;
+}
