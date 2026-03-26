@@ -14,11 +14,26 @@
 
 ## Installation
 
+### Quick start (no code checkout required)
+
+With [uv](https://docs.astral.sh/uv/) installed, you can run `hepagent` directly from PyPI without cloning the repository:
+
 ```bash
-uv python install 3.12 (or higher)
+# Run once without installing permanently
+uvx hepagent -h
+
+# Or install as a persistent tool
+uv tool install hepagent
+hepagent -h
+```
+
+### Developer setup (from source)
+
+```bash
+git clone https://github.com/xju2/hepagent.git
+cd hepagent
+uv python install 3.12
 make sync
-source .venv/bin/activate
-uv pip install -e .
 uv run hepagent list-platforms
 uv run hepagent list-models --platform cborg
 ```

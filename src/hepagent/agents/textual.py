@@ -534,8 +534,9 @@ class TextualAgent(App):
         """Set current step index, automatically clamping to valid bounds."""
         if value != self._i_step:
             self._i_step = max(0, min(value, self.n_steps - 1))
-            self._vscroll.scroll_to(y=0, animate=False)
-            self.update_content()
+            if self._ui_ready:
+                self._vscroll.scroll_to(y=0, animate=False)
+                self.update_content()
 
     def compose(self) -> ComposeResult:
         yield Header()
