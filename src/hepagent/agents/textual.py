@@ -634,13 +634,18 @@ class TextualAgent(App):
         session history and other options are preserved across tasks.
         """
         self._task = task
-        self._i_step = 0
+        self.i_step = 0
         self.n_steps = 1
         self.agent_state = "RUNNING"
 
+        # Capture the current task and a shallow copy of kwargs to avoid races
+        # if another task is started before this thread begins execution.
+        task_to_run = task
+        task_kwargs = dict(self._task_kwargs)
+
         def _runner():
             try:
-                self.agent.run(self._task, **self._task_kwargs)
+                self.agent.run(task_to_run, **task_kwargs)
             except Exception as e:
                 import traceback
 
