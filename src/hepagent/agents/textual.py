@@ -498,6 +498,8 @@ class TextualAgent(App):
         self.result: str = ""
 
         self._vscroll = VerticalScroll()
+        self._vscroll.can_focus = False
+        self._has_task_step: bool = False
 
         self._task: str | None = None
         self._task_kwargs: dict[str, Any] = {}
@@ -588,7 +590,8 @@ class TextualAgent(App):
 
     def on_message_added(self) -> None:
         auto_follow = self.i_step == self.n_steps - 1 and self._vscroll.scroll_y <= 1
-        self.n_steps = len(_messages_to_steps(self.agent.messages))
+        real_steps = len(_messages_to_steps(self.agent.messages))
+        self.n_steps = real_steps + (1 if self._has_task_step else 0)
         self.update_content()
         if auto_follow:
             self.action_last_step()
@@ -609,19 +612,30 @@ class TextualAgent(App):
         self.exit_status = exit_status
         self.result = result
         if self._ui_ready:
+            self._has_task_step = True
+            real_steps = len(_messages_to_steps(self.agent.messages))
+            self.n_steps = real_steps + 1
             self.update_content()
-            self.notify(f"Agent finished with status: {exit_status}")
-            task_input = self.query_one("#task-input", Input)
-            task_input.display = True
-            task_input.focus()
+            self.notify(f"Agent finished ({exit_status}). [bold]←[/bold] to browse steps.")
+            self.action_last_step()
             self.refresh()
+
+    def on_key(self, event: Key) -> None:
+        """App-level key handler for task-step navigation."""
+        focused_id = getattr(self.focused, "id", None)
+
+        # Escape from task input → go to previous step to browse
+        if event.key == "escape" and focused_id == "task-input":
+            event.prevent_default()
+            self.action_previous_step()
+            self.notify("Browsing steps: ← → to navigate, → to return to new task input")
+            return
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle new task input submission."""
         if event.input.id == "task-input":
             new_task = event.value.strip()
             if new_task:
-                event.input.display = False
                 event.input.value = ""
                 self._start_new_task(new_task)
 
@@ -635,6 +649,7 @@ class TextualAgent(App):
         """
         self._task = task
         self.agent_state = "RUNNING"
+        self._has_task_step = False
 
         # Capture the current task and a shallow copy of kwargs to avoid races
         # if another task is started before this thread begins execution.
@@ -661,31 +676,54 @@ class TextualAgent(App):
             return
         container = self.query_one("#content", Vertical)
         container.remove_children()
+        task_input = self.query_one("#task-input", Input)
         items = _messages_to_steps(self.agent.messages)
+        real_n = len(items)
 
-        if not items:
-            container.mount(Static("Waiting for agent to start..."))
-            return
+        on_task_step = self._has_task_step and self.i_step >= real_n
 
-        for message in items[self.i_step]:
-            if isinstance(message["content"], list):
-                content_str = "\n".join([item["text"] for item in message["content"]])
+        if on_task_step:
+            # Show a prompt in the content area; the task input appears below
+            prompt_box = Vertical(classes="message-container final-message")
+            container.mount(prompt_box)
+            prompt_box.mount(Static("NEW TASK", classes="message-header"))
+            prompt_box.mount(
+                Static(
+                    "Enter your next task below, or press [bold]←[/bold] to review previous steps.",
+                    classes="message-content",
+                )
+            )
+            task_input.display = True
+            self.call_after_refresh(task_input.focus)
+        else:
+            task_input.display = False
+            if not items:
+                container.mount(Static("Waiting for agent to start..."))
             else:
-                content_str = str(message["content"])
-            message_container = Vertical(classes="message-container")
-            if message.get("kind") == "final":
-                message_container.add_class("final-message")
-            container.mount(message_container)
-            header_label = _message_header_label(self, message)
-            message_container.mount(Static(header_label, classes="message-header"))
-            content_widget = Static(Text(content_str, no_wrap=False), classes="message-content")
-            if message.get("kind") == "final":
-                content_widget.add_class("final-content")
-            message_container.mount(content_widget)
+                for message in items[self.i_step]:
+                    if isinstance(message["content"], list):
+                        content_str = "\n".join([item["text"] for item in message["content"]])
+                    else:
+                        content_str = str(message["content"])
+                    message_container = Vertical(classes="message-container")
+                    if message.get("kind") == "final":
+                        message_container.add_class("final-message")
+                    container.mount(message_container)
+                    header_label = _message_header_label(self, message)
+                    message_container.mount(Static(header_label, classes="message-header"))
+                    content_widget = Static(
+                        Text(content_str, no_wrap=False), classes="message-content"
+                    )
+                    if message.get("kind") == "final":
+                        content_widget.add_class("final-content")
+                    message_container.mount(content_widget)
+
         if self.input_container.pending_prompt is not None:
             self.agent_state = "AWAITING_INPUT"
         self.input_container.display = (
-            self.input_container.pending_prompt is not None and self.i_step == len(items) - 1
+            not on_task_step
+            and self.input_container.pending_prompt is not None
+            and self.i_step == real_n - 1
         )
         if self.input_container.display:
             self.input_container.on_focus()
@@ -704,7 +742,10 @@ class TextualAgent(App):
             f"Step {self.i_step + 1}/{self.n_steps} - {status_text} "
             f"- Model: {model_name} - Cost: ${self.agent.model.cost:.6f}"
         )
-        self.sub_title = f"Mode: {self.agent.config.mode}"
+        on_task_step = self._has_task_step and self.i_step >= self.n_steps - 1
+        browse_hint = "" if on_task_step else " │ BROWSE (← →)"
+        stopped_hint = browse_hint if self.agent_state == "STOPPED" else ""
+        self.sub_title = f"Mode: {self.agent.config.mode}{stopped_hint}"
         try:
             self.query_one("Header").set_class(self.agent_state == "RUNNING", "running")
         except NoMatches:  # might be called when shutting down

@@ -97,6 +97,7 @@ Header.running {
 }
 
 #task-input {
-    margin: 1 1 0 1;
+    margin: 1 1 1 1;
     border: solid $accent;
+    height: auto;
 }
