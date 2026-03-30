@@ -27,8 +27,8 @@ def test_config_proxies_agent_config():
     assert app.config is app.agent.config
 
 
-def test_start_new_task_resets_state(monkeypatch):
-    """_start_new_task resets the agent state and starts a new thread."""
+def test_start_new_task_preserves_history(monkeypatch):
+    """_start_new_task keeps existing step/count so history remains navigable."""
     threads_started = []
 
     class FakeThread:
@@ -52,7 +52,8 @@ def test_start_new_task_resets_state(monkeypatch):
     app._start_new_task("new task")
 
     assert app._task == "new task"
-    assert app._i_step == 0
-    assert app.n_steps == 1
+    # Step index and count are NOT reset – previous history stays accessible.
+    assert app._i_step == 5
+    assert app.n_steps == 6
     assert app.agent_state == "RUNNING"
     assert len(threads_started) == 1

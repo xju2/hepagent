@@ -345,7 +345,6 @@ class AgentAdapter:
 
     def run(self, task: str, **kwargs):
         """Run the agent with the given task."""
-        self.messages = []
         instructions = self.original_agent.instructions
         if callable(instructions):
             context = kwargs.get("context")
@@ -635,8 +634,6 @@ class TextualAgent(App):
         session history and other options are preserved across tasks.
         """
         self._task = task
-        self.i_step = 0
-        self.n_steps = 1
         self.agent_state = "RUNNING"
 
         # Capture the current task and a shallow copy of kwargs to avoid races

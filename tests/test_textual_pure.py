@@ -338,3 +338,72 @@ def test_log_hooks_on_llm_end_tracks_cost():
 
     # Cost should be non-zero for 1M input tokens
     assert adapter.model.cost > 0
+
+
+# ---------------------------------------------------------------------------
+# AgentAdapter history preservation
+# ---------------------------------------------------------------------------
+
+
+def test_agent_adapter_run_preserves_previous_messages(monkeypatch):
+    """AgentAdapter.run() appends new task messages without erasing previous history."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from hepagent.agents.textual import AgentAdapter
+
+    class StubTextualApp:
+        agent_state = "RUNNING"
+
+        def on_message_added(self):
+            pass
+
+        def on_agent_finished(self, *args):
+            pass
+
+        def call_from_thread(self, fn, *args):
+            pass
+
+    stub_app = StubTextualApp()
+
+    class StubAgent:
+        name = "test"
+        instructions = "system instructions"
+        model = "gpt-4"
+        tools = []
+
+    adapter = AgentAdapter(StubAgent(), stub_app)
+
+    # Simulate a message already present from a previous task.
+    adapter.messages = [{"role": "assistant", "content": "previous result"}]
+
+    # Build a fake event loop that returns a fake result without calling the LLM.
+    fake_result = MagicMock()
+    fake_result.final_output = "done"
+
+    loop = asyncio.new_event_loop()
+
+    def fake_run_until_complete(coro):
+        # Close the coroutine without executing it; all assertions are about
+        # messages that are appended *before* the event loop is invoked.
+        coro.close()
+        return fake_result
+
+    loop.run_until_complete = fake_run_until_complete
+
+    with patch("asyncio.new_event_loop", return_value=loop):
+        # run() may raise when the fake loop's close() is called; that is
+        # expected and does not affect the assertions below (messages are
+        # appended synchronously before the event loop is used).
+        try:
+            adapter.run("second task")
+        except RuntimeError:
+            pass  # fake loop.close() may complain – that is fine
+
+    # The previous message must still be present (history preserved).
+    contents = [m["content"] for m in adapter.messages]
+    assert "previous result" in contents
+
+    # The new task message should also be present.
+    task_msgs = [m for m in adapter.messages if m.get("kind") == "task"]
+    assert any("second task" in m["content"] for m in task_msgs)
