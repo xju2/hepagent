@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.3.2] – 2026-03-30
+
+### Overview
+
+This release focuses on release packaging and Textual TUI usability. HepAgent can now be run directly with `uvx` or installed with `uv tool install`, while the TUI preserves more state across runs and remains usable after a task completes.
+
+---
+
+### What's Changed since v0.3.1
+
+#### Improvements
+
+- **UV-native install and run flow** - Packaging and docs now support running HepAgent without a source checkout via `uvx hepagent` or `uv tool install hepagent`.
+- **Persistent Textual task loop** - The Textual UI now keeps the terminal session alive after a task finishes so a new task can be entered immediately.
+- **Task history across runs** - Step navigation now preserves prior task history, making it possible to review earlier work after subsequent runs.
+- **Textual view stability** - Multiple fixes tighten view invariants, reduce navigation glitches, and improve overall reliability of the interactive interface.
+- **Expanded TUI documentation** - Added a dedicated `docs/TEXTUAL.md` guide to capture architecture details and anti-regression rules for future changes.
+
+#### Fixes
+
+- **Provider configuration cleanup** - Small provider configuration and model-provider handling fixes improve out-of-the-box defaults.
+- **Release workflow cleanup** - Release automation and documentation were tightened to make future releases more reproducible.
+
 ## [v0.3.0] – 2026-03-20
 
 ### Overview
@@ -135,5 +158,6 @@ uv run hepagent --agent "scientist" \
 uv run hepagent list-models --platform cborg
 ```
 
+[v0.3.2]: https://github.com/xju2/hepagent/releases/tag/v0.3.2
 [v0.3.0]: https://github.com/xju2/hepagent/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/xju2/hepagent/releases/tag/v0.2.0

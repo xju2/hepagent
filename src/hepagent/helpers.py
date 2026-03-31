@@ -226,14 +226,14 @@ def enable_mlflow_for_tracing() -> bool:
 
     Returns:
         True if MLflow is successfully imported and tracing is configured;
-        False if MLflow is not installed (ImportError).
+        False if MLflow is not installed or tracing is not configured.
     """
     try:
         import mlflow
         import urllib3
         from urllib3.exceptions import InsecureRequestWarning
 
-        tracking_uri = get_env_var("MLFLOW_TRACKING_URI")
+        tracking_uri = get_env_var("MLFLOW_TRACKING_URI", default="")
         if not tracking_uri:
             print("MLFLOW_TRACKING_URI not set; skipping MLflow tracing setup.")
             return False
