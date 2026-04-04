@@ -466,7 +466,9 @@ class CliRepl:
 
     def render_help(self) -> None:
         """Render help text."""
-        self.console.print(Panel(Markdown(HELP_TEXT), title="help", border_style="cyan"))
+        self.console.print(
+            Panel(Text.from_markup(HELP_TEXT), title="help", border_style="cyan")
+        )
 
     def render_agents(self) -> None:
         """Render available agent names."""

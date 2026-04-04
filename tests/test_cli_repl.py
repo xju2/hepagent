@@ -101,6 +101,26 @@ def test_set_mode_updates_mode():
     assert repl.config.mode == "human"
 
 
+def test_render_help_preserves_line_breaks_and_strips_markup():
+    console = cli_repl.Console(
+        file=io.StringIO(),
+        force_terminal=False,
+        color_system=None,
+        width=120,
+    )
+    repl = _make_repl(console=console)
+
+    repl.render_help()
+
+    output = console.file.getvalue()
+    assert "[bold]" not in output
+    assert "Slash commands" in output
+    assert "/help - Show this help text" in output
+    assert "/mode <confirm|yolo|human> - Change command approval mode" in output
+    assert "Modes" in output
+    assert 'human: Type "y" to allow each command explicitly' in output
+
+
 def test_approve_command_modes():
     repl = _make_repl(prompt_session=FakePromptSession(["", "because no", "y", "not now"]))
 
