@@ -6,6 +6,7 @@ from typer.core import TyperGroup
 
 from agents import SQLiteSession
 from agents.run import DEFAULT_MAX_TURNS
+from hepagent.agents.cli_repl import CliRepl
 from hepagent.agents.common import AgentContext
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
@@ -53,6 +54,62 @@ def create_chat_session(conversation_id: str) -> SQLiteSession:
     db_dir.mkdir(parents=True, exist_ok=True)
     db_path = db_dir / "conversation.db"
     return SQLiteSession(conversation_id, str(db_path))
+
+
+def _available_role_agents() -> dict[str, object]:
+    """Return the configured role-agent registry."""
+    return create_role_cfg()
+
+
+def get_available_agents() -> dict[str, str]:
+    """Return all user-selectable agents and descriptions."""
+    agents = {"scientist": "default TASK_PROMPT mode"}
+    for role_name, role_cfg in _available_role_agents().items():
+        agents[role_name] = role_cfg.description
+    return dict(sorted(agents.items()))
+
+
+def create_app_agent(
+    agent_name: str,
+    *,
+    model_provider: str,
+    model_name: str | None,
+):
+    """Create the selected agent implementation."""
+    normalized = agent_name.lower()
+    if normalized in _available_role_agents():
+        return create_role_agent(
+            role_name=normalized,
+            model_provider=model_provider,
+            model_name=model_name,
+        )
+    return create_skilled_agent(model_provider=model_provider, model_name=model_name)
+
+
+def build_runtime(
+    *,
+    agent_name: str,
+    model: str | None,
+    chat: str | None,
+):
+    """Create the reusable runtime pieces shared by run and repl."""
+    model_provider, model_name = parse_model_spec(model)
+    agent = create_app_agent(
+        agent_name,
+        model_provider=model_provider,
+        model_name=model_name,
+    )
+    context = AgentContext(agent_name=agent_name.lower())
+    display_model = model_name or get_model_provider_settings(model_provider).default_model
+    session = create_chat_session(chat) if chat else None
+    return {
+        "agent": agent,
+        "context": context,
+        "display_model": display_model,
+        "session": session,
+        "model_provider": model_provider,
+        "model_name": model_name,
+    }
 
 
 @app.callback(invoke_without_command=True)
@@ -167,30 +224,10 @@ def run_task(
 
         mlflow.openai.autolog()
 
-    model_provider, model_name = parse_model_spec(model)
-    if agent_name == "shell":
-        agent = create_role_agent(
-            role_name="shell",
-            model_provider=model_provider,
-            model_name=model_name,
-        )
-    elif agent_name == "shell_describer":
-        agent = create_role_agent(
-            role_name="shell_describer",
-            model_provider=model_provider,
-            model_name=model_name,
-        )
-    elif agent_name == "coder":
-        agent = create_role_agent(
-            role_name="coder",
-            model_provider=model_provider,
-            model_name=model_name,
-        )
-    else:
-        agent = create_skilled_agent(model_provider=model_provider, model_name=model_name)
-
-    context = AgentContext(agent_name=agent_name)
-    display_model = model_name or get_model_provider_settings(model_provider).default_model
+    runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
+    agent = runtime["agent"]
+    context = runtime["context"]
+    display_model = runtime["display_model"]
     app_agent = TextualAgent(model=display_model, env={})
 
     wrapper = CompositeToolWrapper(BashToolWrapper(), AskUserToolWrapper())
@@ -199,14 +236,73 @@ def run_task(
     if yolo:
         app_agent.agent.config.mode = "yolo"
 
-    session = create_chat_session(chat) if chat else None
     exit_status, result = app_agent.run_task(
         task=task_prompt,
         context=context,
         max_turns=max_turns,
-        session=session,
+        session=runtime["session"],
     )
     typer.echo(f"Agent exited with status: {exit_status}, result: {result}")
+
+
+@app.command("repl")
+def repl(
+    ctx: typer.Context,
+    agent_name: str = typer.Option(
+        "shell",
+        "--agent",
+        "-a",
+        help="Agent configuration to use.",
+    ),
+    yolo: bool = typer.Option(
+        False,
+        "--yolo",
+        help="Auto-approve all bash commands.",
+    ),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turn",
+        help="Maximum number of agent turns (defaults to SDK default).",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help='Specify the model as "provider:model" (e.g. "openai:gpt-5-mini") '
+        "or a bare model name (defaults to cborg).",
+    ),
+    chat: str | None = typer.Option(
+        None,
+        "--chat",
+        help="Conversation id for persistent SQLite chat history.",
+    ),
+) -> None:
+    """Start the interactive coding REPL."""
+    options = ctx.obj or {}
+    agent_name = agent_name.lower() or str(options.get("agent_name", "scientist"))
+    yolo = yolo or bool(options.get("yolo", False))
+    max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
+    model = model or options.get("model")
+    chat = chat or options.get("chat")
+
+    runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
+    model_provider = runtime["model_provider"]
+    model_name = runtime["model_name"]
+    cli = CliRepl(
+        agent_name=agent_name,
+        agent_factory=lambda selected: create_app_agent(
+            selected,
+            model_provider=model_provider,
+            model_name=model_name,
+        ),
+        available_agents=get_available_agents(),
+        context=runtime["context"],
+        max_turns=max_turns,
+        yolo=yolo,
+        session=runtime["session"],
+        session_factory=create_chat_session,
+        chat_base_id=chat,
+    )
+    cli.run()
 
 
 @app.command("list-agents")
@@ -219,7 +315,7 @@ def list_agents() -> None:
     typer.echo("\tcoder -> --code/-c")
 
     typer.echo("\nAvailable role agents:")
-    roles = create_role_cfg()
+    roles = _available_role_agents()
     for role_key in sorted(roles):
         description = roles[role_key].description
         typer.echo(f"\t{role_key}: {description}")
