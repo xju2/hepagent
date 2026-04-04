@@ -23,6 +23,7 @@ from hepagent.helpers import (
 from hepagent.model_providers import (
     get_model_provider_settings,
     get_supported_model_providers,
+    list_available_models,
     parse_model_spec,
 )
 
@@ -63,7 +64,7 @@ def _available_role_agents() -> dict[str, object]:
 
 def get_available_agents() -> dict[str, str]:
     """Return all user-selectable agents and descriptions."""
-    agents = {"scientist": "default TASK_PROMPT mode"}
+    agents = {"scientist": "Skilled Agent"}
     for role_name, role_cfg in _available_role_agents().items():
         agents[role_name] = role_cfg.description
     return dict(sorted(agents.items()))
@@ -287,12 +288,13 @@ def repl(
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
     model_provider = runtime["model_provider"]
     model_name = runtime["model_name"]
+    display_model = runtime["display_model"]
     cli = CliRepl(
         agent_name=agent_name,
-        agent_factory=lambda selected: create_app_agent(
+        agent_factory=lambda selected, platform, selected_model: create_app_agent(
             selected,
-            model_provider=model_provider,
-            model_name=model_name,
+            model_provider=platform,
+            model_name=selected_model,
         ),
         available_agents=get_available_agents(),
         context=runtime["context"],
@@ -301,6 +303,8 @@ def repl(
         session=runtime["session"],
         session_factory=create_chat_session,
         chat_base_id=chat,
+        model_platform=model_provider,
+        model_name=display_model,
     )
     cli.run()
 
@@ -340,18 +344,13 @@ def list_models(
     ),
 ) -> None:
     """List available models for a provider."""
-    from openai import OpenAI
-
     settings = get_model_provider_settings(platform)
     if not settings.api_key:
         typer.echo(f"{settings.api_key_env} is not set.")
         raise typer.Exit(code=1)
 
     typer.echo(f"Available models for {platform}:")
-    client = OpenAI(base_url=settings.base_url, api_key=settings.api_key)
-    models = client.models.list()
-    names = sorted(model.id for model in models.data)
-    for name in names:
+    for name in list_available_models(platform, settings=settings):
         typer.echo("\t" + name)
 
 

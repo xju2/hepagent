@@ -201,4 +201,6 @@ def test_repl_command_uses_chat_session_and_runs(monkeypatch):
     assert len(created_repls) == 1
     assert created_repls[0].kwargs["session"] is session_sentinel
     assert created_repls[0].kwargs["yolo"] is True
+    assert created_repls[0].kwargs["model_platform"] == "cborg"
+    assert created_repls[0].kwargs["model_name"] == "gemini-flash"
     assert created_repls[0].run_called is True

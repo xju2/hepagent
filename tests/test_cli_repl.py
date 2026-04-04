@@ -32,12 +32,14 @@ def _make_agent(name="scientist"):
 def _make_repl(**kwargs):
     defaults = {
         "agent_name": "scientist",
-        "agent_factory": lambda name: _make_agent(name),
+        "agent_factory": lambda name, platform, model_name: _make_agent(name),
         "available_agents": {"scientist": "default", "coder": "code agent"},
         "context": SimpleNamespace(agent_name="scientist"),
         "max_turns": 5,
         "prompt_session": FakePromptSession([]),
         "console": _make_console(),
+        "model_platform": "cborg",
+        "model_name": "test-model",
     }
     defaults.update(kwargs)
     return cli_repl.CliRepl(**defaults)
@@ -65,13 +67,21 @@ def test_parse_slash_command():
 
 def test_switch_agent_updates_context_and_agent():
     calls = []
-    repl = _make_repl(agent_factory=lambda name: calls.append(name) or _make_agent(name))
+    repl = _make_repl(
+        agent_factory=lambda name, platform, model_name: calls.append(
+            (name, platform, model_name)
+        )
+        or _make_agent(name)
+    )
 
     repl.switch_agent("coder")
 
     assert repl.agent_name == "coder"
     assert repl.context.agent_name == "coder"
-    assert calls == ["scientist", "coder"]
+    assert calls == [
+        ("scientist", "cborg", "test-model"),
+        ("coder", "cborg", "test-model"),
+    ]
 
 
 def test_clear_session_state_rotates_chat_session():
@@ -114,30 +124,82 @@ def test_render_help_preserves_line_breaks_and_strips_markup():
 
     output = console.file.getvalue()
     assert "[bold]" not in output
-    assert "Slash commands" in output
-    assert "/help - Show this help text" in output
-    assert "/mode <confirm|yolo|human> - Change command approval mode" in output
+    assert "Slash Commands" in output
+    assert "/help  Show this help text" in output
+    assert "/platforms  List supported model platforms" in output
+    assert "/platform <name>  Switch the active model platform" in output
+    assert "/models [platform]  List available models for the current or given platform" in output
+    assert "/model <name>  Switch the active model on the current platform" in output
+    assert "/mode <confirm|yolo|human>  Change command approval mode" in output
     assert "Modes" in output
-    assert 'human: Type "y" to allow each command explicitly' in output
+    assert 'human  Type "y" to allow each command explicitly' in output
 
 
 def test_approve_command_modes():
-    repl = _make_repl(prompt_session=FakePromptSession(["", "because no", "y", "not now"]))
+    console = _make_console()
+    repl = _make_repl(
+        prompt_session=FakePromptSession(["", "because no", "y", "not now"]),
+        console=console,
+    )
 
     assert repl.approve_command(cmd="echo hi") is True
     assert repl.approve_command(cmd="echo hi") is False
     repl.config.mode = "human"
     assert repl.approve_command(cmd="echo hi") is True
     assert repl.approve_command(cmd="echo hi") is False
+    output = console.file.getvalue()
+    assert "approval" in output
+    assert "Approved." in output
+    assert "Rejected." in output
+    assert "Reason: because no" in output
+    assert "Reason: not now" in output
 
 
 def test_approve_command_yolo_skips_prompt():
     prompt = FakePromptSession(["should-not-be-used"])
-    repl = _make_repl(prompt_session=prompt)
+    console = _make_console()
+    repl = _make_repl(prompt_session=prompt, console=console)
     repl.config.mode = "yolo"
 
     assert repl.approve_command(cmd="echo hi") is True
     assert prompt.prompts == []
+    assert "Auto-approved in yolo mode." in console.file.getvalue()
+
+
+def test_render_command_proposal_shows_mode():
+    console = _make_console()
+    repl = _make_repl(console=console)
+    repl.config.mode = "human"
+
+    repl.render_command_proposal(cmd="echo hi", cwd="/tmp", thought="")
+
+    output = console.file.getvalue()
+    assert "Command" in output
+    assert "echo hi" in output
+    assert "Working directory" in output
+    assert "/tmp" in output
+    assert "Approval mode" in output
+    assert "human" in output
+
+
+def test_render_assistant_output_skips_duplicate_panel_after_stream():
+    console = _make_console()
+    repl = _make_repl(console=console)
+
+    repl.render_assistant_output("hello", streamed=True)
+
+    assert console.file.getvalue() == ""
+
+
+def test_render_assistant_output_renders_panel_when_not_streamed():
+    console = _make_console()
+    repl = _make_repl(console=console)
+
+    repl.render_assistant_output("hello", streamed=False)
+
+    output = console.file.getvalue()
+    assert "assistant" in output
+    assert "hello" in output
 
 
 def test_repl_tool_wrapper_replaces_known_tools():
@@ -203,6 +265,155 @@ def test_handle_unknown_command_is_handled():
 
     assert result.handled is True
     assert result.should_exit is False
+
+
+def test_render_platforms_shows_current_platform():
+    console = _make_console()
+    repl = _make_repl(console=console, model_platform="openai")
+
+    repl.render_platforms()
+
+    output = console.file.getvalue()
+    assert "Platform" in output
+    assert "openai" in output
+
+
+def test_render_models_uses_current_platform(monkeypatch):
+    console = _make_console()
+    repl = _make_repl(console=console, model_platform="openai", model_name="gpt-5-mini")
+    monkeypatch.setattr(cli_repl, "get_supported_model_providers", lambda: ("cborg", "openai"))
+    monkeypatch.setattr(
+        cli_repl,
+        "get_model_provider_settings",
+        lambda platform: SimpleNamespace(base_url="https://example.com", api_key="key"),
+    )
+    monkeypatch.setattr(
+        cli_repl,
+        "list_available_models",
+        lambda platform, settings=None: ("gpt-5-mini", "gpt-5"),
+    )
+
+    repl.render_models()
+
+    output = console.file.getvalue()
+    assert "Model" in output
+    assert "openai" in output
+    assert "gpt-5-mini" in output
+    assert "gpt-5" in output
+
+
+def test_render_models_rejects_unknown_platform(monkeypatch):
+    console = _make_console()
+    repl = _make_repl(console=console, model_platform="cborg")
+    monkeypatch.setattr(cli_repl, "get_supported_model_providers", lambda: ("cborg", "openai"))
+
+    repl.render_models("wat")
+
+    output = console.file.getvalue()
+    assert "Unknown platform" in output
+    assert "cborg, openai" in output
+
+
+def test_set_platform_switches_platform_and_resets_to_default_model(monkeypatch):
+    calls = []
+    console = _make_console()
+    repl = _make_repl(
+        console=console,
+        model_platform="cborg",
+        model_name="gemini-flash",
+        agent_factory=lambda name, platform, model_name: calls.append(
+            (name, platform, model_name)
+        )
+        or _make_agent(name),
+    )
+    monkeypatch.setattr(cli_repl, "get_supported_model_providers", lambda: ("cborg", "openai"))
+    monkeypatch.setattr(
+        cli_repl,
+        "get_model_provider_settings",
+        lambda platform: SimpleNamespace(default_model="gpt-5-mini"),
+    )
+
+    repl.set_platform("openai")
+
+    assert repl.model.platform == "openai"
+    assert repl.model.name == "gpt-5-mini"
+    assert calls[-1] == ("scientist", "openai", "gpt-5-mini")
+    output = console.file.getvalue()
+    assert "Platform set to openai." in output
+    assert "Model set to default gpt-5-mini." in output
+
+
+def test_set_model_switches_current_model(monkeypatch):
+    calls = []
+    console = _make_console()
+    repl = _make_repl(
+        console=console,
+        model_platform="openai",
+        model_name="gpt-5-mini",
+        agent_factory=lambda name, platform, model_name: calls.append(
+            (name, platform, model_name)
+        )
+        or _make_agent(name),
+    )
+    monkeypatch.setattr(
+        cli_repl,
+        "get_model_provider_settings",
+        lambda platform: SimpleNamespace(base_url="https://example.com", api_key="key"),
+    )
+    monkeypatch.setattr(
+        cli_repl,
+        "list_available_models",
+        lambda platform, settings=None: ("gpt-5-mini", "gpt-5"),
+    )
+
+    repl.set_model("gpt-5")
+
+    assert repl.model.name == "gpt-5"
+    assert calls[-1] == ("scientist", "openai", "gpt-5")
+    output = console.file.getvalue()
+    assert "Model set to gpt-5" in output
+    assert "Platform: openai" in output
+
+
+def test_set_model_rejects_unknown_model(monkeypatch):
+    console = _make_console()
+    repl = _make_repl(console=console, model_platform="openai", model_name="gpt-5-mini")
+    monkeypatch.setattr(
+        cli_repl,
+        "get_model_provider_settings",
+        lambda platform: SimpleNamespace(base_url="https://example.com", api_key="key"),
+    )
+    monkeypatch.setattr(
+        cli_repl,
+        "list_available_models",
+        lambda platform, settings=None: ("gpt-5-mini", "gpt-5"),
+    )
+
+    repl.set_model("wat")
+
+    output = console.file.getvalue()
+    assert "is not available on openai" in output
+    assert "Try /models" in output
+
+
+def test_render_startup_includes_platform_and_model():
+    console = _make_console()
+    repl = _make_repl(console=console, model_platform="openai", model_name="gpt-5-mini")
+
+    repl.render_startup()
+
+    output = console.file.getvalue()
+    assert "Platform: openai" in output
+    assert "Model: gpt-5-mini" in output
+
+
+def test_bottom_toolbar_includes_platform_and_model():
+    repl = _make_repl(model_platform="openai", model_name="gpt-5-mini")
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "platform=openai" in toolbar
+    assert "model=gpt-5-mini" in toolbar
 
 
 def test_run_turn_updates_input_history(monkeypatch):

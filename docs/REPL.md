@@ -53,6 +53,10 @@ uv run hepagent repl --max-turn 30
 - `/clear`: reset the current in-memory REPL transcript
 - `/agents`: list available agents
 - `/agent <name>`: switch the active agent for future turns
+- `/platforms`: list supported model platforms/providers
+- `/platform <name>`: switch the active platform and reset the model to that platform's default
+- `/models [platform]`: list models for the current platform, or for an explicitly selected one
+- `/model <name>`: switch to a specific model on the current platform
 - `/mode <confirm|yolo|human>`: switch shell approval behavior
 
 Unknown slash commands are handled locally and rendered as an inline error with a `/help`
@@ -76,6 +80,23 @@ These modes apply to bash tool usage wrapped by the REPL runtime.
   chat is enabled.
 - `/agent` changes the active agent for subsequent prompts without requiring a restart.
 
+## Model and Platform Visibility
+
+- The startup panel shows the active agent, approval mode, platform, and model.
+- The bottom toolbar keeps the current `agent`, `platform`, `model`, `mode`, and running
+  token cost visible while you work.
+- The streaming status panel shown for each turn also includes the current platform and
+  model, so it is easier to confirm which provider configuration is active.
+- `/platforms` highlights the active platform in the rendered table.
+- `/platform <name>` immediately rebuilds the active agent against that provider.
+- `/models` highlights the active model when the requested platform matches the current
+  REPL platform.
+- `/model <name>` validates the selection against the available models for the current
+  platform before switching.
+
+If the REPL cannot load models for a platform, it renders the provider/configuration error
+locally instead of forwarding that failure to the model.
+
 ## Rendering and Output
 
 The REPL uses:
@@ -86,25 +107,26 @@ The REPL uses:
 Assistant responses stream live. Tool calls, tool results, prompts for extra user input,
 and errors are rendered in distinct blocks to keep the transcript readable.
 
-## Files Added or Updated
+## Related Files
 
-- Added:
-  - [src/hepagent/agents/cli_repl.py](/Users/xju/code/hepagent/src/hepagent/agents/cli_repl.py)
-  - [docs/REPL.md](/Users/xju/code/hepagent/docs/REPL.md)
-- Updated:
-  - [src/hepagent/main.py](/Users/xju/code/hepagent/src/hepagent/main.py)
-  - [pyproject.toml](/Users/xju/code/hepagent/pyproject.toml)
-  - [uv.lock](/Users/xju/code/hepagent/uv.lock)
-  - [tests/test_main_chat.py](/Users/xju/code/hepagent/tests/test_main_chat.py)
-  - [tests/test_cli_repl.py](/Users/xju/code/hepagent/tests/test_cli_repl.py)
+- [src/hepagent/agents/cli_repl.py](/Users/xju/code/hepagent/src/hepagent/agents/cli_repl.py):
+  REPL loop, slash-command handling, status panels, and toolbar rendering
+- [src/hepagent/main.py](/Users/xju/code/hepagent/src/hepagent/main.py):
+  REPL bootstrap and shared runtime wiring
+- [src/hepagent/model_providers.py](/Users/xju/code/hepagent/src/hepagent/model_providers.py):
+  shared provider/model discovery helpers
+- [tests/test_cli_repl.py](/Users/xju/code/hepagent/tests/test_cli_repl.py):
+  REPL command and rendering coverage
+- [tests/test_main_commands.py](/Users/xju/code/hepagent/tests/test_main_commands.py):
+  provider/model listing command coverage
 
 ## Validation Summary
 
-The implementation was validated with:
+The current REPL command and provider/model listing behavior was validated with:
 
 ```bash
-uv run ruff check src/hepagent/main.py src/hepagent/agents/cli_repl.py tests/test_main_chat.py tests/test_cli_repl.py
-uv run pytest -q tests/test_main_chat.py tests/test_cli_repl.py tests/test_cli_entrypoint.py tests/test_main_commands.py tests/test_repl.py tests/test_repl_extra.py tests/test_textual_bash.py tests/test_textual_common.py tests/test_textual_agent.py
+uv run pytest tests/test_cli_repl.py tests/test_main_commands.py
+uv run python -m compileall src/hepagent/agents/cli_repl.py src/hepagent/model_providers.py src/hepagent/main.py
 ```
 
-Both checks passed at the time of implementation.
+Both checks passed.

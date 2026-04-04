@@ -1,6 +1,6 @@
 """Additional tests for hepagent.main (list-models and list-cborg-models commands)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import typer
 
@@ -83,17 +83,6 @@ def test_list_models_with_api_key():
         default_model="model-a",
     )
 
-    mock_model_a = MagicMock()
-    mock_model_a.id = "model-a"
-    mock_model_b = MagicMock()
-    mock_model_b.id = "model-b"
-
-    mock_models_response = MagicMock()
-    mock_models_response.data = [mock_model_a, mock_model_b]
-
-    mock_client = MagicMock()
-    mock_client.models.list.return_value = mock_models_response
-
     output_parts = []
 
     def capture_echo(msg="", **kwargs):
@@ -101,7 +90,7 @@ def test_list_models_with_api_key():
 
     with (
         patch.object(main_module, "get_model_provider_settings", return_value=fake_settings),
-        patch("openai.OpenAI", return_value=mock_client),
+        patch.object(main_module, "list_available_models", return_value=("model-a", "model-b")),
         patch.object(typer_mod, "echo", side_effect=capture_echo),
     ):
         main_module.list_models("cborg")

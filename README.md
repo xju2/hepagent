@@ -111,6 +111,10 @@ Supported slash commands:
 - `/clear`
 - `/agents`
 - `/agent <name>`
+- `/platforms`
+- `/platform <name>`
+- `/models [platform]`
+- `/model <name>`
 - `/mode <confirm|yolo|human>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).

@@ -31,6 +31,11 @@ from agents.stream_events import (
     RunItemStreamEvent,
 )
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
+from hepagent.model_providers import (
+    get_model_provider_settings,
+    get_supported_model_providers,
+    list_available_models,
+)
 from hepagent.token_costs import calculate_cost
 
 OUTPUT_TRUNCATE_LENGTH = 1000
@@ -40,21 +45,6 @@ DEAD_AIR_RETRY_PROMPT = (
     "Continue the current task now with exactly one next command or a final summary. "
     "Do not stay silent."
 )
-
-HELP_TEXT = """\
-[bold]Slash commands[/bold]
-/help - Show this help text
-/quit - Exit the REPL
-/clear - Reset the current REPL transcript
-/agents - List available agents
-/agent <name> - Switch the active agent
-/mode <confirm|yolo|human> - Change command approval mode
-
-[bold]Modes[/bold]
-confirm: Press Enter to approve a command, or type a reason to reject it
-yolo: Auto-approve command execution
-human: Type "y" to allow each command explicitly
-"""
 
 
 @dataclass
@@ -69,6 +59,7 @@ class ReplModelState:
     """Minimal model state tracked in the REPL."""
 
     cost: float = 0.0
+    platform: str = ""
     name: str = ""
 
 
@@ -107,6 +98,45 @@ def _tool_output_contains_finalize_signal(output: Any) -> bool:
     except Exception:
         text = str(output)
     return "FINALIZE_NOW" in text
+
+
+def _build_help_text() -> Text:
+    """Build richly formatted help text for the REPL panel."""
+    text = Text()
+    text.append("Slash Commands\n", style="bold")
+    for command, description in (
+        ("/help", "Show this help text"),
+        ("/quit", "Exit the REPL"),
+        ("/clear", "Reset the current REPL transcript"),
+        ("/agents", "List available agents"),
+        ("/agent <name>", "Switch the active agent"),
+        ("/platforms", "List supported model platforms"),
+        ("/platform <name>", "Switch the active model platform"),
+        (
+            "/models [platform]",
+            "List available models for the current or given platform",
+        ),
+        ("/model <name>", "Switch the active model on the current platform"),
+        ("/mode <confirm|yolo|human>", "Change command approval mode"),
+    ):
+        text.append("  ")
+        text.append(command, style="bold cyan")
+        text.append("  ")
+        text.append(description)
+        text.append("\n")
+
+    text.append("\nModes\n", style="bold")
+    for mode, description in (
+        ("confirm", "Press Enter to approve a command, or type a reason to reject it"),
+        ("yolo", "Auto-approve command execution"),
+        ("human", 'Type "y" to allow each command explicitly'),
+    ):
+        text.append("  ")
+        text.append(mode, style="bold green")
+        text.append("  ")
+        text.append(description)
+        text.append("\n")
+    return text
 
 
 def parse_slash_command(text: str) -> SlashCommand | None:
@@ -199,7 +229,7 @@ class CliRepl:
         self,
         *,
         agent_name: str,
-        agent_factory: Callable[[str], Agent],
+        agent_factory: Callable[[str, str, str | None], Agent],
         available_agents: dict[str, str],
         context: Any,
         max_turns: int,
@@ -209,6 +239,8 @@ class CliRepl:
         chat_base_id: str | None = None,
         prompt_session: PromptSession[str] | None = None,
         console: Console | None = None,
+        model_platform: str = "",
+        model_name: str = "",
     ):
         self.agent_name = agent_name
         self.agent_factory = agent_factory
@@ -223,18 +255,33 @@ class CliRepl:
         self.input_items: list[TResponseInputItem] = []
         self.config = ReplConfig(mode="yolo" if yolo else "confirm")
         self.last_rejection_reason: str | None = None
-        self.model = ReplModelState()
+        self.model = ReplModelState(platform=model_platform, name=model_name)
         self._tool_wrapper = ReplToolWrapper()
         self.current_agent = self._build_wrapped_agent(agent_name)
 
+    def _render_status_panel(self, message: str, *, title: str, border_style: str) -> None:
+        """Render a compact status panel for local REPL events."""
+        self.console.print(
+            Panel.fit(
+                Text.from_markup(message),
+                title=title,
+                border_style=border_style,
+            )
+        )
+
     def _build_wrapped_agent(self, agent_name: str) -> Agent:
-        base_agent = self.agent_factory(agent_name)
+        base_agent = self.agent_factory(
+            agent_name,
+            self._current_platform(),
+            self.model.name or None,
+        )
         model_name = (
             base_agent.model
             if isinstance(base_agent.model, str)
             else getattr(base_agent.model, "model", "")
         )
-        self.model.name = model_name
+        if model_name and not self.model.name:
+            self.model.name = model_name
         wrapped_tools = self._tool_wrapper.wrap_tools(base_agent.tools, self)
         return Agent(
             name=base_agent.name,
@@ -279,7 +326,7 @@ class CliRepl:
     def handle_command(self, command: SlashCommand) -> CommandResult:
         """Execute a slash command locally."""
         if command.name == "quit":
-            self.console.print("[bold]Bye.[/bold]")
+            self._render_status_panel("Bye.", title="session", border_style="cyan")
             return CommandResult(handled=True, should_exit=True)
         if command.name == "help":
             self.render_help()
@@ -293,16 +340,29 @@ class CliRepl:
         if command.name == "agent":
             self.switch_agent(command.args[0] if command.args else "")
             return CommandResult(handled=True)
+        if command.name == "platforms":
+            self.render_platforms()
+            return CommandResult(handled=True)
+        if command.name == "platform":
+            self.set_platform(command.args[0] if command.args else "")
+            return CommandResult(handled=True)
+        if command.name == "models":
+            self.render_models(*command.args)
+            return CommandResult(handled=True)
+        if command.name == "model":
+            self.set_model(command.args[0] if command.args else "")
+            return CommandResult(handled=True)
         if command.name == "mode":
             self.set_mode(command.args[0] if command.args else "")
             return CommandResult(handled=True)
 
-        self.console.print(
-            Panel(
-                f"Unknown command: /{command.name}\nTry /help for available commands.",
-                title="command error",
-                border_style="red",
-            )
+        self._render_status_panel(
+            (
+                f"Unknown command: [bold]/{command.name}[/bold]\n"
+                "Try [bold]/help[/bold] for available commands."
+            ),
+            title="command error",
+            border_style="red",
         )
         return CommandResult(handled=True)
 
@@ -332,9 +392,15 @@ class CliRepl:
                 saw_finalize_signal = False
                 deltas: list[str] = []
 
-                self.console.print(
-                    f"[bold green]{self.agent_name}[/bold green] "
-                    f"[dim](mode={self.config.mode}, cost=${self.model.cost:.6f})[/dim]"
+                self._render_status_panel(
+                    (
+                        f"[bold]{self.agent_name}[/bold]\n"
+                        f"platform={self._current_platform()}  model={self._current_model()}\n"
+                        f"mode={self.config.mode}  cost=${self.model.cost:.6f}\n"
+                        "Streaming response"
+                    ),
+                    title="assistant",
+                    border_style="cyan",
                 )
                 async for event in result.stream_events():
                     if isinstance(event, RawResponsesStreamEvent):
@@ -356,7 +422,7 @@ class CliRepl:
                 if saw_text:
                     self.console.file.write("\n")
                     self.console.file.flush()
-                    self.render_assistant_output(full_text)
+                    self.render_assistant_output(full_text, streamed=True)
 
                 if saw_finalize_signal and not saw_text:
                     followup_input = result.to_input_list()
@@ -377,15 +443,16 @@ class CliRepl:
                         session=self.session,
                     )
                     if forced.final_output is not None:
-                        self.render_assistant_output(str(forced.final_output))
+                        self.render_assistant_output(str(forced.final_output), streamed=False)
                     result = forced
                     break
 
                 if not saw_text:
                     if not dead_air_retry_used:
-                        self.console.print(
-                            "[yellow][recovery: no assistant output; "
-                            "retrying once automatically][/yellow]"
+                        self._render_status_panel(
+                            "No assistant output detected. Retrying once automatically.",
+                            title="recovery",
+                            border_style="yellow",
                         )
                         dead_air_retry_used = True
                         turn_input = result.to_input_list()
@@ -397,24 +464,21 @@ class CliRepl:
                         )
                         self.current_agent = result.last_agent
                         continue
-                    self.console.print(
-                        "[yellow][no assistant text output after retry; "
-                        "continuing to next prompt][/yellow]"
+                    self._render_status_panel(
+                        "Still no assistant text after retry. Continuing to the next prompt.",
+                        title="recovery",
+                        border_style="yellow",
                     )
                 break
             except MaxTurnsExceeded:
-                self.console.print(
-                    f"[red][max turns: {self.max_turns}. Narrow the task or raise the limit.][/red]"
+                self._render_status_panel(
+                    f"Max turns reached: {self.max_turns}. Narrow the task or raise the limit.",
+                    title="run error",
+                    border_style="red",
                 )
                 return
             except Exception as exc:
-                self.console.print(
-                    Panel(
-                        str(exc),
-                        title="run error",
-                        border_style="red",
-                    )
-                )
+                self._render_status_panel(str(exc), title="run error", border_style="red")
                 return
 
         if result is None:
@@ -427,7 +491,11 @@ class CliRepl:
         del cmd, cwd
         self.last_rejection_reason = None
         if self.config.mode == "yolo":
-            self.console.print("[green]Auto-approved (YOLO mode).[/green]")
+            self._render_status_panel(
+                "Auto-approved in [bold]yolo[/bold] mode.",
+                title="approval",
+                border_style="green",
+            )
             return True
         if self.config.mode == "confirm":
             response = self.prompt_inline(
@@ -435,19 +503,35 @@ class CliRepl:
             )
             if response.strip():
                 self.last_rejection_reason = response.strip()
-                self.console.print(f"[red]Rejected:[/red] {self.last_rejection_reason}")
+                self._render_status_panel(
+                    f"Rejected.\nReason: {self.last_rejection_reason}",
+                    title="approval",
+                    border_style="red",
+                )
                 return False
-            self.console.print("[green]Approved.[/green]")
+            self._render_status_panel(
+                "Approved.",
+                title="approval",
+                border_style="green",
+            )
             return True
 
         response = self.prompt_inline(
             "Approve command? Type 'y' to allow, or enter a reason to reject: "
         )
         if response.strip().lower() == "y":
-            self.console.print("[green]Approved.[/green]")
+            self._render_status_panel(
+                "Approved.",
+                title="approval",
+                border_style="green",
+            )
             return True
         self.last_rejection_reason = response.strip() or "Rejected in human mode"
-        self.console.print(f"[red]Rejected:[/red] {self.last_rejection_reason}")
+        self._render_status_panel(
+            f"Rejected.\nReason: {self.last_rejection_reason}",
+            title="approval",
+            border_style="red",
+        )
         return False
 
     def render_startup(self) -> None:
@@ -457,6 +541,8 @@ class CliRepl:
                 (
                     f"Agent: [bold]{self.agent_name}[/bold]\n"
                     f"Mode: [bold]{self.config.mode}[/bold]\n"
+                    f"Platform: [bold]{self._current_platform()}[/bold]\n"
+                    f"Model: [bold]{self._current_model()}[/bold]\n"
                     "Use /help for slash commands. Enter a task to start."
                 ),
                 title="hepagent repl",
@@ -466,9 +552,7 @@ class CliRepl:
 
     def render_help(self) -> None:
         """Render help text."""
-        self.console.print(
-            Panel(Text.from_markup(HELP_TEXT), title="help", border_style="cyan")
-        )
+        self.console.print(Panel(_build_help_text(), title="help", border_style="cyan"))
 
     def render_agents(self) -> None:
         """Render available agent names."""
@@ -476,37 +560,193 @@ class CliRepl:
         table.add_column("Agent", style="bold")
         table.add_column("Description")
         for name, description in sorted(self.available_agents.items()):
-            table.add_row(name, description)
+            label = Text(name, style="bold cyan" if name == self.agent_name else "")
+            table.add_row(label, description)
         self.console.print(table)
+
+    def render_platforms(self) -> None:
+        """Render configured model platforms."""
+        table = Table(title="Supported model platforms")
+        table.add_column("Platform", style="bold")
+        for platform in sorted(get_supported_model_providers()):
+            label = Text(
+                platform,
+                style="bold cyan" if platform == self._current_platform() else "",
+            )
+            table.add_row(label)
+        self.console.print(table)
+
+    def render_models(self, *args: str) -> None:
+        """Render available models for the current or selected platform."""
+        if len(args) > 1:
+            self._render_status_panel(
+                "Usage: [bold]/models [platform][/bold]",
+                title="models error",
+                border_style="red",
+            )
+            return
+
+        platform = args[0].strip().lower() if args else self._current_platform()
+        supported = set(get_supported_model_providers())
+        if platform not in supported:
+            available = ", ".join(sorted(supported))
+            self._render_status_panel(
+                (
+                    f"Unknown platform: [bold]{platform}[/bold]\n"
+                    f"Supported platforms: {available}"
+                ),
+                title="models error",
+                border_style="red",
+            )
+            return
+
+        try:
+            settings = get_model_provider_settings(platform)
+            models = list_available_models(platform, settings=settings)
+        except ValueError as exc:
+            self._render_status_panel(str(exc), title="models error", border_style="red")
+            return
+        except Exception as exc:
+            self._render_status_panel(str(exc), title="models error", border_style="red")
+            return
+
+        table = Table(title=f"Available models for {platform}")
+        table.add_column("Model", style="bold")
+        current_model = self._current_model()
+        for name in models:
+            is_current_model = platform == self._current_platform() and name == current_model
+            label = Text(name, style="bold cyan" if is_current_model else "")
+            table.add_row(label)
+        self.console.print(table)
+
+    def set_platform(self, platform: str) -> None:
+        """Set the active model platform and reset to its default model."""
+        normalized = platform.strip().lower()
+        if not normalized:
+            self._render_status_panel(
+                "Usage: [bold]/platform <name>[/bold]",
+                title="platform error",
+                border_style="red",
+            )
+            return
+
+        supported = set(get_supported_model_providers())
+        if normalized not in supported:
+            available = ", ".join(sorted(supported))
+            self._render_status_panel(
+                (
+                    f"Unknown platform: [bold]{normalized}[/bold]\n"
+                    f"Supported platforms: {available}"
+                ),
+                title="platform error",
+                border_style="red",
+            )
+            return
+
+        try:
+            settings = get_model_provider_settings(normalized)
+        except ValueError as exc:
+            self._render_status_panel(str(exc), title="platform error", border_style="red")
+            return
+        except Exception as exc:
+            self._render_status_panel(str(exc), title="platform error", border_style="red")
+            return
+
+        self.model.platform = normalized
+        self.model.name = settings.default_model
+        self.current_agent = self._build_wrapped_agent(self.agent_name)
+        self._render_status_panel(
+            (
+                f"Platform set to [bold]{normalized}[/bold].\n"
+                f"Model set to default [bold]{self._current_model()}[/bold]."
+            ),
+            title="platform",
+            border_style="green",
+        )
+
+    def set_model(self, model_name: str) -> None:
+        """Set the active model on the current platform."""
+        normalized = model_name.strip()
+        if not normalized:
+            self._render_status_panel(
+                "Usage: [bold]/model <name>[/bold]",
+                title="model error",
+                border_style="red",
+            )
+            return
+
+        platform = self._current_platform()
+        try:
+            settings = get_model_provider_settings(platform)
+            available_models = list_available_models(platform, settings=settings)
+        except ValueError as exc:
+            self._render_status_panel(str(exc), title="model error", border_style="red")
+            return
+        except Exception as exc:
+            self._render_status_panel(str(exc), title="model error", border_style="red")
+            return
+
+        if normalized not in available_models:
+            preview = ", ".join(available_models[:8])
+            suffix = "..." if len(available_models) > 8 else ""
+            self._render_status_panel(
+                (
+                    f"Model [bold]{normalized}[/bold] is not available on [bold]{platform}[/bold].\n"
+                    f"Try [bold]/models[/bold] to inspect the full list. "
+                    f"Known models: {preview}{suffix}"
+                ),
+                title="model error",
+                border_style="red",
+            )
+            return
+
+        self.model.name = normalized
+        self.current_agent = self._build_wrapped_agent(self.agent_name)
+        self._render_status_panel(
+            (
+                f"Model set to [bold]{normalized}[/bold]\n"
+                f"Platform: [bold]{platform}[/bold]"
+            ),
+            title="model",
+            border_style="green",
+        )
 
     def render_command_proposal(self, *, cmd: str, cwd: str = "", thought: str = "") -> None:
         """Render a proposed bash command before execution."""
         if thought:
             self.console.print(Panel(thought, title="assistant thought", border_style="yellow"))
         body = Text()
-        body.append("Command:\n", style="bold")
-        body.append(cmd)
-        body.append("\n\nWorking directory:\n", style="bold")
-        body.append(cwd or "current")
+        body.append("Command\n", style="bold")
+        body.append(cmd, style="cyan")
+        body.append("\n\nWorking directory\n", style="bold")
+        body.append(cwd or "current", style="green")
+        body.append("\n\nApproval mode\n", style="bold")
+        body.append(self.config.mode)
         self.console.print(Panel(body, title="bash tool", border_style="magenta"))
 
     def render_tool_result(self, tool_name: str, result: Any) -> None:
         """Render tool output in a dedicated block."""
+        border_style = "green" if result.get("returncode", 1) == 0 else "red"
         self.console.print(
             Panel(
                 _format_tool_output(result),
                 title=f"{tool_name} result",
-                border_style="green" if result.get("returncode", 1) == 0 else "red",
+                subtitle=f"exit={result.get('returncode', 'n/a')}",
+                border_style=border_style,
             )
         )
 
-    def render_assistant_output(self, text: str) -> None:
-        """Render finalized assistant output as markdown when it is structured."""
+    def render_assistant_output(self, text: str, *, streamed: bool) -> None:
+        """Render assistant output when a final block is still needed."""
         stripped = text.strip()
         if not stripped:
             return
+        if streamed:
+            return
         if "```" in stripped or "\n" in stripped:
             self.console.print(Panel(Markdown(stripped), title="assistant", border_style="cyan"))
+            return
+        self.console.print(Panel(stripped, title="assistant", border_style="cyan"))
 
     def clear_session_state(self) -> None:
         """Clear in-memory transcript state and rotate the persistent chat session."""
@@ -517,47 +757,64 @@ class CliRepl:
         if self.chat_base_id and self.session_factory is not None:
             new_id = f"{self.chat_base_id}-{uuid.uuid4().hex[:8]}"
             self.session = self.session_factory(new_id)
-            self.console.print(f"[dim]Started a fresh chat session: {new_id}[/dim]")
+            self._render_status_panel(
+                f"Started a fresh chat session: [bold]{new_id}[/bold]",
+                title="session",
+                border_style="cyan",
+            )
         else:
-            self.console.print("[dim]Cleared current REPL session state.[/dim]")
+            self._render_status_panel(
+                "Cleared the current REPL session state.",
+                title="session",
+                border_style="cyan",
+            )
 
     def set_mode(self, mode: str) -> None:
         """Set the command approval mode."""
         normalized = mode.lower()
         if normalized not in {"confirm", "yolo", "human"}:
-            self.console.print(
-                Panel(
-                    "Usage: /mode <confirm|yolo|human>",
-                    title="mode error",
-                    border_style="red",
-                )
+            self._render_status_panel(
+                "Usage: [bold]/mode <confirm|yolo|human>[/bold]",
+                title="mode error",
+                border_style="red",
             )
             return
         self.config.mode = normalized
-        self.console.print(f"[green]Mode set to {normalized}.[/green]")
+        self._render_status_panel(
+            f"Mode set to [bold]{normalized}[/bold].",
+            title="mode",
+            border_style="green",
+        )
 
     def switch_agent(self, agent_name: str) -> None:
         """Switch the active agent for future turns."""
         normalized = agent_name.strip().lower()
         if not normalized:
-            self.console.print(
-                Panel("Usage: /agent <agent_name>", title="agent error", border_style="red")
+            self._render_status_panel(
+                "Usage: [bold]/agent <agent_name>[/bold]",
+                title="agent error",
+                border_style="red",
             )
             return
         if normalized not in self.available_agents:
-            self.console.print(
-                Panel(
-                    f"Unknown agent: {normalized}\nTry /agents to see available names.",
-                    title="agent error",
-                    border_style="red",
-                )
+            self._render_status_panel(
+                (
+                    f"Unknown agent: [bold]{normalized}[/bold]\n"
+                    "Try [bold]/agents[/bold] to see available names."
+                ),
+                title="agent error",
+                border_style="red",
             )
             return
         self.agent_name = normalized
         if hasattr(self.context, "agent_name"):
             self.context.agent_name = normalized
         self.current_agent = self._build_wrapped_agent(normalized)
-        self.console.print(f"[green]Switched active agent to {normalized}.[/green]")
+        self._render_status_panel(
+            f"Switched active agent to [bold]{normalized}[/bold].",
+            title="agent",
+            border_style="green",
+        )
 
     def _build_completer(self) -> NestedCompleter:
         return NestedCompleter.from_nested_dict(
@@ -567,15 +824,26 @@ class CliRepl:
                 "/clear": None,
                 "/agents": None,
                 "/agent": dict.fromkeys(self.available_agents, None),
+                "/platforms": None,
+                "/platform": dict.fromkeys(sorted(get_supported_model_providers()), None),
+                "/models": dict.fromkeys(sorted(get_supported_model_providers()), None),
+                "/model": None,
                 "/mode": {"confirm": None, "yolo": None, "human": None},
             }
         )
 
     def _bottom_toolbar(self) -> str:
         return (
-            f" agent={self.agent_name} | mode={self.config.mode} | "
+            f" agent={self.agent_name} | platform={self._current_platform()} | "
+            f"model={self._current_model()} | mode={self.config.mode} | "
             f"cost=${self.model.cost:.6f} | /help "
         )
 
     def _prompt_message(self) -> str:
         return f"{self.agent_name} [{self.config.mode}] > "
+
+    def _current_platform(self) -> str:
+        return self.model.platform or "unknown"
+
+    def _current_model(self) -> str:
+        return self.model.name or "default"
