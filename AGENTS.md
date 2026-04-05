@@ -21,6 +21,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - Only read skill resources on demand via `read_resource`.
 - Ask for missing required inputs with `ask_user_for_info` (one clear question at a time).
 - When a tool/action fails or the user corrects you, record it with `update_logbook`.
+- When finishing a task, update relevant files in `docs/`, `README.md`, and `AGENTS.md` if critical lessons were learned.
 - For long HPC runs, use `wait_for_slurm_job_completion(job_id)` instead of polling manually.
 
 ## Command Safety

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from openai import OpenAI
 from openai import AsyncOpenAI
 
 from agents import OpenAIChatCompletionsModel
@@ -98,6 +99,21 @@ def get_model_provider(
         model_name = settings.default_model
     client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key)
     return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
+
+
+def list_available_models(
+    model_provider: str,
+    *,
+    settings: ModelProviderSettings | None = None,
+) -> tuple[str, ...]:
+    """List the available models for a configured provider."""
+    resolved_settings = settings or get_model_provider_settings(model_provider)
+    client = OpenAI(
+        base_url=resolved_settings.base_url,
+        api_key=resolved_settings.api_key,
+    )
+    models = client.models.list()
+    return tuple(sorted(model.id for model in models.data))
 
 
 def get_cborg_model_provider(

@@ -1164,13 +1164,14 @@ wheels = [
 
 [[package]]
 name = "hepagent"
-version = "0.3.3"
+version = "0.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "camb" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "openai-agents", extra = ["litellm"] },
+    { name = "prompt-toolkit" },
     { name = "pyyaml" },
     { name = "textual" },
     { name = "typer" },
@@ -1205,6 +1206,7 @@ requires-dist = [
     { name = "mlflow", marker = "extra == 'tracing'", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "openai-agents", extras = ["litellm"], specifier = ">=0.6.3" },
+    { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "textual", specifier = ">=6.11.0" },
     { name = "typer", specifier = ">=0.24.1" },

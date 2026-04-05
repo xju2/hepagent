@@ -5,9 +5,10 @@
 
 `hepagent` is an AI agent framework tailored for High Energy Physics (HEP) and cosmology workflows. Key features include:
 
-- **Multi-provider LLM support**: seamlessly switch between providers such as `cborg`, `openai`, `amsc`, and `gemini` via a unified CLI (`hepagent run`) or programmatic API, with per-provider configuration managed in `providers.toml`.
+- **Multi-provider LLM support**: seamlessly switch between providers such as `cborg`, `openai`, `amsc`, and `gemini` via a unified CLI (`hepagent run`, `hepagent repl`) or programmatic API, with per-provider configuration managed in `providers.toml`.
 - **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations) that agents load on demand, keeping prompts concise and context-relevant.
-- **Bash and REPL agents**: interactive shell agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
+- **CLI REPL**: a Claude Code-inspired interactive REPL (`hepagent repl`) with slash commands, streaming transcript output, command approval prompts, and markdown/code rendering.
+- **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **Textual TUI agent**: a rich Terminal User Interface (`TextualAgent`) with real-time display of agent thinking, step navigation, and live cost tracking.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
@@ -85,11 +86,35 @@ YOLO mode (auto-approve all bash commands):
 uv run hepagent run --agent "scientist" --yolo "your task here"
 ```
 
-### Interactive Bash Agent with REPL
+### Interactive REPL
+
+Start the new CLI REPL:
+
+```bash
+uv run hepagent repl
 ```
-python src/hepagent/scripts/bash_repl.py
+
+Examples:
+
+```bash
+uv run hepagent repl --agent scientist
+uv run hepagent repl --agent shell --model openai:gpt-5-mini
+uv run hepagent repl --chat my-session
+uv run hepagent repl --yolo
+uv run hepagent repl --max-turn 30
 ```
-With custom turn budget:
-```
-HEPAGENT_MAX_TURNS=80 python src/hepagent/scripts/bash_repl.py
-```
+
+Supported slash commands:
+
+- `/help`
+- `/quit`
+- `/clear`
+- `/agents`
+- `/agent <name>`
+- `/platforms`
+- `/platform <name>`
+- `/models [platform]`
+- `/model <name>`
+- `/mode <confirm|yolo|human>`
+
+For more detail, see [docs/REPL.md](docs/REPL.md).
