@@ -9,9 +9,9 @@ This document summarizes the new Claude Code-inspired REPL added to `hepagent`.
 - Kept the existing one-shot command:
   - `uv run hepagent run "your task"`
 - Implemented the REPL as a new prompt-toolkit based terminal loop in
-  [src/hepagent/agents/cli_repl.py](/Users/xju/code/hepagent/src/hepagent/agents/cli_repl.py).
+  [src/hepagent/agents/cli_repl.py](../src/hepagent/agents/cli_repl.py).
 - Reused the existing agent/model/session bootstrap logic in
-  [src/hepagent/main.py](/Users/xju/code/hepagent/src/hepagent/main.py) so `run` and `repl`
+  [src/hepagent/main.py](src/hepagent/main.py) so `run` and `repl`
   resolve agents, models, and chat sessions consistently.
 
 ## Design Direction
@@ -109,15 +109,15 @@ and errors are rendered in distinct blocks to keep the transcript readable.
 
 ## Related Files
 
-- [src/hepagent/agents/cli_repl.py](/Users/xju/code/hepagent/src/hepagent/agents/cli_repl.py):
+- [src/hepagent/agents/cli_repl.py](../src/hepagent/agents/cli_repl.py):
   REPL loop, slash-command handling, status panels, and toolbar rendering
-- [src/hepagent/main.py](/Users/xju/code/hepagent/src/hepagent/main.py):
+- [src/hepagent/main.py](../src/hepagent/main.py):
   REPL bootstrap and shared runtime wiring
-- [src/hepagent/model_providers.py](/Users/xju/code/hepagent/src/hepagent/model_providers.py):
+- [src/hepagent/model_providers.py](../src/hepagent/model_providers.py):
   shared provider/model discovery helpers
-- [tests/test_cli_repl.py](/Users/xju/code/hepagent/tests/test_cli_repl.py):
+- [tests/test_cli_repl.py](../src/hepagent/tests/test_cli_repl.py):
   REPL command and rendering coverage
-- [tests/test_main_commands.py](/Users/xju/code/hepagent/tests/test_main_commands.py):
+- [tests/test_main_commands.py](../src/hepagent/tests/test_main_commands.py):
   provider/model listing command coverage
 
 ## Validation Summary
