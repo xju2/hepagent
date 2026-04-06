@@ -1,7 +1,7 @@
 [providers.cborg]
 base_url = "https://api.cborg.lbl.gov"
 api_key_env = "CBORG_API_KEY"
-default_model = "gemini-flash"
+default_model = "lbl/gemma-4-thinking"
 
 [providers.amsc]
 base_url = "https://api.i2-core.american-science-cloud.org"

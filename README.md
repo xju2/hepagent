@@ -61,7 +61,7 @@ export GEMINI_API_KEY="your-api-key"
 
 ### Choose a platform and model
 You can run the agent as in the following examples.
-The default model is `cborg:gemini-flash` if not specified.
+The default model is `cborg:lbl/gemma-4-thinking` if not specified.
 
 List available models for a platform:
 ```bash
@@ -76,7 +76,7 @@ uv run hepagent list-models --platform gemini
 
 ```bash
 uv run hepagent run --agent "shell" --model "gemini:models/gemini-flash-lite-latest" "how many python files in this code repository"
-uv run hepagent run --agent "scientist" --model "cborg:gemini-flash" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+uv run hepagent run --agent "scientist" --model "cborg:lbl/gemma-4-thinking" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
 uv run hepagent run --agent "coder" --model "openai:gpt-5-mini" "Create a worktree for adding a new feature: chunkle."
 uv run hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # uses Gemini provider
 ```

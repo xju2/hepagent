@@ -14,6 +14,11 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
   - `skills/<skill>/SKILL.md`, `LOGBOOK.md`, optional `resources/*.md`
 - Skill context state is tracked in `AgentContext.active_skill`.
 
+## Code Style
+- Match existing TypeScript style and naming in nearby files.
+- Prefer explicit, readable logic over compact clever code.
+- Add brief comments only when logic is not obvious.
+
 ## Required Agent Behavior
 - Treat the user task as authoritative; do not change intent.
 - If a domain skill is relevant, call `load_skill_details(<skill>)` first.
