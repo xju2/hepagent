@@ -39,8 +39,8 @@ TOKEN_COSTS_PER_MILLION = {
     },
     # Gemma 4 Thinking (open model. Free to use, no cost)
     "lbl/gemma-4-thinking": {
-        "input": 0.0,
-        "output": 0.00,
+        "input": 0.00001,
+        "output": 0.00001,
     }
 }
 
