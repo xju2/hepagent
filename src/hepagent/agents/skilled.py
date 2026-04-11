@@ -1,5 +1,5 @@
 from agents import Agent
-from hepagent.agent_helpers import AgentManifestLoader, update_logbook
+from hepagent.agent_helpers import AgentManifestLoader, update_logbook, update_user_profile
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.model_providers import get_model_provider
@@ -27,6 +27,7 @@ def create(
         tools=[
             execute_bash_command_with_confirmation,  # The "Bash Command Execution" tool
             update_logbook,  # The "Learned Lessons Logging" tool
+            update_user_profile,  # The "User Profile Memory" tool
             load_skill_details,  # The "Skill Discovery" tool
             read_resource,  # The "Knowledge Retrieval" tool
             ask_user_for_info,  # The "User Interaction" tool

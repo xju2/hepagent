@@ -11,6 +11,30 @@ from typing import Any
 import yaml
 
 
+USER_PROFILE_TEMPLATE = """# USER PROFILE
+
+Keep this file concise. Record only durable facts that improve future interactions.
+
+## Preferences
+-
+
+## Goals
+-
+
+## Projects
+-
+
+## Expertise
+-
+
+## Interests
+-
+
+## Constraints
+-
+"""
+
+
 def get_hepagent_home() -> pathlib.Path:
     """Returns the user-level config/data directory: ~/.hepagent/
 
@@ -20,6 +44,20 @@ def get_hepagent_home() -> pathlib.Path:
     effects, which matters in CI/HPC environments where $HOME is read-only.
     """
     return pathlib.Path.home() / ".hepagent"
+
+
+def get_user_profile_path() -> pathlib.Path:
+    """Returns the path to the user profile markdown: ~/.hepagent/USER.md."""
+    return get_hepagent_home() / "USER.md"
+
+
+def ensure_user_profile_file() -> pathlib.Path:
+    """Ensure ~/.hepagent/USER.md exists with a minimal template."""
+    profile_path = get_user_profile_path()
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    if not profile_path.exists():
+        profile_path.write_text(USER_PROFILE_TEMPLATE, encoding="utf-8")
+    return profile_path
 
 
 def get_repo_root() -> pathlib.Path:
@@ -106,6 +144,9 @@ def bootstrap_hepagent_home() -> None:
                 target = agents_dest if not subdir else agents_dest / subdir
                 target.mkdir(parents=True, exist_ok=True)
 
+    # --- USER profile file ---
+    ensure_user_profile_file()
+
 
 @lru_cache
 def load_env_config() -> dict[str, Any]:
@@ -117,7 +158,7 @@ def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T](
+def get_env_var[T]( # type: ignore
     key: str, *, dtype: type[T] = str, default: T | None = None, set_env: bool = True
 ) -> T:
     """Helper to access environment variables with a TOML fallback.

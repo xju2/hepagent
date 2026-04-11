@@ -1,5 +1,6 @@
 from hepagent.agent_helpers import AgentManifestLoader
 from hepagent.agents.common import AgentContext
+from unittest.mock import patch
 
 
 def test_get_skill_catalog(mock_agent_env):
@@ -54,3 +55,26 @@ def test_loader_missing_files(tmp_path, monkeypatch):
         loader = AgentManifestLoader()
         catalog = loader.get_skill_catalog()
         assert catalog == ""  # Should be empty string, not a crash
+
+
+def test_get_instructions_includes_user_profile(mock_agent_env, tmp_path):
+    """Loader includes USER.md content in the assembled instructions."""
+    user_profile = tmp_path / "USER.md"
+    user_profile.write_text("# USER PROFILE\n\n## Goals\n- Publish results\n", encoding="utf-8")
+
+    loader = AgentManifestLoader()
+    dummy_context = AgentContext(agent_name="nyx")
+
+    class MockWrapper:
+        def __init__(self, context):
+            self.context = context
+
+    wrapper = MockWrapper(dummy_context)
+
+    with patch("hepagent.agent_helpers.ensure_user_profile_file"), patch(
+        "hepagent.agent_helpers.get_user_profile_path", return_value=user_profile
+    ):
+        instructions = loader.get_instructions(wrapper, None)  # type: ignore[arg-type]
+
+    assert "# USER PROFILE" in instructions
+    assert "Publish results" in instructions

@@ -7,10 +7,12 @@ import pytest
 
 from hepagent.helpers import (
     bootstrap_hepagent_home,
+    ensure_user_profile_file,
     get_agent_dir,
     get_env_var,
     get_hepagent_home,
     get_repo_root,
+    get_user_profile_path,
     load_env_config,
     load_providers_config,
     read_md,
@@ -64,6 +66,29 @@ def test_bootstrap_copies_agents_dir(tmp_path):
     with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
         bootstrap_hepagent_home()
     assert (tmp_path / "agents").exists()
+
+
+def test_bootstrap_creates_user_profile_template(tmp_path):
+    """bootstrap_hepagent_home creates ~/.hepagent/USER.md on first run."""
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        bootstrap_hepagent_home()
+    profile = tmp_path / "USER.md"
+    assert profile.exists()
+    content = profile.read_text(encoding="utf-8")
+    assert "# USER PROFILE" in content
+    assert "## Preferences" in content
+
+
+def test_ensure_user_profile_file_does_not_overwrite_existing(tmp_path):
+    """ensure_user_profile_file preserves existing USER.md content."""
+    profile = tmp_path / "USER.md"
+    profile.write_text("# USER PROFILE\n\n## Preferences\n- Keep this\n", encoding="utf-8")
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        path = ensure_user_profile_file()
+        from_path = get_user_profile_path()
+    assert path == profile
+    assert from_path == profile
+    assert "Keep this" in profile.read_text(encoding="utf-8")
 
 
 def test_bootstrap_does_not_overwrite_existing_files(tmp_path):
