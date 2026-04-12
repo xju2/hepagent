@@ -114,9 +114,32 @@ def _append_note_to_user_section(profile_path, section_title: str, note: str) ->
 
     end_idx = len(lines)
     for idx in range(start_idx + 1, len(lines)):
-        if lines[idx].startswith("## "):
+        if lines[idx].lstrip().startswith("## "):
             end_idx = idx
             break
+
+    def _is_placeholder_bullet(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped.startswith("-"):
+            return False
+        tail = stripped[1:].strip()
+        if not tail:
+            return True
+        # Treat punctuation-only bullets as placeholders (for example: "- / -").
+        return not any(char.isalnum() for char in tail)
+
+    # Drop placeholder bullets in the target section once we have
+    # a real note to persist.
+    section_body_start = start_idx + 1
+    placeholder_indexes = []
+    for idx in range(section_body_start, end_idx):
+        if _is_placeholder_bullet(lines[idx]):
+            placeholder_indexes.append(idx)
+
+    if placeholder_indexes:
+        for idx in reversed(placeholder_indexes):
+            del lines[idx]
+        end_idx -= len(placeholder_indexes)
 
     insert_at = end_idx
     while insert_at > start_idx + 1 and lines[insert_at - 1].strip() == "":
@@ -201,7 +224,7 @@ class AgentManifestLoader:
             components.append(f"# SHARED MEMORY\n{memory}")
 
         if user_profile:
-            components.append(f"# USER PROFILE\n{user_profile}")
+            components.append(f"{user_profile}")
 
         if catalog:
             components.append(

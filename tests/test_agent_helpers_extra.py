@@ -149,6 +149,50 @@ def test_update_user_profile_appends_new_entry(tmp_path):
     assert "- Finish v1 release" in content
 
 
+def test_update_user_profile_removes_placeholder_in_target_section(tmp_path):
+    """update_user_profile removes template placeholder bullets in the target section."""
+    profile = tmp_path / "USER.md"
+    profile.write_text(
+        "# USER PROFILE\n\n## Preferences\n-\n\n## Goals\n-\n",
+        encoding="utf-8",
+    )
+
+    with (
+        patch("hepagent.agent_helpers.ensure_user_profile_file"),
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=profile),
+    ):
+        result = _invoke_user_profile("Goal", "Ship stable release")
+
+    assert "updated" in result.lower()
+    content = profile.read_text(encoding="utf-8")
+    assert "## Goals\n- Ship stable release" in content
+    assert "## Goals\n-\n" not in content
+    # Placeholders in non-target sections should be untouched.
+    assert "## Preferences\n-\n" in content
+
+
+def test_update_user_profile_removes_punctuation_placeholders_only(tmp_path):
+    """Punctuation-only bullets in target section are cleaned when adding a real note."""
+    profile = tmp_path / "USER.md"
+    profile.write_text(
+        "# USER PROFILE\n\n## Preferences\n- Expert in C++\n\n## Goals\n- / /\n- ...\n",
+        encoding="utf-8",
+    )
+
+    with (
+        patch("hepagent.agent_helpers.ensure_user_profile_file"),
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=profile),
+    ):
+        _invoke_user_profile("Goal", "Publish benchmark")
+
+    content = profile.read_text(encoding="utf-8")
+    assert "## Goals\n- Publish benchmark" in content
+    assert "- / /" not in content
+    assert "- ..." not in content
+    # Substantive bullets in other sections should remain.
+    assert "- Expert in C++" in content
+
+
 def test_update_user_profile_skips_duplicate_entry(tmp_path):
     """update_user_profile does not duplicate an already-captured note."""
     profile = tmp_path / "USER.md"
