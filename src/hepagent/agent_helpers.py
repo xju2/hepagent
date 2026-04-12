@@ -7,6 +7,22 @@ from hepagent.helpers import ensure_user_profile_file, extract_yaml, get_user_pr
 from hepagent.token_costs import calculate_cost
 
 
+def _read_user_profile_if_available() -> str:
+    """Best-effort USER.md load with opportunistic create when writable."""
+    profile_path = get_user_profile_path()
+
+    if not profile_path.exists():
+        try:
+            ensure_user_profile_file()
+        except OSError:
+            return ""
+
+    try:
+        return read_md(profile_path)
+    except OSError:
+        return ""
+
+
 def print_usage(usage: Usage, model_name: str = "") -> None:
     """Print usage statistics and cost information.
 
@@ -167,8 +183,7 @@ class AgentManifestLoader:
         identity = read_md(self.common_path / "IDENTITY.md")  # Personality & Vibe
         operation = read_md(self.common_path / "OPERATION.md")  # Operational rules
         memory = read_md(self.storage_path / "MEMORY.md")  # Project/User preferences, etc.
-        ensure_user_profile_file()
-        user_profile = read_md(get_user_profile_path())
+        user_profile = _read_user_profile_if_available()
 
         catalog = self.get_skill_catalog()
 

@@ -80,3 +80,54 @@ def test_get_instructions_includes_user_profile(mock_agent_env, tmp_path):
 
     assert "# USER PROFILE" in instructions
     assert "Publish results" in instructions
+
+
+def test_get_instructions_creates_missing_user_profile_when_writable(mock_agent_env, tmp_path):
+    """Loader creates USER.md on-demand when it is missing and writable."""
+    user_profile = tmp_path / "USER.md"
+    assert not user_profile.exists()
+
+    loader = AgentManifestLoader()
+    dummy_context = AgentContext(agent_name="nyx")
+
+    class MockWrapper:
+        def __init__(self, context):
+            self.context = context
+
+    wrapper = MockWrapper(dummy_context)
+
+    def _create_profile():
+        user_profile.write_text("# USER PROFILE\n\n## Goals\n- Publish results\n", encoding="utf-8")
+        return user_profile
+
+    with (
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=user_profile),
+        patch("hepagent.agent_helpers.ensure_user_profile_file", side_effect=_create_profile),
+    ):
+        instructions = loader.get_instructions(wrapper, None)  # type: ignore[arg-type]
+
+    assert user_profile.exists()
+    assert "# USER PROFILE" in instructions
+    assert "Publish results" in instructions
+
+
+def test_get_instructions_skips_user_profile_on_permission_error(mock_agent_env, tmp_path):
+    """Loader stays read-only-safe when USER.md access raises PermissionError."""
+    loader = AgentManifestLoader()
+    dummy_context = AgentContext(agent_name="nyx")
+
+    class MockWrapper:
+        def __init__(self, context):
+            self.context = context
+
+    wrapper = MockWrapper(dummy_context)
+    missing_profile = tmp_path / "missing" / "USER.md"
+
+    with (
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=missing_profile),
+        patch("hepagent.agent_helpers.ensure_user_profile_file", side_effect=PermissionError("denied")),
+    ):
+        instructions = loader.get_instructions(wrapper, None)  # type: ignore[arg-type]
+
+    assert "# IDENTITY" in instructions
+    assert "# USER PROFILE" not in instructions
