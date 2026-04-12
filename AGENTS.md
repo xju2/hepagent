@@ -28,6 +28,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - When a tool/action fails or the user corrects you, record it with `update_logbook`.
 - When finishing a task, update relevant files in `docs/`, `README.md`, and `AGENTS.md` if critical lessons were learned.
 - For long HPC runs, use `wait_for_slurm_job_completion(job_id)` instead of polling manually.
+- If a task is described in a markdown file, follow the instructions there exactly and update the "## Progress report" section with your progress and next steps.
 
 ## Command Safety
 - Never run destructive shell commands without explicit user approval.

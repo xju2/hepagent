@@ -3,8 +3,24 @@ from typing import Literal
 
 from agents import Agent, RunContextWrapper, Usage, function_tool
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import extract_yaml, read_md
+from hepagent.helpers import ensure_user_profile_file, extract_yaml, get_user_profile_path, read_md
 from hepagent.token_costs import calculate_cost
+
+
+def _read_user_profile_if_available() -> str:
+    """Best-effort USER.md load with opportunistic create when writable."""
+    profile_path = get_user_profile_path()
+
+    if not profile_path.exists():
+        try:
+            ensure_user_profile_file()
+        except OSError:
+            return ""
+
+    try:
+        return read_md(profile_path)
+    except OSError:
+        return ""
 
 
 def print_usage(usage: Usage, model_name: str = "") -> None:
@@ -68,6 +84,105 @@ def update_logbook(
     return f"Insight recorded in {skill_name} logbook."
 
 
+def _append_note_to_user_section(profile_path, section_title: str, note: str) -> bool:
+    """Append a bullet note under a USER.md section. Returns True when a write happens."""
+    content = profile_path.read_text(encoding="utf-8")
+    note_clean = note.strip()
+    if not note_clean:
+        return False
+
+    bullet = f"- {note_clean}"
+    existing = [line.strip().lower() for line in content.splitlines() if line.strip()]
+    if bullet.lower() in existing:
+        return False
+
+    lines = content.splitlines()
+    header = f"## {section_title}"
+
+    start_idx = None
+    for idx, line in enumerate(lines):
+        if line.strip() == header:
+            start_idx = idx
+            break
+
+    if start_idx is None:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.extend([header, bullet, ""])
+        profile_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return True
+
+    end_idx = len(lines)
+    for idx in range(start_idx + 1, len(lines)):
+        if lines[idx].lstrip().startswith("## "):
+            end_idx = idx
+            break
+
+    def _is_placeholder_bullet(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped.startswith("-"):
+            return False
+        tail = stripped[1:].strip()
+        if not tail:
+            return True
+        # Treat punctuation-only bullets as placeholders (for example: "- / -").
+        return not any(char.isalnum() for char in tail)
+
+    # Drop placeholder bullets in the target section once we have
+    # a real note to persist.
+    section_body_start = start_idx + 1
+    placeholder_indexes = []
+    for idx in range(section_body_start, end_idx):
+        if _is_placeholder_bullet(lines[idx]):
+            placeholder_indexes.append(idx)
+
+    if placeholder_indexes:
+        for idx in reversed(placeholder_indexes):
+            del lines[idx]
+        end_idx -= len(placeholder_indexes)
+
+    insert_at = end_idx
+    while insert_at > start_idx + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    lines.insert(insert_at, bullet)
+
+    profile_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return True
+
+
+@function_tool
+def update_user_profile(
+    ctx: RunContextWrapper[AgentContext],
+    category: Literal[
+        "Preference", "Goal", "Project", "Expertise", "Interest", "Constraint", "Other"
+    ],
+    observation: str,
+) -> str:
+    """Record durable user information in ~/.hepagent/USER.md.
+
+    Use this only when new, meaningful user context is learned and not already captured.
+    """
+    del ctx  # Context currently unused; kept for function_tool signature consistency.
+
+    section_map = {
+        "Preference": "Preferences",
+        "Goal": "Goals",
+        "Project": "Projects",
+        "Expertise": "Expertise",
+        "Interest": "Interests",
+        "Constraint": "Constraints",
+        "Other": "Preferences",
+    }
+
+    ensure_user_profile_file()
+    profile_path = get_user_profile_path()
+    section = section_map[category]
+    did_write = _append_note_to_user_section(profile_path, section, observation)
+    if not did_write:
+        return "No update needed: note is empty or already captured in USER.md."
+    return f"USER.md updated under '{section}'."
+
+
 class AgentManifestLoader:
     def __init__(self):
         from hepagent.helpers import get_agent_dir
@@ -85,10 +200,13 @@ class AgentManifestLoader:
         self, context: RunContextWrapper[AgentContext], agent: Agent[AgentContext]
     ) -> str:
         """Assembles the full system prompt from the .agents registry."""
+        del context, agent
+
         ethics = read_md(self.common_path / "ETHICS.md")  # Guardrail guidelines
         identity = read_md(self.common_path / "IDENTITY.md")  # Personality & Vibe
         operation = read_md(self.common_path / "OPERATION.md")  # Operational rules
         memory = read_md(self.storage_path / "MEMORY.md")  # Project/User preferences, etc.
+        user_profile = _read_user_profile_if_available()
 
         catalog = self.get_skill_catalog()
 
@@ -105,6 +223,9 @@ class AgentManifestLoader:
         if memory:
             components.append(f"# SHARED MEMORY\n{memory}")
 
+        if user_profile:
+            components.append(f"{user_profile}")
+
         if catalog:
             components.append(
                 f"# AVAILABLE SKILLS\nYou have access to the following specialized skills."
@@ -116,6 +237,13 @@ class AgentManifestLoader:
              Whenever you encounter an error, a tool failure, or a user
             correction, you MUST call `update_logbook` to record the corrective insight
             so you do not repeat the mistake.""")
+        )
+
+        components.append(
+            textwrap.dedent("""# CRITICAL RULE: USER PROFILE MAINTENANCE
+            When the user reveals significant new durable context (preferences, goals,
+            projects, expertise, interests, or constraints), call `update_user_profile`
+            to keep USER.md current. Keep entries concise and avoid duplicates.""")
         )
 
         # Filter out empty components and join

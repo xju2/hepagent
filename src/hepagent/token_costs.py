@@ -41,7 +41,7 @@ TOKEN_COSTS_PER_MILLION = {
     "lbl/gemma-4-thinking": {
         "input": 0.00001,
         "output": 0.00001,
-    }
+    },
 }
 
 

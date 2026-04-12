@@ -287,7 +287,6 @@ def repl(
 
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
     model_provider = runtime["model_provider"]
-    model_name = runtime["model_name"]
     display_model = runtime["display_model"]
     cli = CliRepl(
         agent_name=agent_name,

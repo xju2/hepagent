@@ -35,8 +35,10 @@ git clone https://github.com/xju2/hepagent.git
 cd hepagent
 uv python install 3.12
 make sync
-uv run hepagent list-platforms
-uv run hepagent list-models --platform cborg
+source .venv/bin/activate
+export OPENAI_AGENTS_DISABLE_TRACING=1  # Optional: disable tracing logs if you don't have OPENAI_API_KEY
+hepagent list-platforms
+hepagent list-models --platform cborg
 ```
 
 ### Configurations
@@ -65,25 +67,25 @@ The default model is `cborg:lbl/gemma-4` if not specified.
 
 List available models for a platform:
 ```bash
-uv run hepagent list-models --platform cborg
-uv run hepagent list-models --platform amsc
-uv run hepagent list-models --platform openai
-uv run hepagent list-models --platform gemini
+hepagent list-models --platform cborg
+hepagent list-models --platform amsc
+hepagent list-models --platform openai
+hepagent list-models --platform gemini
 ```
 
 
 ### Run an agent with a specific model and task:
 
 ```bash
-uv run hepagent run --agent "shell" --model "gemini:models/gemini-flash-lite-latest" "how many python files in this code repository"
-uv run hepagent run --agent "scientist" --model "cborg:lbl/gemma-4" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
-uv run hepagent run --agent "coder" --model "openai:gpt-5-mini" "Create a worktree for adding a new feature: chunkle."
-uv run hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # uses Gemini provider
+hepagent run --agent "shell" --model "gemini:models/gemini-flash-lite-latest" "how many python files in this code repository"
+hepagent run --agent "scientist" --model "cborg:lbl/gemma-4" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+hepagent run --agent "coder" --model "openai:gpt-5-mini" "Create a worktree for adding a new feature: chunkle."
+hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # uses Gemini provider
 ```
 
 YOLO mode (auto-approve all bash commands):
 ```bash
-uv run hepagent run --agent "scientist" --yolo "your task here"
+hepagent run --agent "scientist" --yolo "your task here"
 ```
 
 ### Interactive REPL
@@ -91,17 +93,17 @@ uv run hepagent run --agent "scientist" --yolo "your task here"
 Start the new CLI REPL:
 
 ```bash
-uv run hepagent repl
+hepagent repl
 ```
 
 Examples:
 
 ```bash
-uv run hepagent repl --agent scientist
-uv run hepagent repl --agent shell --model openai:gpt-5-mini
-uv run hepagent repl --chat my-session
-uv run hepagent repl --yolo
-uv run hepagent repl --max-turn 30
+hepagent repl --agent scientist
+hepagent repl --agent shell --model openai:gpt-5-mini
+hepagent repl --chat my-session
+hepagent repl --yolo
+hepagent repl --max-turn 30
 ```
 
 Supported slash commands:
