@@ -10,7 +10,6 @@ from typing import Any
 
 import yaml
 
-
 USER_PROFILE_TEMPLATE = """# USER PROFILE
 
 Keep this file concise. Record only durable facts that improve future interactions.
@@ -158,7 +157,7 @@ def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
 
 
-def get_env_var[T]( # type: ignore
+def get_env_var[T](  # type: ignore
     key: str, *, dtype: type[T] = str, default: T | None = None, set_env: bool = True
 ) -> T:
     """Helper to access environment variables with a TOML fallback.

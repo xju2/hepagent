@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from openai import OpenAI
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from agents import OpenAIChatCompletionsModel
 from hepagent.helpers import get_env_var, load_providers_config

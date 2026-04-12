@@ -1,6 +1,7 @@
+from unittest.mock import patch
+
 from hepagent.agent_helpers import AgentManifestLoader
 from hepagent.agents.common import AgentContext
-from unittest.mock import patch
 
 
 def test_get_skill_catalog(mock_agent_env):
@@ -71,8 +72,9 @@ def test_get_instructions_includes_user_profile(mock_agent_env, tmp_path):
 
     wrapper = MockWrapper(dummy_context)
 
-    with patch("hepagent.agent_helpers.ensure_user_profile_file"), patch(
-        "hepagent.agent_helpers.get_user_profile_path", return_value=user_profile
+    with (
+        patch("hepagent.agent_helpers.ensure_user_profile_file"),
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=user_profile),
     ):
         instructions = loader.get_instructions(wrapper, None)  # type: ignore[arg-type]
 

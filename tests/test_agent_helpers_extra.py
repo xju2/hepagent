@@ -136,12 +136,11 @@ def test_manifest_loader_extract_yaml(mock_agent_env):
 def test_update_user_profile_appends_new_entry(tmp_path):
     """update_user_profile appends a new item under the mapped section."""
     profile = tmp_path / "USER.md"
-    profile.write_text(
-        "# USER PROFILE\n\n## Preferences\n- \n\n## Goals\n- \n", encoding="utf-8"
-    )
+    profile.write_text("# USER PROFILE\n\n## Preferences\n- \n\n## Goals\n- \n", encoding="utf-8")
 
-    with patch("hepagent.agent_helpers.ensure_user_profile_file"), patch(
-        "hepagent.agent_helpers.get_user_profile_path", return_value=profile
+    with (
+        patch("hepagent.agent_helpers.ensure_user_profile_file"),
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=profile),
     ):
         result = _invoke_user_profile("Goal", "Finish v1 release")
 
@@ -157,8 +156,9 @@ def test_update_user_profile_skips_duplicate_entry(tmp_path):
         "# USER PROFILE\n\n## Preferences\n- Prefer concise answers\n", encoding="utf-8"
     )
 
-    with patch("hepagent.agent_helpers.ensure_user_profile_file"), patch(
-        "hepagent.agent_helpers.get_user_profile_path", return_value=profile
+    with (
+        patch("hepagent.agent_helpers.ensure_user_profile_file"),
+        patch("hepagent.agent_helpers.get_user_profile_path", return_value=profile),
     ):
         first = _invoke_user_profile("Preference", "Prefer concise answers")
         second = _invoke_user_profile("Preference", "Prefer concise answers")

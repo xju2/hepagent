@@ -414,9 +414,7 @@ class CliRepl:
                             if _tool_output_contains_finalize_signal(event.item.output):
                                 saw_finalize_signal = True
                     elif isinstance(event, AgentUpdatedStreamEvent):
-                        self.console.print(
-                            f"\n[dim]Agent updated: {event.new_agent.name}[/dim]"
-                        )
+                        self.console.print(f"\n[dim]Agent updated: {event.new_agent.name}[/dim]")
 
                 full_text = "".join(deltas)
                 if saw_text:
@@ -591,10 +589,7 @@ class CliRepl:
         if platform not in supported:
             available = ", ".join(sorted(supported))
             self._render_status_panel(
-                (
-                    f"Unknown platform: [bold]{platform}[/bold]\n"
-                    f"Supported platforms: {available}"
-                ),
+                (f"Unknown platform: [bold]{platform}[/bold]\nSupported platforms: {available}"),
                 title="models error",
                 border_style="red",
             )
@@ -634,10 +629,7 @@ class CliRepl:
         if normalized not in supported:
             available = ", ".join(sorted(supported))
             self._render_status_panel(
-                (
-                    f"Unknown platform: [bold]{normalized}[/bold]\n"
-                    f"Supported platforms: {available}"
-                ),
+                (f"Unknown platform: [bold]{normalized}[/bold]\nSupported platforms: {available}"),
                 title="platform error",
                 border_style="red",
             )
@@ -691,7 +683,7 @@ class CliRepl:
             suffix = "..." if len(available_models) > 8 else ""
             self._render_status_panel(
                 (
-                    f"Model [bold]{normalized}[/bold] is not available on [bold]{platform}[/bold].\n"
+                    f"Model [bold]{normalized}[/bold] is not on [bold]{platform}[/bold].\n"
                     f"Try [bold]/models[/bold] to inspect the full list. "
                     f"Known models: {preview}{suffix}"
                 ),
@@ -703,10 +695,7 @@ class CliRepl:
         self.model.name = normalized
         self.current_agent = self._build_wrapped_agent(self.agent_name)
         self._render_status_panel(
-            (
-                f"Model set to [bold]{normalized}[/bold]\n"
-                f"Platform: [bold]{platform}[/bold]"
-            ),
+            (f"Model set to [bold]{normalized}[/bold]\nPlatform: [bold]{platform}[/bold]"),
             title="model",
             border_style="green",
         )

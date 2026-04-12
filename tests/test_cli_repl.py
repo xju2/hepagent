@@ -68,9 +68,7 @@ def test_parse_slash_command():
 def test_switch_agent_updates_context_and_agent():
     calls = []
     repl = _make_repl(
-        agent_factory=lambda name, platform, model_name: calls.append(
-            (name, platform, model_name)
-        )
+        agent_factory=lambda name, platform, model_name: calls.append((name, platform, model_name))
         or _make_agent(name)
     )
 
@@ -321,9 +319,7 @@ def test_set_platform_switches_platform_and_resets_to_default_model(monkeypatch)
         console=console,
         model_platform="cborg",
         model_name="gemini-flash",
-        agent_factory=lambda name, platform, model_name: calls.append(
-            (name, platform, model_name)
-        )
+        agent_factory=lambda name, platform, model_name: calls.append((name, platform, model_name))
         or _make_agent(name),
     )
     monkeypatch.setattr(cli_repl, "get_supported_model_providers", lambda: ("cborg", "openai"))
@@ -350,9 +346,7 @@ def test_set_model_switches_current_model(monkeypatch):
         console=console,
         model_platform="openai",
         model_name="gpt-5-mini",
-        agent_factory=lambda name, platform, model_name: calls.append(
-            (name, platform, model_name)
-        )
+        agent_factory=lambda name, platform, model_name: calls.append((name, platform, model_name))
         or _make_agent(name),
     )
     monkeypatch.setattr(
