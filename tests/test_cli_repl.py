@@ -386,7 +386,7 @@ def test_set_model_rejects_unknown_model(monkeypatch):
     repl.set_model("wat")
 
     output = console.file.getvalue()
-    assert "is not available on openai" in output
+    assert "is not on openai" in output
     assert "Try /models" in output
 
 
