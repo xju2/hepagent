@@ -128,13 +128,11 @@ def test_supported_model_providers_includes_ollama():
     assert "ollama" in SUPPORTED_MODEL_PROVIDERS
 
 
-def test_get_model_provider_settings_ollama_uses_default_key():
+def test_get_model_provider_settings_ollama_uses_default_key(monkeypatch):
     """ollama provider uses api_key_default when env var is not set."""
-    import os
-
     from hepagent.model_providers import get_model_provider_settings
 
-    os.environ.pop("OLLAMA_API_KEY", None)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     settings = get_model_provider_settings("ollama")
     assert settings.base_url == "http://localhost:11434/api/chat"
     assert settings.default_model == "gemma4:e4b"
