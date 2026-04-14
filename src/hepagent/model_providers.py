@@ -13,6 +13,7 @@ class ModelProviderSettings:
     api_key: str | None
     api_key_env: str
     default_model: str
+    api_key_default: str | None = None
 
 
 def get_supported_model_providers() -> tuple[str, ...]:
@@ -38,19 +39,24 @@ def get_model_provider_settings(model_provider: str) -> ModelProviderSettings:
     if not base_url or not api_key_env or not default_model:
         raise ValueError(f"Incomplete provider configuration for {model_provider}")
 
+    api_key_default = cfg.get("api_key_default")
     api_key = get_env_var(api_key_env, default="")
     if not api_key:
-        raise ValueError(
-            f"API key not found. Please set the environment variable '{api_key_env}' "
-            f"or modify your configuration $HOME/.hepagent/config/env_vars.toml "
-            f"to add the API key for provider '{model_provider}'."
-        )
+        if api_key_default is not None:
+            api_key = api_key_default
+        else:
+            raise ValueError(
+                f"API key not found. Please set the environment variable '{api_key_env}' "
+                f"or modify your configuration $HOME/.hepagent/config/env_vars.toml "
+                f"to add the API key for provider '{model_provider}'."
+            )
 
     return ModelProviderSettings(
         base_url=base_url,
         api_key=api_key,
         api_key_env=api_key_env,
         default_model=default_model,
+        api_key_default=api_key_default,
     )
 
 
