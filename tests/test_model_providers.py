@@ -121,3 +121,45 @@ def test_get_cborg_model_provider_returns_model():
         mock_client_cls.return_value = MagicMock()
         model = get_cborg_model_provider()
     assert isinstance(model, OpenAIChatCompletionsModel)
+
+
+def test_supported_model_providers_includes_ollama():
+    """SUPPORTED_MODEL_PROVIDERS includes 'ollama'."""
+    assert "ollama" in SUPPORTED_MODEL_PROVIDERS
+
+
+def test_get_model_provider_settings_ollama_uses_default_key(monkeypatch):
+    """ollama provider uses api_key_default when env var is not set."""
+    from hepagent.model_providers import get_model_provider_settings
+
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    settings = get_model_provider_settings("ollama")
+    assert settings.base_url == "http://localhost:11434/api/chat"
+    assert settings.default_model == "gemma4:e4b"
+    assert settings.api_key == "ollama"
+
+
+def test_get_model_provider_settings_ollama_respects_env_key(monkeypatch):
+    """ollama provider uses OLLAMA_API_KEY when set."""
+    monkeypatch.setenv("OLLAMA_API_KEY", "custom-key")
+    settings = get_model_provider_settings("ollama")
+    assert settings.api_key == "custom-key"
+
+
+def test_parse_model_spec_with_ollama_provider():
+    """parse_model_spec supports ollama:model format."""
+    provider, model = parse_model_spec("ollama:llama3")
+    assert provider == "ollama"
+    assert model == "llama3"
+
+
+def test_get_model_provider_ollama_returns_model_object():
+    """get_model_provider returns a model object for ollama."""
+    from unittest.mock import MagicMock, patch
+
+    from agents import OpenAIChatCompletionsModel
+
+    with patch("hepagent.model_providers.AsyncOpenAI") as mock_client_cls:
+        mock_client_cls.return_value = MagicMock()
+        model = get_model_provider(model_provider="ollama")
+    assert isinstance(model, OpenAIChatCompletionsModel)
