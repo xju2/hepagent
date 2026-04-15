@@ -134,7 +134,7 @@ def test_get_model_provider_settings_ollama_uses_default_key(monkeypatch):
 
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     settings = get_model_provider_settings("ollama")
-    assert settings.base_url == "http://localhost:11434/api/chat"
+    assert settings.base_url == "http://localhost:11434/v1"
     assert settings.default_model == "gemma4:e4b"
     assert settings.api_key == "ollama"
 

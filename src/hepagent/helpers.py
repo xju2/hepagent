@@ -97,13 +97,31 @@ def read_md(path: pathlib.Path) -> str:
 
 
 def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
+    # Always start from the packaged defaults so new entries (e.g. a freshly
+    # added provider) are visible to existing installs whose user file predates
+    # the addition.
+    pkg_path = resources.files("hepagent.config").joinpath(filename)
+    result: dict[str, Any] = dict(
+        tomllib.loads(pkg_path.read_text(encoding="utf-8")).get(key) or {}
+    )
+
+    # Deep-merge user overrides: user values win at the section-field level,
+    # but sections absent from the user file retain their packaged defaults.
     user_config = get_hepagent_home() / "config" / filename
     if user_config.exists():
-        data = tomllib.loads(user_config.read_text(encoding="utf-8"))
-    else:
-        path = resources.files("hepagent.config").joinpath(filename)
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    result = data.get(key)
+        user_section = (
+            tomllib.loads(user_config.read_text(encoding="utf-8")).get(key) or {}
+        )
+        for section_key, section_val in user_section.items():
+            if (
+                section_key in result
+                and isinstance(result[section_key], dict)
+                and isinstance(section_val, dict)
+            ):
+                result[section_key] = {**result[section_key], **section_val}
+            else:
+                result[section_key] = section_val
+
     if not isinstance(result, dict) or not result:
         raise ValueError(f"No {key} configured in {filename}")
     return result

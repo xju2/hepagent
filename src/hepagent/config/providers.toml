@@ -19,7 +19,7 @@ api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-flash"
 
 [providers.ollama]
-base_url = "http://localhost:11434/api/chat"
+base_url = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 api_key_default = "ollama"
 default_model = "gemma4:e4b"
