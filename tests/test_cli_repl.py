@@ -238,16 +238,28 @@ def test_bash_tool_rejects_when_not_approved():
 
 
 def test_ask_user_tool_collects_input():
+    import io
+
+    class StubPromptSession:
+        async def prompt_async(self, message, **kwargs):
+            self.message = message
+            return "answer"
+
     class StubConsole:
+        file = io.StringIO()
+
         def print(self, *args, **kwargs):
             return None
 
     class StubRepl:
         console = StubConsole()
+        prompt_session = StubPromptSession()
 
-        def prompt_inline(self, message):
-            self.message = message
-            return "answer"
+        def _build_completer(self):
+            return None
+
+        def _bottom_toolbar(self):
+            return ""
 
     tool = cli_repl.ReplToolWrapper()._create_ask_user_tool(StubRepl())
 

@@ -201,7 +201,9 @@ class ReplToolWrapper:
 
     def _create_ask_user_tool(self, repl: CliRepl):
         @function_tool
-        def ask_user_for_info(prompt: str, thought: str = "") -> str:
+        async def ask_user_for_info(prompt: str, thought: str = "") -> str:
+            repl.console.file.write("\n")
+            repl.console.file.flush()
             if thought:
                 repl.console.print(
                     Panel(
@@ -217,7 +219,13 @@ class ReplToolWrapper:
                     border_style="magenta",
                 )
             )
-            return repl.prompt_inline(f"{prompt}\n> ").strip()
+            result = await repl.prompt_session.prompt_async(
+                f"{prompt}\n> ",
+                completer=repl._build_completer(),
+                complete_while_typing=False,
+                bottom_toolbar=repl._bottom_toolbar,
+            )
+            return result.strip()
 
         return ask_user_for_info
 
