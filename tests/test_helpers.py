@@ -122,7 +122,7 @@ def test_load_env_config_returns_dict():
 
 
 def test_load_providers_config_uses_user_file_when_present(tmp_path):
-    """User providers.toml should override bundled defaults when present."""
+    """User providers.toml overrides bundled values for sections it defines."""
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "providers.toml").write_text(
@@ -144,6 +144,40 @@ default_model = "custom-model"
 
     assert "cborg" in providers
     assert providers["cborg"]["base_url"] == "https://custom-cborg.example.com"
+    # Bundled-only providers must still be visible even though the user file
+    # doesn't mention them (this is the upgrade-path guarantee).
+    assert "ollama" in providers
+
+
+def test_load_providers_config_merges_bundled_and_user_overrides(tmp_path):
+    """Bundled provider defaults are merged with user overrides at field level.
+
+    A user who only overrides one field (e.g. default_model) should still get
+    the remaining fields (e.g. base_url) from the bundled defaults.
+    """
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "providers.toml").write_text(
+        """
+[providers.ollama]
+default_model = "llama3:8b"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    load_providers_config.cache_clear()
+    try:
+        with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+            providers = load_providers_config()
+    finally:
+        load_providers_config.cache_clear()
+
+    # User override wins for the field they set.
+    assert providers["ollama"]["default_model"] == "llama3:8b"
+    # Bundled fields not overridden are preserved.
+    assert providers["ollama"]["base_url"] == "http://localhost:11434/v1"
+    # Providers not mentioned in the user file are still present.
+    assert "cborg" in providers
 
 
 def test_get_env_var_reads_from_environment(monkeypatch):
