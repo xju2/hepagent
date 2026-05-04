@@ -20,6 +20,10 @@ class FakePromptSession:
         self.prompts.append(message)
         return self.responses.pop(0) if self.responses else ""
 
+    async def prompt_async(self, message, **kwargs):
+        self.prompts.append(message)
+        return self.responses.pop(0) if self.responses else ""
+
 
 def _make_console():
     return cli_repl.Console(file=io.StringIO(), force_terminal=False, color_system=None)
@@ -140,11 +144,11 @@ def test_approve_command_modes():
         console=console,
     )
 
-    assert repl.approve_command(cmd="echo hi") is True
-    assert repl.approve_command(cmd="echo hi") is False
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is False
     repl.config.mode = "human"
-    assert repl.approve_command(cmd="echo hi") is True
-    assert repl.approve_command(cmd="echo hi") is False
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is False
     output = console.file.getvalue()
     assert "approval" in output
     assert "Approved." in output
@@ -159,7 +163,7 @@ def test_approve_command_yolo_skips_prompt():
     repl = _make_repl(prompt_session=prompt, console=console)
     repl.config.mode = "yolo"
 
-    assert repl.approve_command(cmd="echo hi") is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
     assert prompt.prompts == []
     assert "Auto-approved in yolo mode." in console.file.getvalue()
 
@@ -216,13 +220,19 @@ def test_repl_tool_wrapper_replaces_known_tools():
 
 
 def test_bash_tool_rejects_when_not_approved():
+    import io
+
+    class StubConsole:
+        file = io.StringIO()
+
     class StubRepl:
+        console = StubConsole()
         last_rejection_reason = "nope"
 
         def render_command_proposal(self, **kwargs):
             self.proposal = kwargs
 
-        def approve_command(self, **kwargs):
+        async def approve_command_async(self, **kwargs):
             self.approval = kwargs
             return False
 

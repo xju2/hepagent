@@ -185,11 +185,13 @@ class ReplToolWrapper:
 
     def _create_bash_tool(self, repl: CliRepl):
         @function_tool
-        def execute_bash_command_with_repl_confirmation(
+        async def execute_bash_command_with_repl_confirmation(
             cmd: str, cwd: str = "", thought: str = ""
         ) -> dict:
+            repl.console.file.write("\n")
+            repl.console.file.flush()
             repl.render_command_proposal(cmd=cmd, cwd=cwd, thought=thought)
-            if not repl.approve_command(cmd=cmd, cwd=cwd):
+            if not await repl.approve_command_async(cmd=cmd, cwd=cwd):
                 reason = repl.last_rejection_reason or "No reason provided"
                 return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
 
@@ -325,6 +327,15 @@ class CliRepl:
     def prompt_inline(self, message: str) -> str:
         """Prompt the user for a single line of input."""
         return self.prompt_session.prompt(
+            message,
+            completer=self._build_completer(),
+            complete_while_typing=False,
+            bottom_toolbar=self._bottom_toolbar,
+        )
+
+    async def prompt_inline_async(self, message: str) -> str:
+        """Async variant of prompt_inline for use inside async tools."""
+        return await self.prompt_session.prompt_async(
             message,
             completer=self._build_completer(),
             complete_while_typing=False,
@@ -492,7 +503,7 @@ class CliRepl:
         self.current_agent = result.last_agent
         self.input_items = result.to_input_list()
 
-    def approve_command(self, *, cmd: str, cwd: str = "") -> bool:
+    async def approve_command_async(self, *, cmd: str, cwd: str = "") -> bool:
         """Check whether the current bash command is approved."""
         del cmd, cwd
         self.last_rejection_reason = None
@@ -504,7 +515,7 @@ class CliRepl:
             )
             return True
         if self.config.mode == "confirm":
-            response = self.prompt_inline(
+            response = await self.prompt_inline_async(
                 "Approve command? Press Enter to allow, or type a reason to reject: "
             )
             if response.strip():
@@ -522,7 +533,7 @@ class CliRepl:
             )
             return True
 
-        response = self.prompt_inline(
+        response = await self.prompt_inline_async(
             "Approve command? Type 'y' to allow, or enter a reason to reject: "
         )
         if response.strip().lower() == "y":
