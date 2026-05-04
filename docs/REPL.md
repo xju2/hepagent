@@ -59,6 +59,7 @@ uv run hepagent repl --max-turn 30
 - `/models [platform]`: list models for the current platform, or for an explicitly selected one
 - `/model <name>`: switch to a specific model on the current platform
 - `/mode <confirm|yolo|human>`: switch shell approval behavior
+- `/max-turn <turns>`: increase the max-turns limit for future REPL turns
 
 Unknown slash commands are handled locally and rendered as an inline error with a `/help`
 hint instead of being sent to the model.
@@ -89,8 +90,8 @@ These modes apply to bash tool usage wrapped by the REPL runtime.
 ## Model and Platform Visibility
 
 - The startup panel shows the active agent, approval mode, platform, and model.
-- The bottom toolbar keeps the current `agent`, `platform`, `model`, `mode`, and running
-  token cost visible while you work.
+- The bottom toolbar keeps the current `agent`, `platform`, `model`, `mode`,
+  `max_turns`, and running token cost visible while you work.
 - The streaming status panel shown for each turn also includes the current platform and
   model, so it is easier to confirm which provider configuration is active.
 - `/platforms` highlights the active platform in the rendered table.

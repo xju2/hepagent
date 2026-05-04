@@ -154,6 +154,7 @@ def _build_help_text() -> Text:
         ),
         ("/model <name>", "Switch the active model on the current platform"),
         ("/mode <confirm|yolo|human>", "Change command approval mode"),
+        ("/max-turn <turns>", "Increase the max-turns limit"),
     ):
         text.append("  ")
         text.append(command, style="bold cyan")
@@ -413,6 +414,9 @@ class CliRepl:
         if command.name == "mode":
             self.set_mode(command.args[0] if command.args else "")
             return CommandResult(handled=True)
+        if command.name in {"max-turn", "max-turns"}:
+            self.set_max_turns(*command.args)
+            return CommandResult(handled=True)
 
         self._render_status_panel(
             (
@@ -565,7 +569,10 @@ class CliRepl:
                 break
             except MaxTurnsExceeded:
                 self._render_status_panel(
-                    f"Max turns reached: {self.max_turns}. Narrow the task or raise the limit.",
+                    (
+                        f"Max turns reached: {self.max_turns}. Narrow the task or "
+                        "raise the limit with [bold]/max-turn <turns>[/bold]."
+                    ),
                     title="run error",
                     border_style="red",
                 )
@@ -888,6 +895,52 @@ class CliRepl:
             border_style="green",
         )
 
+    def set_max_turns(self, *args: str) -> None:
+        """Increase the maximum turns used for future REPL runs."""
+        if len(args) != 1:
+            self._render_status_panel(
+                "Usage: [bold]/max-turn <turns>[/bold]",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        raw_value = args[0].strip()
+        try:
+            new_max_turns = int(raw_value)
+        except ValueError:
+            self._render_status_panel(
+                "Max turns must be a positive integer.",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        if new_max_turns <= 0:
+            self._render_status_panel(
+                "Max turns must be a positive integer.",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+        if new_max_turns <= self.max_turns:
+            self._render_status_panel(
+                (
+                    f"Current max turns is [bold]{self.max_turns}[/bold]. "
+                    "Use a larger value to increase it."
+                ),
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        self.max_turns = new_max_turns
+        self._render_status_panel(
+            f"Max turns increased to [bold]{new_max_turns}[/bold].",
+            title="max-turn",
+            border_style="green",
+        )
+
     def switch_agent(self, agent_name: str) -> None:
         """Switch the active agent for future turns."""
         normalized = agent_name.strip().lower()
@@ -931,6 +984,8 @@ class CliRepl:
                 "/models": dict.fromkeys(sorted(get_supported_model_providers()), None),
                 "/model": None,
                 "/mode": {"confirm": None, "yolo": None, "human": None},
+                "/max-turn": None,
+                "/max-turns": None,
             }
         )
 
@@ -941,7 +996,8 @@ class CliRepl:
         return (
             f" agent={self.agent_name} | platform={self._current_platform()} | "
             f"model={self._current_model()} | mode={self.config.mode} | "
-            f"cost=${self.model.cost:.6f}{skill_part}{session_part} | /help "
+            f"max_turns={self.max_turns} | cost=${self.model.cost:.6f}"
+            f"{skill_part}{session_part} | /help "
         )
 
     def _prompt_message(self) -> str:

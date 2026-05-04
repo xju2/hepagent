@@ -119,5 +119,6 @@ Supported slash commands:
 - `/models [platform]`
 - `/model <name>`
 - `/mode <confirm|yolo|human>`
+- `/max-turn <turns>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).

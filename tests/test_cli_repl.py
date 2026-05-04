@@ -144,6 +144,41 @@ def test_set_mode_updates_mode():
     assert repl.config.mode == "human"
 
 
+def test_set_max_turns_increases_limit():
+    console = _make_console()
+    repl = _make_repl(console=console, max_turns=5)
+
+    repl.set_max_turns("12")
+
+    assert repl.max_turns == 12
+    assert "Max turns increased to 12." in console.file.getvalue()
+
+
+def test_set_max_turns_rejects_invalid_or_non_increasing_values():
+    console = _make_console()
+    repl = _make_repl(console=console, max_turns=5)
+
+    repl.set_max_turns()
+    repl.set_max_turns("abc")
+    repl.set_max_turns("0")
+    repl.set_max_turns("5")
+
+    assert repl.max_turns == 5
+    output = console.file.getvalue()
+    assert "Usage: /max-turn <turns>" in output
+    assert "Max turns must be a positive integer." in output
+    assert "Use a larger value to increase it." in output
+
+
+def test_max_turn_slash_command_aliases_update_limit():
+    repl = _make_repl(max_turns=5)
+
+    result = repl.handle_command(cli_repl.SlashCommand(name="max-turns", args=("9",)))
+
+    assert result.handled is True
+    assert repl.max_turns == 9
+
+
 def test_render_help_preserves_line_breaks_and_strips_markup():
     console = cli_repl.Console(
         file=io.StringIO(),
@@ -164,6 +199,7 @@ def test_render_help_preserves_line_breaks_and_strips_markup():
     assert "/models [platform]  List available models for the current or given platform" in output
     assert "/model <name>  Switch the active model on the current platform" in output
     assert "/mode <confirm|yolo|human>  Change command approval mode" in output
+    assert "/max-turn <turns>  Increase the max-turns limit" in output
     assert "Modes" in output
     assert 'human  Type "y" to allow each command explicitly' in output
 
@@ -512,6 +548,7 @@ def test_bottom_toolbar_includes_platform_and_model():
 
     assert "platform=openai" in toolbar
     assert "model=gpt-5-mini" in toolbar
+    assert "max_turns=5" in toolbar
 
 
 def test_bottom_toolbar_includes_session_id_when_enabled():
@@ -609,6 +646,45 @@ def test_run_turn_updates_input_history(monkeypatch):
 
     assert repl.input_items[0]["content"] == "hello"
     assert repl.input_items[-1]["content"] == "Hello from agent"
+
+
+def test_run_turn_uses_updated_max_turns(monkeypatch):
+    raw_event = cli_repl.RawResponsesStreamEvent(
+        data=ResponseTextDeltaEvent(
+            delta="Done",
+            type="response.output_text.delta",
+            event_id="e1",
+            item_id="i1",
+            output_index=0,
+            content_index=0,
+            logprobs=[],
+            sequence_number=0,
+        )
+    )
+    calls = []
+
+    class FakeResult:
+        last_agent = _make_agent()
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": "Done"}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append(max_turns)
+            return FakeResult()
+
+    repl = _make_repl(max_turns=5)
+    repl.set_max_turns("11")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("hello"))
+
+    assert calls == [11]
 
 
 def test_run_turn_with_persistent_session_sends_only_current_user_input(monkeypatch):
