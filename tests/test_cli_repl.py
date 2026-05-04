@@ -247,13 +247,55 @@ def test_bash_tool_rejects_when_not_approved():
     assert "nope" in result["output"]
 
 
-def test_ask_user_tool_collects_input():
+def test_bash_tool_executes_command_in_worker_thread(monkeypatch):
     import io
 
-    class StubPromptSession:
-        async def prompt_async(self, message, **kwargs):
-            self.message = message
-            return "answer"
+    calls = []
+    rendered = []
+    command_result = {"output": "done", "returncode": 0}
+
+    def fake_execute_bash_command(cmd, cwd=""):
+        calls.append(("execute", cmd, cwd))
+        return command_result
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append(("to_thread", func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(cli_repl, "execute_bash_command", fake_execute_bash_command)
+    monkeypatch.setattr(cli_repl.asyncio, "to_thread", fake_to_thread)
+
+    class StubConsole:
+        file = io.StringIO()
+
+    class StubRepl:
+        console = StubConsole()
+        last_rejection_reason = None
+
+        def render_command_proposal(self, **kwargs):
+            self.proposal = kwargs
+
+        async def approve_command_async(self, **kwargs):
+            self.approval = kwargs
+            return True
+
+        def render_tool_result(self, tool_name, result):
+            rendered.append((tool_name, result))
+
+    tool = cli_repl.ReplToolWrapper()._create_bash_tool(StubRepl())
+
+    result = _invoke_tool(tool, cmd="echo hi", cwd="/tmp", thought="")
+
+    assert result == command_result
+    assert calls == [
+        ("to_thread", fake_execute_bash_command, ("echo hi",), {"cwd": "/tmp"}),
+        ("execute", "echo hi", "/tmp"),
+    ]
+    assert rendered == [("bash", command_result)]
+
+
+def test_ask_user_tool_collects_input():
+    import io
 
     class StubConsole:
         file = io.StringIO()
@@ -263,19 +305,18 @@ def test_ask_user_tool_collects_input():
 
     class StubRepl:
         console = StubConsole()
-        prompt_session = StubPromptSession()
 
-        def _build_completer(self):
-            return None
+        async def prompt_inline_async(self, message):
+            self.message = message
+            return " answer "
 
-        def _bottom_toolbar(self):
-            return ""
-
-    tool = cli_repl.ReplToolWrapper()._create_ask_user_tool(StubRepl())
+    repl = StubRepl()
+    tool = cli_repl.ReplToolWrapper()._create_ask_user_tool(repl)
 
     result = _invoke_tool(tool, prompt="Enter value", thought="Think first")
 
     assert result == "answer"
+    assert repl.message == "Enter value\n> "
 
 
 def test_handle_unknown_command_is_handled():

@@ -195,7 +195,7 @@ class ReplToolWrapper:
                 reason = repl.last_rejection_reason or "No reason provided"
                 return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
 
-            result = execute_bash_command(cmd, cwd=cwd)
+            result = await asyncio.to_thread(execute_bash_command, cmd, cwd=cwd)
             repl.render_tool_result("bash", result)
             return result
 
@@ -221,12 +221,7 @@ class ReplToolWrapper:
                     border_style="magenta",
                 )
             )
-            result = await repl.prompt_session.prompt_async(
-                f"{prompt}\n> ",
-                completer=repl._build_completer(),
-                complete_while_typing=False,
-                bottom_toolbar=repl._bottom_toolbar,
-            )
+            result = await repl.prompt_inline_async(f"{prompt}\n> ")
             return result.strip()
 
         return ask_user_for_info

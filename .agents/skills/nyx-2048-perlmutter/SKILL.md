@@ -38,30 +38,26 @@ Note: the archive is `.tar`, not `.tar.gz`.
    - `12423464357575`
    Write down the seed you use in `/global/cfs/cdirs/m3443/usr/xju/FoundationUniverse/nyx_sim_pre_compiled/known_seeds.md` for future reference.
 
-4. Start interactive CPU allocation:
-```bash
-salloc --nodes 4 --qos interactive --time 04:00:00 --constraint cpu --account=m3443
-```
 
-5. Create the IC output directory and generate IC files with precompiled CosmicIC:
+4. Create the IC output directory and generate IC files with precompiled CosmicIC:
 ```bash
 mkdir ICFiles_2048
-srun -N 4 -n 512 --ntasks-per-node=128 ./init input_40Mpcbyh_2048.par inputs_4096_80Mpcbyh_Jacobus_etal00_tk.dat ICFiles_2048/IC_File 2>&1 | tee cosmicic_2048.log
+srun --nodes 4 --qos interactive --time 04:00:00 -C cpu --account m3443 -N 4 -n 512 --ntasks-per-node=128 ./init input_40Mpcbyh_2048.par inputs_4096_80Mpcbyh_Jacobus_etal00_tk.dat ICFiles_2048/IC_File 2>&1 | tee cosmicic_2048.log
 ```
 Note: CosmicIC also auto-generates a `FileList.txt` with wrong relative paths (`./init/ICFiles_2048/...`). Ignore it.
 
-6. Build `FileList_2048.txt` with full absolute paths for all generated IC files:
+5. Build `FileList_2048.txt` with full absolute paths for all generated IC files:
 ```bash
 ls ICFiles_2048/ | sort -V | awk '{print "/path/to/runN/ICFiles_2048/" $0}' > FileList_2048.txt
 ```
 Verify it has 512 lines (`wc -l FileList_2048.txt`).
 
-7. Submit Nyx batch run (128 nodes / 512 GPUs):
+6. Submit Nyx batch run (128 nodes / 512 GPUs):
 ```bash
 sbatch run_batch_job_512_GPU.qsub
 ```
 
-8. Expected runtime is about 1.23 hours. However, because the job may not start immediately due to queue times, write a progress report including shell command exectued, the submission ID.
+7. Expected runtime is about 1.23 hours. However, because the job may not start immediately due to queue times, write a progress report including shell command executed, the submission ID.
 
 ## Reference Results Location
 - `/pscratch/sd/n/nataraj2/Nyx/cosmo-suite/modcon-cosmology/NyxRuns/LyA_2048_40Mpcbyh_LCDM`
