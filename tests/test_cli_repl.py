@@ -432,6 +432,56 @@ def test_bottom_toolbar_includes_platform_and_model():
     assert "model=gpt-5-mini" in toolbar
 
 
+def test_prompt_message_includes_skill_when_scientist_has_active_skill():
+    repl = _make_repl(context=SimpleNamespace(agent_name="scientist", active_skill="nyx"))
+
+    msg = repl._prompt_message()
+
+    assert "(nyx)" in msg
+    assert "scientist" in msg
+
+
+def test_prompt_message_no_skill_when_scientist_without_active_skill():
+    repl = _make_repl()
+
+    msg = repl._prompt_message()
+
+    assert "(" not in msg
+    assert "scientist" in msg
+
+
+def test_prompt_message_no_skill_for_non_scientist_agent():
+    repl = _make_repl(
+        agent_name="coder",
+        context=SimpleNamespace(agent_name="coder", active_skill="nyx"),
+    )
+
+    msg = repl._prompt_message()
+
+    assert "(nyx)" not in msg
+    assert "coder" in msg
+
+
+def test_bottom_toolbar_includes_skill_when_active():
+    repl = _make_repl(
+        model_platform="cborg",
+        model_name="test-model",
+        context=SimpleNamespace(agent_name="scientist", active_skill="nyx"),
+    )
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "skill=nyx" in toolbar
+
+
+def test_bottom_toolbar_omits_skill_when_none():
+    repl = _make_repl(model_platform="cborg", model_name="test-model")
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "skill=" not in toolbar
+
+
 def test_run_turn_updates_input_history(monkeypatch):
     raw_event = cli_repl.RawResponsesStreamEvent(
         data=ResponseTextDeltaEvent(

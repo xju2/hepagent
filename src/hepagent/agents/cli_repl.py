@@ -841,14 +841,22 @@ class CliRepl:
         )
 
     def _bottom_toolbar(self) -> str:
+        skill = self._active_skill()
+        skill_part = f" | skill={skill}" if skill else ""
         return (
             f" agent={self.agent_name} | platform={self._current_platform()} | "
             f"model={self._current_model()} | mode={self.config.mode} | "
-            f"cost=${self.model.cost:.6f} | /help "
+            f"cost=${self.model.cost:.6f}{skill_part} | /help "
         )
 
     def _prompt_message(self) -> str:
+        skill = self._active_skill() if self.agent_name == "scientist" else None
+        if skill:
+            return f"{self.agent_name} [{self.config.mode}] ({skill}) > "
         return f"{self.agent_name} [{self.config.mode}] > "
+
+    def _active_skill(self) -> str | None:
+        return getattr(self.context, "active_skill", None) or None
 
     def _current_platform(self) -> str:
         return self.model.platform or "unknown"
