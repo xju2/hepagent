@@ -42,6 +42,7 @@ Common options mirror `hepagent run`:
 uv run hepagent repl --agent scientist
 uv run hepagent repl --agent shell --model openai:gpt-5-mini
 uv run hepagent repl --chat my-session
+uv run hepagent repl --disable-session
 uv run hepagent repl --yolo
 uv run hepagent repl --max-turn 30
 ```
@@ -74,8 +75,13 @@ These modes apply to bash tool usage wrapped by the REPL runtime.
 
 ## Session Behavior
 
-- The REPL keeps one live in-memory conversation across multiple prompts.
-- If `--chat` is provided, turns also use a persistent SQLite-backed session.
+- By default, `hepagent repl` starts a random SQLite-backed session such as
+  `repl-3f8a91c0d2b4`.
+- `/quit` prints the session id and a `hepagent repl --chat <session-id>` command so
+  the conversation can be resumed later.
+- If `--chat` is provided, the REPL resumes that persistent SQLite-backed session.
+- `--disable-session` keeps only the live in-memory conversation for the current
+  process.
 - `/clear` resets the live transcript and starts a fresh chat session id when persistent
   chat is enabled.
 - `/agent` changes the active agent for subsequent prompts without requiring a restart.

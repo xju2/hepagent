@@ -241,7 +241,8 @@ class CliRepl:
         yolo: bool = False,
         session: Any | None = None,
         session_factory: Callable[[str], Any] | None = None,
-        chat_base_id: str | None = None,
+        session_id: str | None = None,
+        session_base_id: str | None = None,
         prompt_session: PromptSession[str] | None = None,
         console: Console | None = None,
         model_platform: str = "",
@@ -255,7 +256,8 @@ class CliRepl:
         self.console = console or Console(highlight=True)
         self.prompt_session = prompt_session or PromptSession(history=InMemoryHistory())
         self.session_factory = session_factory
-        self.chat_base_id = chat_base_id
+        self.session_id = session_id
+        self.session_base_id = session_base_id or session_id
         self.session = session
         self.input_items: list[TResponseInputItem] = []
         self.config = ReplConfig(mode="yolo" if yolo else "confirm")
@@ -340,7 +342,13 @@ class CliRepl:
     def handle_command(self, command: SlashCommand) -> CommandResult:
         """Execute a slash command locally."""
         if command.name == "quit":
-            self._render_status_panel("Bye.", title="session", border_style="cyan")
+            message = "Bye."
+            if self.session_id:
+                message += (
+                    "\nResume this session with "
+                    f"[bold]hepagent repl --chat {self.session_id}[/bold]"
+                )
+            self._render_status_panel(message, title="session", border_style="cyan")
             return CommandResult(handled=True, should_exit=True)
         if command.name == "help":
             self.render_help()
@@ -381,8 +389,10 @@ class CliRepl:
         return CommandResult(handled=True)
 
     async def _run_turn(self, user_input: str) -> None:
-        turn_input = list(self.input_items)
-        turn_input.append({"role": "user", "content": user_input})
+        user_item = {"role": "user", "content": user_input}
+        turn_input = (
+            [user_item] if self.session is not None else list(self.input_items) + [user_item]
+        )
         self.console.print(
             Panel(
                 user_input,
@@ -548,13 +558,15 @@ class CliRepl:
 
     def render_startup(self) -> None:
         """Render the initial REPL banner."""
+        session_line = f"\nSession: [bold]{self.session_id}[/bold]" if self.session_id else ""
         self.console.print(
             Panel(
                 (
                     f"Agent: [bold]{self.agent_name}[/bold]\n"
                     f"Mode: [bold]{self.config.mode}[/bold]\n"
                     f"Platform: [bold]{self._current_platform()}[/bold]\n"
-                    f"Model: [bold]{self._current_model()}[/bold]\n"
+                    f"Model: [bold]{self._current_model()}[/bold]"
+                    f"{session_line}\n"
                     "Use /help for slash commands. Enter a task to start."
                 ),
                 title="hepagent repl",
@@ -757,8 +769,9 @@ class CliRepl:
         self.model.cost = 0.0
         self.console.clear()
         self.render_startup()
-        if self.chat_base_id and self.session_factory is not None:
-            new_id = f"{self.chat_base_id}-{uuid.uuid4().hex[:8]}"
+        if self.session_base_id and self.session_factory is not None:
+            new_id = f"{self.session_base_id}-{uuid.uuid4().hex[:8]}"
+            self.session_id = new_id
             self.session = self.session_factory(new_id)
             self._render_status_panel(
                 f"Started a fresh chat session: [bold]{new_id}[/bold]",
@@ -838,10 +851,11 @@ class CliRepl:
     def _bottom_toolbar(self) -> str:
         skill = self._active_skill()
         skill_part = f" | skill={skill}" if skill else ""
+        session_part = f" | session={self.session_id}" if self.session_id else ""
         return (
             f" agent={self.agent_name} | platform={self._current_platform()} | "
             f"model={self._current_model()} | mode={self.config.mode} | "
-            f"cost=${self.model.cost:.6f}{skill_part} | /help "
+            f"cost=${self.model.cost:.6f}{skill_part}{session_part} | /help "
         )
 
     def _prompt_message(self) -> str:

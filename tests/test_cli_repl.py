@@ -90,7 +90,8 @@ def test_clear_session_state_rotates_chat_session():
     created = []
     repl = _make_repl(
         session=object(),
-        chat_base_id="conv",
+        session_id="conv-current",
+        session_base_id="conv",
         session_factory=lambda cid: created.append(cid) or f"session:{cid}",
     )
     repl.input_items = [{"role": "user", "content": "hello"}]
@@ -102,7 +103,20 @@ def test_clear_session_state_rotates_chat_session():
     assert repl.model.cost == 0.0
     assert len(created) == 1
     assert created[0].startswith("conv-")
+    assert repl.session_id == created[0]
     assert repl.session == f"session:{created[0]}"
+
+
+def test_quit_prints_resume_command_for_session():
+    console = _make_console()
+    repl = _make_repl(console=console, session=object(), session_id="repl-abc123")
+
+    result = repl.handle_command(cli_repl.SlashCommand(name="quit", args=()))
+
+    output = console.file.getvalue()
+    assert result.should_exit is True
+    assert "Bye." in output
+    assert "hepagent repl --chat repl-abc123" in output
 
 
 def test_set_mode_updates_mode():
@@ -464,6 +478,16 @@ def test_render_startup_includes_platform_and_model():
     assert "Model: gpt-5-mini" in output
 
 
+def test_render_startup_includes_session_id_when_enabled():
+    console = _make_console()
+    repl = _make_repl(console=console, session=object(), session_id="repl-abc123")
+
+    repl.render_startup()
+
+    output = console.file.getvalue()
+    assert "Session: repl-abc123" in output
+
+
 def test_bottom_toolbar_includes_platform_and_model():
     repl = _make_repl(model_platform="openai", model_name="gpt-5-mini")
 
@@ -471,6 +495,14 @@ def test_bottom_toolbar_includes_platform_and_model():
 
     assert "platform=openai" in toolbar
     assert "model=gpt-5-mini" in toolbar
+
+
+def test_bottom_toolbar_includes_session_id_when_enabled():
+    repl = _make_repl(session=object(), session_id="repl-abc123")
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "session=repl-abc123" in toolbar
 
 
 def test_prompt_message_includes_skill_when_scientist_has_active_skill():
@@ -560,3 +592,50 @@ def test_run_turn_updates_input_history(monkeypatch):
 
     assert repl.input_items[0]["content"] == "hello"
     assert repl.input_items[-1]["content"] == "Hello from agent"
+
+
+def test_run_turn_with_persistent_session_sends_only_current_user_input(monkeypatch):
+    raw_event = cli_repl.RawResponsesStreamEvent(
+        data=ResponseTextDeltaEvent(
+            delta="Hello from agent",
+            type="response.output_text.delta",
+            event_id="e1",
+            item_id="i1",
+            output_index=0,
+            content_index=0,
+            logprobs=[],
+            sequence_number=0,
+        )
+    )
+    calls = []
+    session = object()
+
+    class FakeResult:
+        def __init__(self, agent, input_items):
+            self.last_agent = agent
+            self._input_items = list(input_items)
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return self._input_items + [{"role": "assistant", "content": "Hello from agent"}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"input": input, "session": session})
+            return FakeResult(agent, input or [])
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    repl.input_items = [{"role": "user", "content": "old question"}]
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {
+            "input": [{"role": "user", "content": "new question"}],
+            "session": session,
+        }
+    ]

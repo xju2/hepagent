@@ -102,6 +102,7 @@ Examples:
 hepagent repl --agent scientist
 hepagent repl --agent shell --model openai:gpt-5-mini
 hepagent repl --chat my-session
+hepagent repl --disable-session
 hepagent repl --yolo
 hepagent repl --max-turn 30
 ```
