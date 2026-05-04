@@ -391,7 +391,7 @@ class CliRepl:
     async def _run_turn(self, user_input: str) -> None:
         user_item = {"role": "user", "content": user_input}
         turn_input = (
-            [user_item] if self.session is not None else list(self.input_items) + [user_item]
+            user_input if self.session is not None else list(self.input_items) + [user_item]
         )
         self.console.print(
             Panel(
@@ -447,16 +447,19 @@ class CliRepl:
                     self.render_assistant_output(full_text, streamed=True)
 
                 if saw_finalize_signal and not saw_text:
-                    followup_input = result.to_input_list()
-                    followup_input.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "FINALIZE_NOW received. Provide the final summary only; "
-                                "do not call tools."
-                            ),
-                        }
+                    finalize_prompt = (
+                        "FINALIZE_NOW received. Provide the final summary only; do not call tools."
                     )
+                    if self.session is not None:
+                        followup_input = finalize_prompt
+                    else:
+                        followup_input = result.to_input_list()
+                        followup_input.append(
+                            {
+                                "role": "user",
+                                "content": finalize_prompt,
+                            }
+                        )
                     forced = await Runner.run(
                         result.last_agent,
                         input=followup_input,
@@ -477,13 +480,16 @@ class CliRepl:
                             border_style="yellow",
                         )
                         dead_air_retry_used = True
-                        turn_input = result.to_input_list()
-                        turn_input.append(
-                            {
-                                "role": "user",
-                                "content": DEAD_AIR_RETRY_PROMPT,
-                            }
-                        )
+                        if self.session is not None:
+                            turn_input = DEAD_AIR_RETRY_PROMPT
+                        else:
+                            turn_input = result.to_input_list()
+                            turn_input.append(
+                                {
+                                    "role": "user",
+                                    "content": DEAD_AIR_RETRY_PROMPT,
+                                }
+                            )
                         self.current_agent = result.last_agent
                         continue
                     self._render_status_panel(

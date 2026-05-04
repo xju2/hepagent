@@ -63,6 +63,12 @@ def _invoke_tool(tool, **kwargs):
     return result
 
 
+def _input_to_items(input_value):
+    if isinstance(input_value, str):
+        return [{"role": "user", "content": input_value}]
+    return list(input_value or [])
+
+
 def test_parse_slash_command():
     parsed = cli_repl.parse_slash_command('/agent "shell coder"')
     assert parsed == cli_repl.SlashCommand(name="agent", args=("shell coder",))
@@ -613,7 +619,7 @@ def test_run_turn_with_persistent_session_sends_only_current_user_input(monkeypa
     class FakeResult:
         def __init__(self, agent, input_items):
             self.last_agent = agent
-            self._input_items = list(input_items)
+            self._input_items = _input_to_items(input_items)
 
         async def stream_events(self):
             yield raw_event
@@ -635,7 +641,93 @@ def test_run_turn_with_persistent_session_sends_only_current_user_input(monkeypa
 
     assert calls == [
         {
-            "input": [{"role": "user", "content": "new question"}],
+            "input": "new question",
             "session": session,
         }
+    ]
+
+
+def test_run_turn_with_persistent_session_retries_with_string_input(monkeypatch):
+    calls = []
+    session = object()
+    raw_event = cli_repl.RawResponsesStreamEvent(data=SimpleNamespace(type="noop"))
+
+    class FakeResult:
+        def __init__(self, agent, input_items):
+            self.last_agent = agent
+            self._input_items = _input_to_items(input_items)
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return self._input_items
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"input": input, "session": session})
+            return FakeResult(agent, input)
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {"input": "new question", "session": session},
+        {"input": cli_repl.DEAD_AIR_RETRY_PROMPT, "session": session},
+    ]
+
+
+def test_run_turn_with_persistent_session_finalizes_with_string_input(monkeypatch):
+    calls = []
+    session = object()
+    tool_output_event = cli_repl.RunItemStreamEvent(
+        name="tool_output",
+        item=SimpleNamespace(
+            type="tool_call_output_item",
+            output={"output": "FINALIZE_NOW: done"},
+        ),
+    )
+
+    class FakeStreamResult:
+        last_agent = _make_agent()
+
+        async def stream_events(self):
+            yield tool_output_event
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": ""}]
+
+    class FakeFinalResult:
+        last_agent = _make_agent()
+        final_output = "Final summary."
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": self.final_output}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"method": "run_streamed", "input": input, "session": session})
+            return FakeStreamResult()
+
+        @staticmethod
+        async def run(agent, input, context=None, max_turns=None, session=None):
+            calls.append({"method": "run", "input": input, "session": session})
+            return FakeFinalResult()
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {"method": "run_streamed", "input": "new question", "session": session},
+        {
+            "method": "run",
+            "input": "FINALIZE_NOW received. Provide the final summary only; do not call tools.",
+            "session": session,
+        },
     ]
