@@ -75,6 +75,17 @@ def test_parse_slash_command():
     assert cli_repl.parse_slash_command("plain text") is None
 
 
+def test_extract_single_bash_command():
+    proposal = cli_repl._extract_single_bash_command("THOUGHT: inspect files\n```bash\nls -la\n```")
+
+    assert proposal == cli_repl.BashCommandProposal(
+        cmd="ls -la",
+        thought="THOUGHT: inspect files",
+    )
+    assert cli_repl._extract_single_bash_command("No command") is None
+    assert cli_repl._extract_single_bash_command("```bash\nls\n```\n```bash\npwd\n```") is None
+
+
 def test_switch_agent_updates_context_and_agent():
     calls = []
     repl = _make_repl(
@@ -731,3 +742,67 @@ def test_run_turn_with_persistent_session_finalizes_with_string_input(monkeypatc
             "session": session,
         },
     ]
+
+
+def test_run_turn_executes_text_emitted_bash_block_and_continues_session(monkeypatch):
+    session = object()
+    runner_calls = []
+    executed = []
+    command_text = "THOUGHT: inspect\n```bash\necho hi\n```"
+    final_text = "Done."
+
+    def raw_text_event(text):
+        return cli_repl.RawResponsesStreamEvent(
+            data=ResponseTextDeltaEvent(
+                delta=text,
+                type="response.output_text.delta",
+                event_id="e1",
+                item_id="i1",
+                output_index=0,
+                content_index=0,
+                logprobs=[],
+                sequence_number=0,
+            )
+        )
+
+    class FakeResult:
+        def __init__(self, agent, input_items, text):
+            self.last_agent = agent
+            self._input_items = _input_to_items(input_items)
+            self._text = text
+
+        async def stream_events(self):
+            yield raw_text_event(self._text)
+
+        def to_input_list(self):
+            return self._input_items + [{"role": "assistant", "content": self._text}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            runner_calls.append({"input": input, "session": session})
+            text = command_text if len(runner_calls) == 1 else final_text
+            return FakeResult(agent, input, text)
+
+    def fake_execute_bash_command(cmd, cwd=""):
+        executed.append({"cmd": cmd, "cwd": cwd})
+        return {"output": "hi\n", "returncode": 0}
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    repl = _make_repl(session=session, session_id="repl-abc123", yolo=True)
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+    monkeypatch.setattr(cli_repl, "execute_bash_command", fake_execute_bash_command)
+    monkeypatch.setattr(cli_repl.asyncio, "to_thread", fake_to_thread)
+
+    asyncio.run(repl._run_turn("start"))
+
+    assert executed == [{"cmd": "echo hi", "cwd": ""}]
+    assert runner_calls[0] == {"input": "start", "session": session}
+    assert runner_calls[1]["session"] is session
+    assert (
+        "The bash command proposed in your previous response has completed."
+        in runner_calls[1]["input"]
+    )
+    assert "echo hi" in runner_calls[1]["input"]

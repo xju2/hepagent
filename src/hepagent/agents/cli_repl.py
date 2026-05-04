@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 import uuid
 from collections.abc import Callable
@@ -79,6 +80,17 @@ class CommandResult:
     should_exit: bool = False
 
 
+@dataclass(frozen=True)
+class BashCommandProposal:
+    """A single bash command block emitted as assistant text."""
+
+    cmd: str
+    thought: str = ""
+
+
+_BASH_BLOCK_RE = re.compile(r"```(?:bash|sh|shell)\s*\n(?P<cmd>.*?)```", re.DOTALL)
+
+
 def _format_tool_output(output: Any) -> str:
     """Bound tool-output display so the transcript stays readable."""
     try:
@@ -98,6 +110,30 @@ def _tool_output_contains_finalize_signal(output: Any) -> bool:
     except Exception:
         text = str(output)
     return "FINALIZE_NOW" in text
+
+
+def _extract_single_bash_command(text: str) -> BashCommandProposal | None:
+    """Return the only bash code block in an assistant response, if one exists."""
+    matches = list(_BASH_BLOCK_RE.finditer(text))
+    if len(matches) != 1:
+        return None
+    cmd = matches[0].group("cmd").strip()
+    if not cmd:
+        return None
+    thought = text[: matches[0].start()].strip()
+    return BashCommandProposal(cmd=cmd, thought=thought)
+
+
+def _build_command_feedback(cmd: str, result: dict[str, Any]) -> str:
+    """Build the next model input after executing a text-emitted bash command."""
+    return (
+        "The bash command proposed in your previous response has completed.\n\n"
+        "Command:\n"
+        f"```bash\n{cmd}\n```\n\n"
+        f"Result:\n{_format_tool_output(result)}\n\n"
+        "Continue from this result. If the task is complete, provide a concise final "
+        "summary. If another command is needed, emit exactly one bash code block."
+    )
 
 
 def _build_help_text() -> Text:
@@ -403,6 +439,7 @@ class CliRepl:
 
         result: RunResultBase | None = None
         dead_air_retry_used = False
+        command_proposals_run = 0
         while True:
             try:
                 result = Runner.run_streamed(
@@ -414,6 +451,7 @@ class CliRepl:
                 )
                 saw_text = False
                 saw_finalize_signal = False
+                saw_tool_event = False
                 deltas: list[str] = []
 
                 self._render_status_panel(
@@ -434,6 +472,7 @@ class CliRepl:
                             self.console.file.write(event.data.delta)
                             self.console.file.flush()
                     elif isinstance(event, RunItemStreamEvent):
+                        saw_tool_event = True
                         if event.item.type == "tool_call_output_item":
                             if _tool_output_contains_finalize_signal(event.item.output):
                                 saw_finalize_signal = True
@@ -445,6 +484,32 @@ class CliRepl:
                     self.console.file.write("\n")
                     self.console.file.flush()
                     self.render_assistant_output(full_text, streamed=True)
+
+                    bash_proposal = (
+                        None if saw_tool_event else _extract_single_bash_command(full_text)
+                    )
+                    if bash_proposal is not None:
+                        if command_proposals_run >= self.max_turns:
+                            self._render_status_panel(
+                                (
+                                    "Max command proposals reached while continuing the "
+                                    f"REPL turn: {self.max_turns}."
+                                ),
+                                title="run error",
+                                border_style="red",
+                            )
+                            break
+                        command_proposals_run += 1
+                        command_result = await self._execute_text_bash_proposal(bash_proposal)
+                        feedback = _build_command_feedback(bash_proposal.cmd, command_result)
+                        if self.session is not None:
+                            turn_input = feedback
+                        else:
+                            turn_input = result.to_input_list()
+                            turn_input.append({"role": "user", "content": feedback})
+                        self.current_agent = result.last_agent
+                        dead_air_retry_used = False
+                        continue
 
                 if saw_finalize_signal and not saw_text:
                     finalize_prompt = (
@@ -513,6 +578,21 @@ class CliRepl:
             return
         self.current_agent = result.last_agent
         self.input_items = result.to_input_list()
+
+    async def _execute_text_bash_proposal(self, proposal: BashCommandProposal) -> dict[str, Any]:
+        """Execute a bash block emitted as text using the REPL approval flow."""
+        self.console.file.write("\n")
+        self.console.file.flush()
+        self.render_command_proposal(cmd=proposal.cmd, thought=proposal.thought)
+        if not await self.approve_command_async(cmd=proposal.cmd):
+            reason = self.last_rejection_reason or "No reason provided"
+            result = {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
+            self.render_tool_result("bash", result)
+            return result
+
+        result = await asyncio.to_thread(execute_bash_command, proposal.cmd, cwd="")
+        self.render_tool_result("bash", result)
+        return result
 
     async def approve_command_async(self, *, cmd: str, cwd: str = "") -> bool:
         """Check whether the current bash command is approved."""
