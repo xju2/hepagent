@@ -42,6 +42,7 @@ Common options mirror `hepagent run`:
 uv run hepagent repl --agent scientist
 uv run hepagent repl --agent shell --model openai:gpt-5-mini
 uv run hepagent repl --chat my-session
+uv run hepagent repl --disable-session
 uv run hepagent repl --yolo
 uv run hepagent repl --max-turn 30
 ```
@@ -58,6 +59,7 @@ uv run hepagent repl --max-turn 30
 - `/models [platform]`: list models for the current platform, or for an explicitly selected one
 - `/model <name>`: switch to a specific model on the current platform
 - `/mode <confirm|yolo|human>`: switch shell approval behavior
+- `/max-turn <turns>`: increase the max-turns limit for future REPL turns
 
 Unknown slash commands are handled locally and rendered as an inline error with a `/help`
 hint instead of being sent to the model.
@@ -74,8 +76,13 @@ These modes apply to bash tool usage wrapped by the REPL runtime.
 
 ## Session Behavior
 
-- The REPL keeps one live in-memory conversation across multiple prompts.
-- If `--chat` is provided, turns also use a persistent SQLite-backed session.
+- By default, `hepagent repl` starts a random SQLite-backed session such as
+  `repl-3f8a91c0d2b4`.
+- `/quit` prints the session id and a `hepagent repl --chat <session-id>` command so
+  the conversation can be resumed later.
+- If `--chat` is provided, the REPL resumes that persistent SQLite-backed session.
+- `--disable-session` keeps only the live in-memory conversation for the current
+  process.
 - `/clear` resets the live transcript and starts a fresh chat session id when persistent
   chat is enabled.
 - `/agent` changes the active agent for subsequent prompts without requiring a restart.
@@ -83,8 +90,8 @@ These modes apply to bash tool usage wrapped by the REPL runtime.
 ## Model and Platform Visibility
 
 - The startup panel shows the active agent, approval mode, platform, and model.
-- The bottom toolbar keeps the current `agent`, `platform`, `model`, `mode`, and running
-  token cost visible while you work.
+- The bottom toolbar keeps the current `agent`, `platform`, `model`, `mode`,
+  `max_turns`, and running token cost visible while you work.
 - The streaming status panel shown for each turn also includes the current platform and
   model, so it is easier to confirm which provider configuration is active.
 - `/platforms` highlights the active platform in the rendered table.

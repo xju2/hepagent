@@ -202,5 +202,56 @@ def test_repl_command_uses_chat_session_and_runs(monkeypatch):
     assert created_repls[0].kwargs["session"] is session_sentinel
     assert created_repls[0].kwargs["yolo"] is True
     assert created_repls[0].kwargs["model_platform"] == "cborg"
-    assert created_repls[0].kwargs["model_name"] == "lbl/gemma-4"
+    assert (
+        created_repls[0].kwargs["model_name"]
+        == main_module.get_model_provider_settings("cborg").default_model
+    )
     assert created_repls[0].run_called is True
+
+
+def test_repl_command_creates_default_session(monkeypatch):
+    session_sentinel = object()
+    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    monkeypatch.setattr(main_module, "create_repl_session_id", lambda: "repl-random")
+
+    runner = CliRunner()
+    result = runner.invoke(main_module.app, ["repl", "--yolo"])
+
+    assert result.exit_code == 0
+    assert chat_calls == ["repl-random"]
+    assert len(created_repls) == 1
+    assert created_repls[0].kwargs["session"] is session_sentinel
+    assert created_repls[0].kwargs["session_id"] == "repl-random"
+    assert created_repls[0].kwargs["session_base_id"] == "repl-random"
+    assert created_repls[0].run_called is True
+
+
+def test_repl_command_disable_session_skips_chat_session(monkeypatch):
+    session_sentinel = object()
+    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+
+    runner = CliRunner()
+    result = runner.invoke(main_module.app, ["repl", "--disable-session", "--yolo"])
+
+    assert result.exit_code == 0
+    assert chat_calls == []
+    assert len(created_repls) == 1
+    assert created_repls[0].kwargs["session"] is None
+    assert created_repls[0].kwargs["session_id"] is None
+    assert created_repls[0].kwargs["session_base_id"] is None
+
+
+def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
+    session_sentinel = object()
+    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main_module.app,
+        ["repl", "--chat", "conv-repl", "--disable-session", "--yolo"],
+    )
+
+    assert result.exit_code != 0
+    assert "Use either --chat or --disable-session" in result.output
+    assert chat_calls == []
+    assert created_repls == []

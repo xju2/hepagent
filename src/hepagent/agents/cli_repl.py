@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 import uuid
 from collections.abc import Callable
@@ -79,6 +80,17 @@ class CommandResult:
     should_exit: bool = False
 
 
+@dataclass(frozen=True)
+class BashCommandProposal:
+    """A single bash command block emitted as assistant text."""
+
+    cmd: str
+    thought: str = ""
+
+
+_BASH_BLOCK_RE = re.compile(r"```(?:bash|sh|shell)\s*\n(?P<cmd>.*?)```", re.DOTALL)
+
+
 def _format_tool_output(output: Any) -> str:
     """Bound tool-output display so the transcript stays readable."""
     try:
@@ -100,6 +112,30 @@ def _tool_output_contains_finalize_signal(output: Any) -> bool:
     return "FINALIZE_NOW" in text
 
 
+def _extract_single_bash_command(text: str) -> BashCommandProposal | None:
+    """Return the only bash code block in an assistant response, if one exists."""
+    matches = list(_BASH_BLOCK_RE.finditer(text))
+    if len(matches) != 1:
+        return None
+    cmd = matches[0].group("cmd").strip()
+    if not cmd:
+        return None
+    thought = text[: matches[0].start()].strip()
+    return BashCommandProposal(cmd=cmd, thought=thought)
+
+
+def _build_command_feedback(cmd: str, result: dict[str, Any]) -> str:
+    """Build the next model input after executing a text-emitted bash command."""
+    return (
+        "The bash command proposed in your previous response has completed.\n\n"
+        "Command:\n"
+        f"```bash\n{cmd}\n```\n\n"
+        f"Result:\n{_format_tool_output(result)}\n\n"
+        "Continue from this result. If the task is complete, provide a concise final "
+        "summary. If another command is needed, emit exactly one bash code block."
+    )
+
+
 def _build_help_text() -> Text:
     """Build richly formatted help text for the REPL panel."""
     text = Text()
@@ -118,6 +154,7 @@ def _build_help_text() -> Text:
         ),
         ("/model <name>", "Switch the active model on the current platform"),
         ("/mode <confirm|yolo|human>", "Change command approval mode"),
+        ("/max-turn <turns>", "Increase the max-turns limit"),
     ):
         text.append("  ")
         text.append(command, style="bold cyan")
@@ -185,15 +222,17 @@ class ReplToolWrapper:
 
     def _create_bash_tool(self, repl: CliRepl):
         @function_tool
-        def execute_bash_command_with_repl_confirmation(
+        async def execute_bash_command_with_repl_confirmation(
             cmd: str, cwd: str = "", thought: str = ""
         ) -> dict:
+            repl.console.file.write("\n")
+            repl.console.file.flush()
             repl.render_command_proposal(cmd=cmd, cwd=cwd, thought=thought)
-            if not repl.approve_command(cmd=cmd, cwd=cwd):
+            if not await repl.approve_command_async(cmd=cmd, cwd=cwd):
                 reason = repl.last_rejection_reason or "No reason provided"
                 return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
 
-            result = execute_bash_command(cmd, cwd=cwd)
+            result = await asyncio.to_thread(execute_bash_command, cmd, cwd=cwd)
             repl.render_tool_result("bash", result)
             return result
 
@@ -201,7 +240,9 @@ class ReplToolWrapper:
 
     def _create_ask_user_tool(self, repl: CliRepl):
         @function_tool
-        def ask_user_for_info(prompt: str, thought: str = "") -> str:
+        async def ask_user_for_info(prompt: str, thought: str = "") -> str:
+            repl.console.file.write("\n")
+            repl.console.file.flush()
             if thought:
                 repl.console.print(
                     Panel(
@@ -217,7 +258,8 @@ class ReplToolWrapper:
                     border_style="magenta",
                 )
             )
-            return repl.prompt_inline(f"{prompt}\n> ").strip()
+            result = await repl.prompt_inline_async(f"{prompt}\n> ")
+            return result.strip()
 
         return ask_user_for_info
 
@@ -236,7 +278,8 @@ class CliRepl:
         yolo: bool = False,
         session: Any | None = None,
         session_factory: Callable[[str], Any] | None = None,
-        chat_base_id: str | None = None,
+        session_id: str | None = None,
+        session_base_id: str | None = None,
         prompt_session: PromptSession[str] | None = None,
         console: Console | None = None,
         model_platform: str = "",
@@ -250,7 +293,8 @@ class CliRepl:
         self.console = console or Console(highlight=True)
         self.prompt_session = prompt_session or PromptSession(history=InMemoryHistory())
         self.session_factory = session_factory
-        self.chat_base_id = chat_base_id
+        self.session_id = session_id
+        self.session_base_id = session_base_id or session_id
         self.session = session
         self.input_items: list[TResponseInputItem] = []
         self.config = ReplConfig(mode="yolo" if yolo else "confirm")
@@ -323,10 +367,25 @@ class CliRepl:
             bottom_toolbar=self._bottom_toolbar,
         )
 
+    async def prompt_inline_async(self, message: str) -> str:
+        """Async variant of prompt_inline for use inside async tools."""
+        return await self.prompt_session.prompt_async(
+            message,
+            completer=self._build_completer(),
+            complete_while_typing=False,
+            bottom_toolbar=self._bottom_toolbar,
+        )
+
     def handle_command(self, command: SlashCommand) -> CommandResult:
         """Execute a slash command locally."""
         if command.name == "quit":
-            self._render_status_panel("Bye.", title="session", border_style="cyan")
+            message = "Bye."
+            if self.session_id:
+                message += (
+                    "\nResume this session with "
+                    f"[bold]hepagent repl --chat {self.session_id}[/bold]"
+                )
+            self._render_status_panel(message, title="session", border_style="cyan")
             return CommandResult(handled=True, should_exit=True)
         if command.name == "help":
             self.render_help()
@@ -355,6 +414,9 @@ class CliRepl:
         if command.name == "mode":
             self.set_mode(command.args[0] if command.args else "")
             return CommandResult(handled=True)
+        if command.name in {"max-turn", "max-turns"}:
+            self.set_max_turns(*command.args)
+            return CommandResult(handled=True)
 
         self._render_status_panel(
             (
@@ -367,8 +429,10 @@ class CliRepl:
         return CommandResult(handled=True)
 
     async def _run_turn(self, user_input: str) -> None:
-        turn_input = list(self.input_items)
-        turn_input.append({"role": "user", "content": user_input})
+        user_item = {"role": "user", "content": user_input}
+        turn_input = (
+            user_input if self.session is not None else list(self.input_items) + [user_item]
+        )
         self.console.print(
             Panel(
                 user_input,
@@ -379,6 +443,7 @@ class CliRepl:
 
         result: RunResultBase | None = None
         dead_air_retry_used = False
+        command_proposals_run = 0
         while True:
             try:
                 result = Runner.run_streamed(
@@ -390,6 +455,7 @@ class CliRepl:
                 )
                 saw_text = False
                 saw_finalize_signal = False
+                saw_tool_event = False
                 deltas: list[str] = []
 
                 self._render_status_panel(
@@ -410,6 +476,7 @@ class CliRepl:
                             self.console.file.write(event.data.delta)
                             self.console.file.flush()
                     elif isinstance(event, RunItemStreamEvent):
+                        saw_tool_event = True
                         if event.item.type == "tool_call_output_item":
                             if _tool_output_contains_finalize_signal(event.item.output):
                                 saw_finalize_signal = True
@@ -422,17 +489,46 @@ class CliRepl:
                     self.console.file.flush()
                     self.render_assistant_output(full_text, streamed=True)
 
-                if saw_finalize_signal and not saw_text:
-                    followup_input = result.to_input_list()
-                    followup_input.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "FINALIZE_NOW received. Provide the final summary only; "
-                                "do not call tools."
-                            ),
-                        }
+                    bash_proposal = (
+                        None if saw_tool_event else _extract_single_bash_command(full_text)
                     )
+                    if bash_proposal is not None:
+                        if command_proposals_run >= self.max_turns:
+                            self._render_status_panel(
+                                (
+                                    "Max command proposals reached while continuing the "
+                                    f"REPL turn: {self.max_turns}."
+                                ),
+                                title="run error",
+                                border_style="red",
+                            )
+                            break
+                        command_proposals_run += 1
+                        command_result = await self._execute_text_bash_proposal(bash_proposal)
+                        feedback = _build_command_feedback(bash_proposal.cmd, command_result)
+                        if self.session is not None:
+                            turn_input = feedback
+                        else:
+                            turn_input = result.to_input_list()
+                            turn_input.append({"role": "user", "content": feedback})
+                        self.current_agent = result.last_agent
+                        dead_air_retry_used = False
+                        continue
+
+                if saw_finalize_signal and not saw_text:
+                    finalize_prompt = (
+                        "FINALIZE_NOW received. Provide the final summary only; do not call tools."
+                    )
+                    if self.session is not None:
+                        followup_input = finalize_prompt
+                    else:
+                        followup_input = result.to_input_list()
+                        followup_input.append(
+                            {
+                                "role": "user",
+                                "content": finalize_prompt,
+                            }
+                        )
                     forced = await Runner.run(
                         result.last_agent,
                         input=followup_input,
@@ -453,13 +549,16 @@ class CliRepl:
                             border_style="yellow",
                         )
                         dead_air_retry_used = True
-                        turn_input = result.to_input_list()
-                        turn_input.append(
-                            {
-                                "role": "user",
-                                "content": DEAD_AIR_RETRY_PROMPT,
-                            }
-                        )
+                        if self.session is not None:
+                            turn_input = DEAD_AIR_RETRY_PROMPT
+                        else:
+                            turn_input = result.to_input_list()
+                            turn_input.append(
+                                {
+                                    "role": "user",
+                                    "content": DEAD_AIR_RETRY_PROMPT,
+                                }
+                            )
                         self.current_agent = result.last_agent
                         continue
                     self._render_status_panel(
@@ -470,7 +569,10 @@ class CliRepl:
                 break
             except MaxTurnsExceeded:
                 self._render_status_panel(
-                    f"Max turns reached: {self.max_turns}. Narrow the task or raise the limit.",
+                    (
+                        f"Max turns reached: {self.max_turns}. Narrow the task or "
+                        "raise the limit with [bold]/max-turn <turns>[/bold]."
+                    ),
                     title="run error",
                     border_style="red",
                 )
@@ -484,7 +586,22 @@ class CliRepl:
         self.current_agent = result.last_agent
         self.input_items = result.to_input_list()
 
-    def approve_command(self, *, cmd: str, cwd: str = "") -> bool:
+    async def _execute_text_bash_proposal(self, proposal: BashCommandProposal) -> dict[str, Any]:
+        """Execute a bash block emitted as text using the REPL approval flow."""
+        self.console.file.write("\n")
+        self.console.file.flush()
+        self.render_command_proposal(cmd=proposal.cmd, thought=proposal.thought)
+        if not await self.approve_command_async(cmd=proposal.cmd):
+            reason = self.last_rejection_reason or "No reason provided"
+            result = {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
+            self.render_tool_result("bash", result)
+            return result
+
+        result = await asyncio.to_thread(execute_bash_command, proposal.cmd, cwd="")
+        self.render_tool_result("bash", result)
+        return result
+
+    async def approve_command_async(self, *, cmd: str, cwd: str = "") -> bool:
         """Check whether the current bash command is approved."""
         del cmd, cwd
         self.last_rejection_reason = None
@@ -496,7 +613,7 @@ class CliRepl:
             )
             return True
         if self.config.mode == "confirm":
-            response = self.prompt_inline(
+            response = await self.prompt_inline_async(
                 "Approve command? Press Enter to allow, or type a reason to reject: "
             )
             if response.strip():
@@ -514,7 +631,7 @@ class CliRepl:
             )
             return True
 
-        response = self.prompt_inline(
+        response = await self.prompt_inline_async(
             "Approve command? Type 'y' to allow, or enter a reason to reject: "
         )
         if response.strip().lower() == "y":
@@ -534,13 +651,15 @@ class CliRepl:
 
     def render_startup(self) -> None:
         """Render the initial REPL banner."""
+        session_line = f"\nSession: [bold]{self.session_id}[/bold]" if self.session_id else ""
         self.console.print(
             Panel(
                 (
                     f"Agent: [bold]{self.agent_name}[/bold]\n"
                     f"Mode: [bold]{self.config.mode}[/bold]\n"
                     f"Platform: [bold]{self._current_platform()}[/bold]\n"
-                    f"Model: [bold]{self._current_model()}[/bold]\n"
+                    f"Model: [bold]{self._current_model()}[/bold]"
+                    f"{session_line}\n"
                     "Use /help for slash commands. Enter a task to start."
                 ),
                 title="hepagent repl",
@@ -743,8 +862,9 @@ class CliRepl:
         self.model.cost = 0.0
         self.console.clear()
         self.render_startup()
-        if self.chat_base_id and self.session_factory is not None:
-            new_id = f"{self.chat_base_id}-{uuid.uuid4().hex[:8]}"
+        if self.session_base_id and self.session_factory is not None:
+            new_id = f"{self.session_base_id}-{uuid.uuid4().hex[:8]}"
+            self.session_id = new_id
             self.session = self.session_factory(new_id)
             self._render_status_panel(
                 f"Started a fresh chat session: [bold]{new_id}[/bold]",
@@ -772,6 +892,52 @@ class CliRepl:
         self._render_status_panel(
             f"Mode set to [bold]{normalized}[/bold].",
             title="mode",
+            border_style="green",
+        )
+
+    def set_max_turns(self, *args: str) -> None:
+        """Increase the maximum turns used for future REPL runs."""
+        if len(args) != 1:
+            self._render_status_panel(
+                "Usage: [bold]/max-turn <turns>[/bold]",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        raw_value = args[0].strip()
+        try:
+            new_max_turns = int(raw_value)
+        except ValueError:
+            self._render_status_panel(
+                "Max turns must be a positive integer.",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        if new_max_turns <= 0:
+            self._render_status_panel(
+                "Max turns must be a positive integer.",
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+        if new_max_turns <= self.max_turns:
+            self._render_status_panel(
+                (
+                    f"Current max turns is [bold]{self.max_turns}[/bold]. "
+                    "Use a larger value to increase it."
+                ),
+                title="max-turn error",
+                border_style="red",
+            )
+            return
+
+        self.max_turns = new_max_turns
+        self._render_status_panel(
+            f"Max turns increased to [bold]{new_max_turns}[/bold].",
+            title="max-turn",
             border_style="green",
         )
 
@@ -818,18 +984,30 @@ class CliRepl:
                 "/models": dict.fromkeys(sorted(get_supported_model_providers()), None),
                 "/model": None,
                 "/mode": {"confirm": None, "yolo": None, "human": None},
+                "/max-turn": None,
+                "/max-turns": None,
             }
         )
 
     def _bottom_toolbar(self) -> str:
+        skill = self._active_skill()
+        skill_part = f" | skill={skill}" if skill else ""
+        session_part = f" | session={self.session_id}" if self.session_id else ""
         return (
             f" agent={self.agent_name} | platform={self._current_platform()} | "
             f"model={self._current_model()} | mode={self.config.mode} | "
-            f"cost=${self.model.cost:.6f} | /help "
+            f"max_turns={self.max_turns} | cost=${self.model.cost:.6f}"
+            f"{skill_part}{session_part} | /help "
         )
 
     def _prompt_message(self) -> str:
+        skill = self._active_skill() if self.agent_name == "scientist" else None
+        if skill:
+            return f"{self.agent_name} [{self.config.mode}] ({skill}) > "
         return f"{self.agent_name} [{self.config.mode}] > "
+
+    def _active_skill(self) -> str | None:
+        return getattr(self.context, "active_skill", None) or None
 
     def _current_platform(self) -> str:
         return self.model.platform or "unknown"

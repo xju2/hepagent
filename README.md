@@ -102,6 +102,7 @@ Examples:
 hepagent repl --agent scientist
 hepagent repl --agent shell --model openai:gpt-5-mini
 hepagent repl --chat my-session
+hepagent repl --disable-session
 hepagent repl --yolo
 hepagent repl --max-turn 30
 ```
@@ -118,5 +119,6 @@ Supported slash commands:
 - `/models [platform]`
 - `/model <name>`
 - `/mode <confirm|yolo|human>`
+- `/max-turn <turns>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).

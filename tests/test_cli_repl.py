@@ -20,6 +20,10 @@ class FakePromptSession:
         self.prompts.append(message)
         return self.responses.pop(0) if self.responses else ""
 
+    async def prompt_async(self, message, **kwargs):
+        self.prompts.append(message)
+        return self.responses.pop(0) if self.responses else ""
+
 
 def _make_console():
     return cli_repl.Console(file=io.StringIO(), force_terminal=False, color_system=None)
@@ -59,10 +63,27 @@ def _invoke_tool(tool, **kwargs):
     return result
 
 
+def _input_to_items(input_value):
+    if isinstance(input_value, str):
+        return [{"role": "user", "content": input_value}]
+    return list(input_value or [])
+
+
 def test_parse_slash_command():
     parsed = cli_repl.parse_slash_command('/agent "shell coder"')
     assert parsed == cli_repl.SlashCommand(name="agent", args=("shell coder",))
     assert cli_repl.parse_slash_command("plain text") is None
+
+
+def test_extract_single_bash_command():
+    proposal = cli_repl._extract_single_bash_command("THOUGHT: inspect files\n```bash\nls -la\n```")
+
+    assert proposal == cli_repl.BashCommandProposal(
+        cmd="ls -la",
+        thought="THOUGHT: inspect files",
+    )
+    assert cli_repl._extract_single_bash_command("No command") is None
+    assert cli_repl._extract_single_bash_command("```bash\nls\n```\n```bash\npwd\n```") is None
 
 
 def test_switch_agent_updates_context_and_agent():
@@ -86,7 +107,8 @@ def test_clear_session_state_rotates_chat_session():
     created = []
     repl = _make_repl(
         session=object(),
-        chat_base_id="conv",
+        session_id="conv-current",
+        session_base_id="conv",
         session_factory=lambda cid: created.append(cid) or f"session:{cid}",
     )
     repl.input_items = [{"role": "user", "content": "hello"}]
@@ -98,7 +120,20 @@ def test_clear_session_state_rotates_chat_session():
     assert repl.model.cost == 0.0
     assert len(created) == 1
     assert created[0].startswith("conv-")
+    assert repl.session_id == created[0]
     assert repl.session == f"session:{created[0]}"
+
+
+def test_quit_prints_resume_command_for_session():
+    console = _make_console()
+    repl = _make_repl(console=console, session=object(), session_id="repl-abc123")
+
+    result = repl.handle_command(cli_repl.SlashCommand(name="quit", args=()))
+
+    output = console.file.getvalue()
+    assert result.should_exit is True
+    assert "Bye." in output
+    assert "hepagent repl --chat repl-abc123" in output
 
 
 def test_set_mode_updates_mode():
@@ -107,6 +142,41 @@ def test_set_mode_updates_mode():
     repl.set_mode("human")
 
     assert repl.config.mode == "human"
+
+
+def test_set_max_turns_increases_limit():
+    console = _make_console()
+    repl = _make_repl(console=console, max_turns=5)
+
+    repl.set_max_turns("12")
+
+    assert repl.max_turns == 12
+    assert "Max turns increased to 12." in console.file.getvalue()
+
+
+def test_set_max_turns_rejects_invalid_or_non_increasing_values():
+    console = _make_console()
+    repl = _make_repl(console=console, max_turns=5)
+
+    repl.set_max_turns()
+    repl.set_max_turns("abc")
+    repl.set_max_turns("0")
+    repl.set_max_turns("5")
+
+    assert repl.max_turns == 5
+    output = console.file.getvalue()
+    assert "Usage: /max-turn <turns>" in output
+    assert "Max turns must be a positive integer." in output
+    assert "Use a larger value to increase it." in output
+
+
+def test_max_turn_slash_command_aliases_update_limit():
+    repl = _make_repl(max_turns=5)
+
+    result = repl.handle_command(cli_repl.SlashCommand(name="max-turns", args=("9",)))
+
+    assert result.handled is True
+    assert repl.max_turns == 9
 
 
 def test_render_help_preserves_line_breaks_and_strips_markup():
@@ -129,6 +199,7 @@ def test_render_help_preserves_line_breaks_and_strips_markup():
     assert "/models [platform]  List available models for the current or given platform" in output
     assert "/model <name>  Switch the active model on the current platform" in output
     assert "/mode <confirm|yolo|human>  Change command approval mode" in output
+    assert "/max-turn <turns>  Increase the max-turns limit" in output
     assert "Modes" in output
     assert 'human  Type "y" to allow each command explicitly' in output
 
@@ -140,11 +211,11 @@ def test_approve_command_modes():
         console=console,
     )
 
-    assert repl.approve_command(cmd="echo hi") is True
-    assert repl.approve_command(cmd="echo hi") is False
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is False
     repl.config.mode = "human"
-    assert repl.approve_command(cmd="echo hi") is True
-    assert repl.approve_command(cmd="echo hi") is False
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is False
     output = console.file.getvalue()
     assert "approval" in output
     assert "Approved." in output
@@ -159,7 +230,7 @@ def test_approve_command_yolo_skips_prompt():
     repl = _make_repl(prompt_session=prompt, console=console)
     repl.config.mode = "yolo"
 
-    assert repl.approve_command(cmd="echo hi") is True
+    assert asyncio.run(repl.approve_command_async(cmd="echo hi")) is True
     assert prompt.prompts == []
     assert "Auto-approved in yolo mode." in console.file.getvalue()
 
@@ -216,13 +287,19 @@ def test_repl_tool_wrapper_replaces_known_tools():
 
 
 def test_bash_tool_rejects_when_not_approved():
+    import io
+
+    class StubConsole:
+        file = io.StringIO()
+
     class StubRepl:
+        console = StubConsole()
         last_rejection_reason = "nope"
 
         def render_command_proposal(self, **kwargs):
             self.proposal = kwargs
 
-        def approve_command(self, **kwargs):
+        async def approve_command_async(self, **kwargs):
             self.approval = kwargs
             return False
 
@@ -237,23 +314,76 @@ def test_bash_tool_rejects_when_not_approved():
     assert "nope" in result["output"]
 
 
-def test_ask_user_tool_collects_input():
+def test_bash_tool_executes_command_in_worker_thread(monkeypatch):
+    import io
+
+    calls = []
+    rendered = []
+    command_result = {"output": "done", "returncode": 0}
+
+    def fake_execute_bash_command(cmd, cwd=""):
+        calls.append(("execute", cmd, cwd))
+        return command_result
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append(("to_thread", func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(cli_repl, "execute_bash_command", fake_execute_bash_command)
+    monkeypatch.setattr(cli_repl.asyncio, "to_thread", fake_to_thread)
+
     class StubConsole:
+        file = io.StringIO()
+
+    class StubRepl:
+        console = StubConsole()
+        last_rejection_reason = None
+
+        def render_command_proposal(self, **kwargs):
+            self.proposal = kwargs
+
+        async def approve_command_async(self, **kwargs):
+            self.approval = kwargs
+            return True
+
+        def render_tool_result(self, tool_name, result):
+            rendered.append((tool_name, result))
+
+    tool = cli_repl.ReplToolWrapper()._create_bash_tool(StubRepl())
+
+    result = _invoke_tool(tool, cmd="echo hi", cwd="/tmp", thought="")
+
+    assert result == command_result
+    assert calls == [
+        ("to_thread", fake_execute_bash_command, ("echo hi",), {"cwd": "/tmp"}),
+        ("execute", "echo hi", "/tmp"),
+    ]
+    assert rendered == [("bash", command_result)]
+
+
+def test_ask_user_tool_collects_input():
+    import io
+
+    class StubConsole:
+        file = io.StringIO()
+
         def print(self, *args, **kwargs):
             return None
 
     class StubRepl:
         console = StubConsole()
 
-        def prompt_inline(self, message):
+        async def prompt_inline_async(self, message):
             self.message = message
-            return "answer"
+            return " answer "
 
-    tool = cli_repl.ReplToolWrapper()._create_ask_user_tool(StubRepl())
+    repl = StubRepl()
+    tool = cli_repl.ReplToolWrapper()._create_ask_user_tool(repl)
 
     result = _invoke_tool(tool, prompt="Enter value", thought="Think first")
 
     assert result == "answer"
+    assert repl.message == "Enter value\n> "
 
 
 def test_handle_unknown_command_is_handled():
@@ -401,6 +531,16 @@ def test_render_startup_includes_platform_and_model():
     assert "Model: gpt-5-mini" in output
 
 
+def test_render_startup_includes_session_id_when_enabled():
+    console = _make_console()
+    repl = _make_repl(console=console, session=object(), session_id="repl-abc123")
+
+    repl.render_startup()
+
+    output = console.file.getvalue()
+    assert "Session: repl-abc123" in output
+
+
 def test_bottom_toolbar_includes_platform_and_model():
     repl = _make_repl(model_platform="openai", model_name="gpt-5-mini")
 
@@ -408,6 +548,65 @@ def test_bottom_toolbar_includes_platform_and_model():
 
     assert "platform=openai" in toolbar
     assert "model=gpt-5-mini" in toolbar
+    assert "max_turns=5" in toolbar
+
+
+def test_bottom_toolbar_includes_session_id_when_enabled():
+    repl = _make_repl(session=object(), session_id="repl-abc123")
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "session=repl-abc123" in toolbar
+
+
+def test_prompt_message_includes_skill_when_scientist_has_active_skill():
+    repl = _make_repl(context=SimpleNamespace(agent_name="scientist", active_skill="nyx"))
+
+    msg = repl._prompt_message()
+
+    assert "(nyx)" in msg
+    assert "scientist" in msg
+
+
+def test_prompt_message_no_skill_when_scientist_without_active_skill():
+    repl = _make_repl()
+
+    msg = repl._prompt_message()
+
+    assert "(" not in msg
+    assert "scientist" in msg
+
+
+def test_prompt_message_no_skill_for_non_scientist_agent():
+    repl = _make_repl(
+        agent_name="coder",
+        context=SimpleNamespace(agent_name="coder", active_skill="nyx"),
+    )
+
+    msg = repl._prompt_message()
+
+    assert "(nyx)" not in msg
+    assert "coder" in msg
+
+
+def test_bottom_toolbar_includes_skill_when_active():
+    repl = _make_repl(
+        model_platform="cborg",
+        model_name="test-model",
+        context=SimpleNamespace(agent_name="scientist", active_skill="nyx"),
+    )
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "skill=nyx" in toolbar
+
+
+def test_bottom_toolbar_omits_skill_when_none():
+    repl = _make_repl(model_platform="cborg", model_name="test-model")
+
+    toolbar = repl._bottom_toolbar()
+
+    assert "skill=" not in toolbar
 
 
 def test_run_turn_updates_input_history(monkeypatch):
@@ -447,3 +646,239 @@ def test_run_turn_updates_input_history(monkeypatch):
 
     assert repl.input_items[0]["content"] == "hello"
     assert repl.input_items[-1]["content"] == "Hello from agent"
+
+
+def test_run_turn_uses_updated_max_turns(monkeypatch):
+    raw_event = cli_repl.RawResponsesStreamEvent(
+        data=ResponseTextDeltaEvent(
+            delta="Done",
+            type="response.output_text.delta",
+            event_id="e1",
+            item_id="i1",
+            output_index=0,
+            content_index=0,
+            logprobs=[],
+            sequence_number=0,
+        )
+    )
+    calls = []
+
+    class FakeResult:
+        last_agent = _make_agent()
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": "Done"}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append(max_turns)
+            return FakeResult()
+
+    repl = _make_repl(max_turns=5)
+    repl.set_max_turns("11")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("hello"))
+
+    assert calls == [11]
+
+
+def test_run_turn_with_persistent_session_sends_only_current_user_input(monkeypatch):
+    raw_event = cli_repl.RawResponsesStreamEvent(
+        data=ResponseTextDeltaEvent(
+            delta="Hello from agent",
+            type="response.output_text.delta",
+            event_id="e1",
+            item_id="i1",
+            output_index=0,
+            content_index=0,
+            logprobs=[],
+            sequence_number=0,
+        )
+    )
+    calls = []
+    session = object()
+
+    class FakeResult:
+        def __init__(self, agent, input_items):
+            self.last_agent = agent
+            self._input_items = _input_to_items(input_items)
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return self._input_items + [{"role": "assistant", "content": "Hello from agent"}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"input": input, "session": session})
+            return FakeResult(agent, input or [])
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    repl.input_items = [{"role": "user", "content": "old question"}]
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {
+            "input": "new question",
+            "session": session,
+        }
+    ]
+
+
+def test_run_turn_with_persistent_session_retries_with_string_input(monkeypatch):
+    calls = []
+    session = object()
+    raw_event = cli_repl.RawResponsesStreamEvent(data=SimpleNamespace(type="noop"))
+
+    class FakeResult:
+        def __init__(self, agent, input_items):
+            self.last_agent = agent
+            self._input_items = _input_to_items(input_items)
+
+        async def stream_events(self):
+            yield raw_event
+
+        def to_input_list(self):
+            return self._input_items
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"input": input, "session": session})
+            return FakeResult(agent, input)
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {"input": "new question", "session": session},
+        {"input": cli_repl.DEAD_AIR_RETRY_PROMPT, "session": session},
+    ]
+
+
+def test_run_turn_with_persistent_session_finalizes_with_string_input(monkeypatch):
+    calls = []
+    session = object()
+    tool_output_event = cli_repl.RunItemStreamEvent(
+        name="tool_output",
+        item=SimpleNamespace(
+            type="tool_call_output_item",
+            output={"output": "FINALIZE_NOW: done"},
+        ),
+    )
+
+    class FakeStreamResult:
+        last_agent = _make_agent()
+
+        async def stream_events(self):
+            yield tool_output_event
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": ""}]
+
+    class FakeFinalResult:
+        last_agent = _make_agent()
+        final_output = "Final summary."
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": self.final_output}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            calls.append({"method": "run_streamed", "input": input, "session": session})
+            return FakeStreamResult()
+
+        @staticmethod
+        async def run(agent, input, context=None, max_turns=None, session=None):
+            calls.append({"method": "run", "input": input, "session": session})
+            return FakeFinalResult()
+
+    repl = _make_repl(session=session, session_id="repl-abc123")
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("new question"))
+
+    assert calls == [
+        {"method": "run_streamed", "input": "new question", "session": session},
+        {
+            "method": "run",
+            "input": "FINALIZE_NOW received. Provide the final summary only; do not call tools.",
+            "session": session,
+        },
+    ]
+
+
+def test_run_turn_executes_text_emitted_bash_block_and_continues_session(monkeypatch):
+    session = object()
+    runner_calls = []
+    executed = []
+    command_text = "THOUGHT: inspect\n```bash\necho hi\n```"
+    final_text = "Done."
+
+    def raw_text_event(text):
+        return cli_repl.RawResponsesStreamEvent(
+            data=ResponseTextDeltaEvent(
+                delta=text,
+                type="response.output_text.delta",
+                event_id="e1",
+                item_id="i1",
+                output_index=0,
+                content_index=0,
+                logprobs=[],
+                sequence_number=0,
+            )
+        )
+
+    class FakeResult:
+        def __init__(self, agent, input_items, text):
+            self.last_agent = agent
+            self._input_items = _input_to_items(input_items)
+            self._text = text
+
+        async def stream_events(self):
+            yield raw_text_event(self._text)
+
+        def to_input_list(self):
+            return self._input_items + [{"role": "assistant", "content": self._text}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            runner_calls.append({"input": input, "session": session})
+            text = command_text if len(runner_calls) == 1 else final_text
+            return FakeResult(agent, input, text)
+
+    def fake_execute_bash_command(cmd, cwd=""):
+        executed.append({"cmd": cmd, "cwd": cwd})
+        return {"output": "hi\n", "returncode": 0}
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    repl = _make_repl(session=session, session_id="repl-abc123", yolo=True)
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+    monkeypatch.setattr(cli_repl, "execute_bash_command", fake_execute_bash_command)
+    monkeypatch.setattr(cli_repl.asyncio, "to_thread", fake_to_thread)
+
+    asyncio.run(repl._run_turn("start"))
+
+    assert executed == [{"cmd": "echo hi", "cwd": ""}]
+    assert runner_calls[0] == {"input": "start", "session": session}
+    assert runner_calls[1]["session"] is session
+    assert (
+        "The bash command proposed in your previous response has completed."
+        in runner_calls[1]["input"]
+    )
+    assert "echo hi" in runner_calls[1]["input"]

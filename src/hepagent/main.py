@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import click
 import typer
 from typer.core import TyperGroup
@@ -55,6 +57,11 @@ def create_chat_session(conversation_id: str) -> SQLiteSession:
     db_dir.mkdir(parents=True, exist_ok=True)
     db_path = db_dir / "conversation.db"
     return SQLiteSession(conversation_id, str(db_path))
+
+
+def create_repl_session_id() -> str:
+    """Create a short, random REPL session id."""
+    return f"repl-{uuid.uuid4().hex[:12]}"
 
 
 def _available_role_agents() -> dict[str, object]:
@@ -276,6 +283,11 @@ def repl(
         "--chat",
         help="Conversation id for persistent SQLite chat history.",
     ),
+    disable_session: bool = typer.Option(
+        False,
+        "--disable-session",
+        help="Disable the default persistent REPL session.",
+    ),
 ) -> None:
     """Start the interactive coding REPL."""
     options = ctx.obj or {}
@@ -284,8 +296,12 @@ def repl(
     max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
     model = model or options.get("model")
     chat = chat or options.get("chat")
+    if disable_session and chat:
+        raise typer.BadParameter("Use either --chat or --disable-session, not both.")
 
-    runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
+    repl_session_id = None if disable_session else chat or create_repl_session_id()
+
+    runtime = build_runtime(agent_name=agent_name, model=model, chat=repl_session_id)
     model_provider = runtime["model_provider"]
     display_model = runtime["display_model"]
     cli = CliRepl(
@@ -301,7 +317,8 @@ def repl(
         yolo=yolo,
         session=runtime["session"],
         session_factory=create_chat_session,
-        chat_base_id=chat,
+        session_id=repl_session_id,
+        session_base_id=repl_session_id,
         model_platform=model_provider,
         model_name=display_model,
     )
