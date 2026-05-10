@@ -40,6 +40,7 @@ Common options mirror `hepagent run`:
 
 ```bash
 uv run hepagent repl --agent scientist
+uv run hepagent repl --agent explorer
 uv run hepagent repl --agent shell --model openai:gpt-5-mini
 uv run hepagent repl --chat my-session
 uv run hepagent repl --disable-session

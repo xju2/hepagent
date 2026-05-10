@@ -79,6 +79,7 @@ hepagent list-models --platform gemini
 ```bash
 hepagent run --agent "shell" --model "gemini:models/gemini-flash-lite-latest" "how many python files in this code repository"
 hepagent run --agent "scientist" --model "cborg:lbl/gemma-4" "I would like to simulate a cosmology sky with Nyx code." --max-turn 30
+hepagent run --agent "explorer" --model "openai:gpt-5-mini" "Suggest research directions connecting weak lensing and neutrino mass"
 hepagent run --agent "coder" --model "openai:gpt-5-mini" "Create a worktree for adding a new feature: chunkle."
 hepagent run --agent "scientist" --model "gemini:models/gemini-2.0-flash" "..."  # uses Gemini provider
 ```
@@ -100,6 +101,7 @@ Examples:
 
 ```bash
 hepagent repl --agent scientist
+hepagent repl --agent explorer
 hepagent repl --agent shell --model openai:gpt-5-mini
 hepagent repl --chat my-session
 hepagent repl --disable-session
