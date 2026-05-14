@@ -1,8 +1,15 @@
+import re
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
 import hepagent.main as main_module
+
+
+def _normalize_cli_output(text: str) -> str:
+    """Strip ANSI styling and normalize whitespace for robust assertions."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.split())
 
 
 class _DummyAgent:
@@ -276,6 +283,7 @@ def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     )
 
     assert result.exit_code != 0
-    assert "Use either --chat or --disable-session" in result.output
+    normalized_output = _normalize_cli_output(result.output)
+    assert "Use either --chat or --disable-session, not both." in normalized_output
     assert chat_calls == []
     assert created_repls == []
