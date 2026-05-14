@@ -140,7 +140,8 @@ async def run_specialist_panel(
     """Run selected specialist agents concurrently and format their findings."""
 
     specialists = _select_specialists(specialist_keys)
-    results = await asyncio.gather(
+    specialist_names = [specialist.name for specialist in specialists]
+    gathered_results = await asyncio.gather(
         *[
             _run_specialist(
                 specialist,
@@ -150,8 +151,20 @@ async def run_specialist_panel(
                 model_name=model_name,
             )
             for specialist in specialists
-        ]
+        ],
+        return_exceptions=True,
     )
+    results: list[tuple[str, str]] = []
+    for specialist_name, result in zip(specialist_names, gathered_results, strict=True):
+        if isinstance(result, Exception):
+            results.append(
+                (
+                    specialist_name,
+                    f"ERROR: Specialist run failed with {type(result).__name__}: {result}",
+                )
+            )
+        else:
+            results.append(result)
     sections = [
         "# Parallel specialist findings",
         f"Question: {question}",
