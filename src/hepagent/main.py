@@ -10,6 +10,7 @@ from agents import SQLiteSession
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.cli_repl import CliRepl
 from hepagent.agents.common import AgentContext
+from hepagent.agents.explorer import create as create_explorer_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.agents.textual import AgentAdapter, TextualAgent
@@ -71,7 +72,10 @@ def _available_role_agents() -> dict[str, object]:
 
 def get_available_agents() -> dict[str, str]:
     """Return all user-selectable agents and descriptions."""
-    agents = {"scientist": "Skilled Agent"}
+    agents = {
+        "explorer": "Research-direction explorer with parallel specialist sub-agents.",
+        "scientist": "Skilled Agent",
+    }
     for role_name, role_cfg in _available_role_agents().items():
         agents[role_name] = role_cfg.description
     return dict(sorted(agents.items()))
@@ -85,6 +89,8 @@ def create_app_agent(
 ):
     """Create the selected agent implementation."""
     normalized = agent_name.lower()
+    if normalized == "explorer":
+        return create_explorer_agent(model_provider=model_provider, model_name=model_name)
     if normalized in _available_role_agents():
         return create_role_agent(
             role_name=normalized,
@@ -329,7 +335,8 @@ def repl(
 def list_agents() -> None:
     """List available run modes and role agents."""
     typer.echo("Built-in run modes:")
-    typer.echo("\tskilled -> default TASK_PROMPT mode")
+    typer.echo("\tscientist -> skilled research agent")
+    typer.echo("\texplorer -> research-direction explorer")
     typer.echo("\tshell -> --shell/-s")
     typer.echo("\tshell_describer -> --describe/-d")
     typer.echo("\tcoder -> --code/-c")

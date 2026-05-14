@@ -1,8 +1,15 @@
+import re
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
 import hepagent.main as main_module
+
+
+def _normalize_cli_output(text: str) -> str:
+    """Strip ANSI styling and normalize whitespace for robust assertions."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.split())
 
 
 class _DummyAgent:
@@ -44,10 +51,15 @@ def _setup_stubs(monkeypatch, session_sentinel):
     created_repls = []
     chat_calls = []
     skilled_calls = []
+    explorer_calls = []
     role_calls = []
 
     def _fake_create_skilled_agent(**kwargs):
         skilled_calls.append(kwargs)
+        return _DummyAgent()
+
+    def _fake_create_explorer_agent(**kwargs):
+        explorer_calls.append(kwargs)
         return _DummyAgent()
 
     def _fake_create_role_agent(**kwargs):
@@ -55,6 +67,7 @@ def _setup_stubs(monkeypatch, session_sentinel):
         return _DummyAgent()
 
     monkeypatch.setattr(main_module, "create_skilled_agent", _fake_create_skilled_agent)
+    monkeypatch.setattr(main_module, "create_explorer_agent", _fake_create_explorer_agent)
     monkeypatch.setattr(main_module, "create_role_agent", _fake_create_role_agent)
 
     def _fake_textual_agent(*args, **kwargs):
@@ -76,12 +89,12 @@ def _setup_stubs(monkeypatch, session_sentinel):
         return session_sentinel
 
     monkeypatch.setattr(main_module, "create_chat_session", _fake_create_chat_session)
-    return created_apps, created_repls, chat_calls, skilled_calls, role_calls
+    return created_apps, created_repls, chat_calls, skilled_calls, explorer_calls, role_calls
 
 
 def test_run_command_uses_chat_session(monkeypatch):
     session_sentinel = object()
-    created_apps, _, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["run", "--chat", "conv-1", "hello"])
@@ -95,7 +108,7 @@ def test_run_command_uses_chat_session(monkeypatch):
 
 def test_default_to_run_path_uses_chat_session(monkeypatch):
     session_sentinel = object()
-    created_apps, _, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["--chat", "conv-2", "hello"])
@@ -109,7 +122,7 @@ def test_default_to_run_path_uses_chat_session(monkeypatch):
 
 def test_run_shell_mode_uses_role_agent(monkeypatch):
     session_sentinel = object()
-    created_apps, _, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, _, skilled_calls, _, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["run", "-a", "shell", "check disk space"])
@@ -125,7 +138,7 @@ def test_run_shell_mode_uses_role_agent(monkeypatch):
 
 def test_run_describe_mode_uses_role_agent(monkeypatch):
     session_sentinel = object()
-    created_apps, _, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, _, skilled_calls, _, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["run", "-a", "shell_describer", "ls -la | wc -l"])
@@ -141,7 +154,7 @@ def test_run_describe_mode_uses_role_agent(monkeypatch):
 
 def test_run_code_mode_uses_role_agent(monkeypatch):
     session_sentinel = object()
-    created_apps, _, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, _, skilled_calls, _, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["run", "-a", "coder", "write python to count xju"])
@@ -157,7 +170,7 @@ def test_run_code_mode_uses_role_agent(monkeypatch):
 
 def test_run_default_mode_uses_skilled_agent(monkeypatch):
     session_sentinel = object()
-    created_apps, _, _, skilled_calls, role_calls = _setup_stubs(monkeypatch, session_sentinel)
+    created_apps, _, _, skilled_calls, _, role_calls = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["run", "run a nyx simulation"])
@@ -168,6 +181,24 @@ def test_run_default_mode_uses_skilled_agent(monkeypatch):
     task, kwargs = created_apps[0].run_task_calls[0]
     assert task == "run a nyx simulation"
     assert kwargs["context"].agent_name == "scientist"
+
+
+def test_run_explorer_mode_uses_explorer_agent(monkeypatch):
+    session_sentinel = object()
+    created_apps, _, _, skilled_calls, explorer_calls, role_calls = _setup_stubs(
+        monkeypatch, session_sentinel
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main_module.app, ["run", "-a", "explorer", "find axion ideas"])
+
+    assert result.exit_code == 0
+    assert len(skilled_calls) == 0
+    assert len(explorer_calls) == 1
+    assert len(role_calls) == 0
+    task, kwargs = created_apps[0].run_task_calls[0]
+    assert task == "find axion ideas"
+    assert kwargs["context"].agent_name == "explorer"
 
 
 def test_list_agents_includes_roles(monkeypatch):
@@ -191,7 +222,7 @@ def test_list_agents_includes_roles(monkeypatch):
 
 def test_repl_command_uses_chat_session_and_runs(monkeypatch):
     session_sentinel = object()
-    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    _, created_repls, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["repl", "--chat", "conv-repl", "--yolo"])
@@ -211,7 +242,7 @@ def test_repl_command_uses_chat_session_and_runs(monkeypatch):
 
 def test_repl_command_creates_default_session(monkeypatch):
     session_sentinel = object()
-    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    _, created_repls, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
     monkeypatch.setattr(main_module, "create_repl_session_id", lambda: "repl-random")
 
     runner = CliRunner()
@@ -228,7 +259,7 @@ def test_repl_command_creates_default_session(monkeypatch):
 
 def test_repl_command_disable_session_skips_chat_session(monkeypatch):
     session_sentinel = object()
-    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    _, created_repls, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(main_module.app, ["repl", "--disable-session", "--yolo"])
@@ -243,7 +274,7 @@ def test_repl_command_disable_session_skips_chat_session(monkeypatch):
 
 def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     session_sentinel = object()
-    _, created_repls, chat_calls, _, _ = _setup_stubs(monkeypatch, session_sentinel)
+    _, created_repls, chat_calls, _, _, _ = _setup_stubs(monkeypatch, session_sentinel)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -252,6 +283,7 @@ def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     )
 
     assert result.exit_code != 0
-    assert "Use either --chat or --disable-session" in result.output
+    normalized_output = _normalize_cli_output(result.output)
+    assert "Use either --chat or --disable-session, not both." in normalized_output
     assert chat_calls == []
     assert created_repls == []

@@ -125,7 +125,9 @@ def test_get_instructions_skips_user_profile_on_permission_error(mock_agent_env,
 
     with (
         patch("hepagent.agent_helpers.get_user_profile_path", return_value=missing_profile),
-        patch("hepagent.agent_helpers.ensure_user_profile_file", side_effect=PermissionError("denied")),
+        patch(
+            "hepagent.agent_helpers.ensure_user_profile_file", side_effect=PermissionError("denied")
+        ),
     ):
         instructions = loader.get_instructions(wrapper, None)  # type: ignore[arg-type]
 

@@ -109,9 +109,7 @@ def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
     # but sections absent from the user file retain their packaged defaults.
     user_config = get_hepagent_home() / "config" / filename
     if user_config.exists():
-        user_section = (
-            tomllib.loads(user_config.read_text(encoding="utf-8")).get(key) or {}
-        )
+        user_section = tomllib.loads(user_config.read_text(encoding="utf-8")).get(key) or {}
         for section_key, section_val in user_section.items():
             if (
                 section_key in result
