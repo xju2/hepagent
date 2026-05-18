@@ -377,5 +377,221 @@ def list_models(
         typer.echo("\t" + name)
 
 
+jfc_app = typer.Typer(name="jfc", help="JFC autonomous HEP analysis pipeline.")
+app.add_typer(jfc_app)
+
+
+@jfc_app.command("run")
+def jfc_run(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name (short identifier)."),
+    analysis_type: str = typer.Option(
+        ...,
+        "--type",
+        "-t",
+        help="Analysis type: measurement or search.",
+    ),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="Physics prompt / question."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help='Model as "provider:model" (e.g. "cborg:claude-sonnet-4-5").',
+    ),
+    max_iterations: int = typer.Option(
+        3, "--max-iterations", help="Max review iterations per phase."
+    ),
+) -> None:
+    """Start a new JFC analysis from scratch."""
+    import asyncio
+
+    from hepagent.agents.jfc.orchestrator import MaxIterationsExceeded, run_jfc_analysis
+    from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    model_provider, model_name = parse_model_spec(model)
+
+    def _cb(phase: str, status: str) -> None:
+        typer.echo(f"[jfc] phase={phase} {status}")
+
+    try:
+        pdf = asyncio.run(
+            run_jfc_analysis(
+                analysis_name=name,
+                physics_prompt=prompt,
+                analysis_type=analysis_type,  # type: ignore[arg-type]
+                base_dir=base_dir,
+                model_provider=model_provider,
+                model_name=model_name,
+                max_iterations_per_phase=max_iterations,
+                progress_callback=_cb,
+            )
+        )
+        typer.echo(f"Analysis complete. Final PDF: {pdf}")
+    except MaxIterationsExceeded as e:
+        typer.echo(f"Error: {e}", err=True)
+        typer.echo(f"Resume with: hepagent jfc resume --name {name}", err=True)
+        raise typer.Exit(code=1) from e
+    except PhaseEscalationError as e:
+        typer.echo(f"Escalation at phase {e.phase}: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    except KeyboardInterrupt as e:
+        typer.echo("\nInterrupted. State saved. Resume with: hepagent jfc resume --name {name}")
+        raise typer.Exit(code=130) from e
+
+
+@jfc_app.command("resume")
+def jfc_resume(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name to resume."),
+    from_phase: str = typer.Option(
+        ..., "--from-phase", help="Phase to start from, e.g. '3' or '4a'"
+    ),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    model: str | None = typer.Option(None, "--model", help="Model override."),
+    max_iterations: int = typer.Option(3, "--max-iterations"),
+) -> None:
+    """Resume an interrupted JFC analysis from a specific phase."""
+    import asyncio
+    from pathlib import Path
+
+    from hepagent.agents.jfc.orchestrator import MaxIterationsExceeded, load_state, run_jfc_analysis
+    from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    analysis_root = Path(base_dir).resolve() / name
+    if not analysis_root.exists():
+        typer.echo(f"Error: analysis directory not found: {analysis_root}", err=True)
+        raise typer.Exit(code=1)
+
+    model_provider, model_name = parse_model_spec(model)
+
+    # Load physics prompt and type from saved state
+    state_path = analysis_root / ".orchestration_state.json"
+    prompt_file = analysis_root / "prompt.md"
+    prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
+    analysis_type = "measurement"
+    if state_path.exists():
+        s = load_state(analysis_root)
+        analysis_type = s.analysis_type
+        if not model_provider or model_provider == "cborg":
+            model_provider = s.model_provider
+            model_name = model_name or s.model_name
+
+    # Parse phase
+    try:
+        start_phase: int | str = int(from_phase)
+    except ValueError:
+        start_phase = from_phase
+
+    def _cb(phase: str, status: str) -> None:
+        typer.echo(f"[jfc] phase={phase} {status}")
+
+    try:
+        pdf = asyncio.run(
+            run_jfc_analysis(
+                analysis_name=name,
+                physics_prompt=prompt,
+                analysis_type=analysis_type,  # type: ignore[arg-type]
+                base_dir=base_dir,
+                model_provider=model_provider,
+                model_name=model_name,
+                start_from_phase=start_phase,
+                max_iterations_per_phase=max_iterations,
+                progress_callback=_cb,
+            )
+        )
+        typer.echo(f"Analysis complete. Final PDF: {pdf}")
+    except (MaxIterationsExceeded, PhaseEscalationError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    except KeyboardInterrupt as e:
+        typer.echo("\nInterrupted. State saved.")
+        raise typer.Exit(code=130) from e
+
+
+@jfc_app.command("status")
+def jfc_status(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """Show the current phase status of a JFC analysis."""
+    from pathlib import Path
+
+    from hepagent.agents.jfc.orchestrator import PHASE_ORDER, load_state
+
+    analysis_root = Path(base_dir).resolve() / name
+    if not analysis_root.exists():
+        typer.echo(f"Error: analysis not found: {analysis_root}", err=True)
+        raise typer.Exit(code=1)
+
+    state_path = analysis_root / ".orchestration_state.json"
+    if not state_path.exists():
+        typer.echo(f"No orchestration state found for '{name}'.")
+        raise typer.Exit(code=1)
+
+    state = load_state(analysis_root)
+
+    phase_names = {
+        "1": "Strategy",
+        "2": "Exploration",
+        "3": "Processing",
+        "4a": "Expected Results",
+        "4b": "10% Validation",
+        "4c": "Full Data",
+        "5": "Documentation",
+    }
+
+    typer.echo(f"\nJFC Analysis: {name}")
+    typer.echo(f"Type: {state.analysis_type}")
+    typer.echo(f"Root: {analysis_root}\n")
+    typer.echo(f"{'Phase':<6} {'Name':<22} {'Status'}")
+    typer.echo("-" * 50)
+    for phase in PHASE_ORDER:
+        key = str(phase)
+        pname = phase_names.get(key, key)
+        if key in state.completed_phases:
+            status = "✓ PASS"
+            iters = state.phase_iterations.get(key, 1)
+            if iters > 1:
+                status += f"  ({iters} review iterations)"
+        elif key == state.current_subphase:
+            status = "→ IN PROGRESS"
+        else:
+            status = "○ pending"
+        typer.echo(f"{key:<6} {pname:<22} {status}")
+    typer.echo()
+
+
+@jfc_app.command("list")
+def jfc_list(
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """List JFC analyses in the analyses directory."""
+    from pathlib import Path
+
+    analyses_dir = Path(base_dir).resolve()
+    if not analyses_dir.exists():
+        typer.echo(f"No analyses directory found at {analyses_dir}")
+        return
+
+    analyses = [d for d in sorted(analyses_dir.iterdir()) if d.is_dir()]
+    if not analyses:
+        typer.echo(f"No analyses found in {analyses_dir}")
+        return
+
+    typer.echo(f"\nJFC Analyses in {analyses_dir}:\n")
+    for analysis_dir in analyses:
+        state_path = analysis_dir / ".orchestration_state.json"
+        if state_path.exists():
+            try:
+                from hepagent.agents.jfc.orchestrator import load_state
+
+                state = load_state(analysis_dir)
+                current = state.current_subphase
+                n_complete = len(state.completed_phases)
+                typer.echo(f"  {analysis_dir.name:<30} phase={current}  ({n_complete}/7 complete)")
+            except Exception:
+                typer.echo(f"  {analysis_dir.name:<30} (state unreadable)")
+        else:
+            typer.echo(f"  {analysis_dir.name:<30} (no state)")
+
+
 if __name__ == "__main__":
     app()

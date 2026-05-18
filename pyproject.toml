@@ -58,7 +58,7 @@ packages = ["src/hepagent"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["*ipynb"]
+exclude = ["*ipynb", "testarea/*"]
 
 [tool.ruff.lint]
 select = [
