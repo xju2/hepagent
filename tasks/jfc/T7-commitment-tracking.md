@@ -99,10 +99,10 @@ In the Phase 4a arbiter's system prompt, include:
 
 ## Acceptance Criteria
 
-- [ ] Phase 1 executor produces a `COMMITMENTS.md` with [D1]-[DN] rows
-- [ ] `check_phase1_commitments` returns pending items correctly
-- [ ] Orchestrator raises `CommitmentsNotResolved` if any pending at Phase 4a
-- [ ] `update_commitments("D1", "resolved", "evidence")` updates the table row
-- [ ] `update_commitments("D2", "downscoped", "reason")` updates correctly
-- [ ] Arbiter system prompt at Phase 4a references COMMITMENTS.md
-- [ ] Unit test: `tests/agents/jfc/test_commitment_checker.py`
+- [x] Phase 1 executor produces a `COMMITMENTS.md` with [D1]-[DN] rows
+- [x] `check_phase1_commitments` returns pending items correctly
+- [x] Orchestrator raises `CommitmentsNotResolved` if any pending at Phase 4a
+- [x] `update_commitments("D1", "resolved", "evidence")` updates the table row
+- [x] `update_commitments("D2", "downscoped", "reason")` updates correctly
+- [x] Arbiter system prompt at Phase 4a references COMMITMENTS.md
+- [x] Unit test: `tests/agents/jfc/test_commitment_checker.py`

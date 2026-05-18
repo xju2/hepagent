@@ -85,9 +85,9 @@ A reference card mapping each JFC agent role to its HepAgent instantiation:
 
 ## Acceptance Criteria
 
-- [ ] `load_skill_details("jfc")` returns the skill manifest without error
-- [ ] `read_resource("jfc/methodology-summary")` returns condensed methodology
-- [ ] `read_resource("jfc/agent-roles")` returns the role reference card
-- [ ] The skill manifest passes lint (valid YAML frontmatter, non-empty body)
-- [ ] The body correctly reflects anti-fabrication rules from
+- [x] `load_skill_details("jfc")` returns the skill manifest without error
+- [x] `read_resource("jfc/methodology-summary")` returns condensed methodology
+- [x] `read_resource("jfc/agent-roles")` returns the role reference card
+- [x] The skill manifest passes lint (valid YAML frontmatter, non-empty body)
+- [x] The body correctly reflects anti-fabrication rules from
   `testarea/jfc/src/methodology/01-principles.md` (verify by diff)

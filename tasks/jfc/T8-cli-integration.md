@@ -84,11 +84,11 @@ CLI and TUI pass different callbacks; this keeps the engine decoupled.
 
 ## Acceptance Criteria
 
-- [ ] `hepagent jfc --help` shows the subcommand group
-- [ ] `hepagent jfc run --name test --type measurement --prompt "..."` starts
+- [x] `hepagent jfc --help` shows the subcommand group
+- [x] `hepagent jfc run --name test --type measurement --prompt "..."` starts
   the analysis (even if it fails on the first real phase due to missing data)
-- [ ] `hepagent jfc status --name test` prints the phase table
-- [ ] `hepagent jfc resume --name test --from-phase 2` skips phase 1
-- [ ] Ctrl-C during `hepagent jfc run` saves state and exits cleanly
-- [ ] `hepagent jfc list` lists analyses in `analyses/`
-- [ ] Integration test: `tests/cli/test_jfc_cli.py` (mocked orchestrator)
+- [x] `hepagent jfc status --name test` prints the phase table
+- [x] `hepagent jfc resume --name test --from-phase 2` skips phase 1
+- [x] Ctrl-C during `hepagent jfc run` saves state and exits cleanly
+- [x] `hepagent jfc list` lists analyses in `analyses/`
+- [x] Integration test: `tests/cli/test_jfc_cli.py` (mocked orchestrator)

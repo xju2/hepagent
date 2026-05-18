@@ -112,11 +112,11 @@ Exports `create_phase_executor`, `create_note_writer`, `create_typesetter`.
 
 ## Acceptance Criteria
 
-- [ ] `create_phase_executor(phase=1, analysis_root=path)` returns an `Agent`
+- [x] `create_phase_executor(phase=1, analysis_root=path)` returns an `Agent`
   without error
-- [ ] The assembled system prompt contains the executor.md role definition
-- [ ] The assembled system prompt contains the phase1_claude.md template body
-- [ ] Running the agent (mocked) writes a file to `phase1_strategy/outputs/`
-- [ ] `create_note_writer("4a", path)` returns an `Agent`
-- [ ] `create_typesetter(path)` returns an `Agent`
-- [ ] Unit tests in `tests/agents/jfc/test_executor.py` verify prompt assembly
+- [x] The assembled system prompt contains the executor.md role definition
+- [x] The assembled system prompt contains the phase1_claude.md template body
+- [x] Running the agent (mocked) writes a file to `phase1_strategy/outputs/`
+- [x] `create_note_writer("4a", path)` returns an `Agent`
+- [x] `create_typesetter(path)` returns an `Agent`
+- [x] Unit tests in `tests/agents/jfc/test_executor.py` verify prompt assembly
