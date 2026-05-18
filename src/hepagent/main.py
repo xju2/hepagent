@@ -390,7 +390,12 @@ def jfc_run(
         "-t",
         help="Analysis type: measurement or search.",
     ),
-    prompt: str = typer.Option(..., "--prompt", "-p", help="Physics prompt / question."),
+    prompt_file: str = typer.Option(
+        ...,
+        "--prompt-file",
+        "-p",
+        help="Path to a markdown file containing the physics prompt / question.",
+    ),
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
     model: str | None = typer.Option(
         None,
@@ -403,9 +408,16 @@ def jfc_run(
 ) -> None:
     """Start a new JFC analysis from scratch."""
     import asyncio
+    from pathlib import Path
 
     from hepagent.agents.jfc.orchestrator import MaxIterationsExceeded, run_jfc_analysis
     from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    p = Path(prompt_file)
+    if not p.exists():
+        typer.echo(f"Error: prompt file not found: {prompt_file}", err=True)
+        raise typer.Exit(code=1)
+    prompt = p.read_text(encoding="utf-8")
 
     model_provider, model_name = parse_model_spec(model)
 
