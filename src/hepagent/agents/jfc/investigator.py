@@ -8,12 +8,13 @@ from pathlib import Path
 from agents import Agent, Runner
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
-from hepagent.helpers import get_repo_root, read_md
+from hepagent.agents.jfc._data import get_jfc_data_dir
+from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
 from hepagent.tools.common import read_resource
 from hepagent.tools.jfc import get_jfc_tools
 
-_JFC_SRC = get_repo_root() / "testarea" / "jfc" / "src"
+_JFC_SRC = get_jfc_data_dir()
 
 
 @dataclass

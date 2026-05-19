@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from agents import function_tool
-from hepagent.helpers import get_repo_root
+from hepagent.agents.jfc._data import get_jfc_data_dir
 
 _PHASE_DIR_MAP = {
     "1": "phase1_strategy",
@@ -25,7 +25,7 @@ async def validate_figures(analysis_root: str, phase: str) -> str:
     Run lint_plots.py on figures in the phase outputs directory.
 
     Returns the linter output. Any RED FLAG lines indicate Category A issues.
-    Wraps testarea/jfc/src/conventions/lint_plots.py.
+    Wraps hepagent/agents/jfc/data/conventions/lint_plots.py.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
@@ -39,13 +39,10 @@ async def validate_figures(analysis_root: str, phase: str) -> str:
     if not figures_dir.exists():
         return f"No figures directory found at {figures_dir}"
 
-    lint_script = get_repo_root() / "testarea" / "jfc" / "src" / "conventions" / "lint_plots.py"
-    if not lint_script.exists():
-        # Fall back to scripts/ location
-        lint_script = get_repo_root() / "testarea" / "jfc" / "src" / "scripts" / "lint_plots.py"
+    lint_script = get_jfc_data_dir() / "conventions" / "lint_plots.py"
 
     if not lint_script.exists():
-        return "lint_plots.py not found in testarea/jfc/src/conventions/ or scripts/"
+        return f"lint_plots.py not found at {lint_script}"
 
     try:
         result = subprocess.run(

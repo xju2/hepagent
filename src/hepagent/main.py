@@ -405,13 +405,18 @@ def jfc_run(
     max_iterations: int = typer.Option(
         3, "--max-iterations", help="Max review iterations per phase."
     ),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
 ) -> None:
     """Start a new JFC analysis from scratch."""
     import asyncio
+    import os
     from pathlib import Path
 
     from hepagent.agents.jfc.orchestrator import MaxIterationsExceeded, run_jfc_analysis
     from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    if yolo:
+        os.environ["HEPAGENT_YOLO"] = "1"
 
     p = Path(prompt_file)
     if not p.exists():
@@ -459,13 +464,18 @@ def jfc_resume(
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
     model: str | None = typer.Option(None, "--model", help="Model override."),
     max_iterations: int = typer.Option(3, "--max-iterations"),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
 ) -> None:
     """Resume an interrupted JFC analysis from a specific phase."""
     import asyncio
+    import os
     from pathlib import Path
 
     from hepagent.agents.jfc.orchestrator import MaxIterationsExceeded, load_state, run_jfc_analysis
     from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    if yolo:
+        os.environ["HEPAGENT_YOLO"] = "1"
 
     analysis_root = Path(base_dir).resolve() / name
     if not analysis_root.exists():

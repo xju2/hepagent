@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from agents import function_tool
-from hepagent.helpers import get_repo_root
-
-
-def _jfc_src() -> Path:
-    return get_repo_root() / "testarea" / "jfc" / "src"
-
+from hepagent.agents.jfc._data import get_jfc_data_dir
 
 PHASE_DIRS = [
     "phase1_strategy",
@@ -26,6 +22,32 @@ PHASE_DIRS = [
 ]
 
 PHASE_SUBDIRS = ["outputs", "outputs/figures", "src", "review", "logs"]
+
+# Maps each phase directory to the template that generates its CLAUDE.md
+_PHASE_TEMPLATE_MAP = {
+    "phase1_strategy": "phase1_claude.md",
+    "phase2_exploration": "phase2_claude.md",
+    "phase3_selection": "phase3_claude.md",
+    "phase4a_inference_expected": "phase4_claude.md",
+    "phase4b_inference_partial": "phase4_claude.md",
+    "phase4c_inference_observed": "phase4_claude.md",
+    "phase5_documentation": "phase5_claude.md",
+}
+
+_CONVENTIONS_FOR_TYPE = {
+    "measurement": (
+        "- `conventions/unfolding.md` — for unfolded measurements\n"
+        "- `conventions/extraction.md` — for extraction/counting measurements\n"
+        "\nThe technique selected in Phase 1 determines which file applies."
+    ),
+    "search": "- `conventions/search.md`",
+}
+
+
+def _substitute(template: str, variables: dict[str, str]) -> str:
+    for key, value in variables.items():
+        template = template.replace("{{" + key + "}}", value)
+    return template
 
 
 async def _scaffold_impl(
@@ -48,23 +70,36 @@ async def _scaffold_impl(
     except OSError as e:
         return f"Error creating directory {analysis_root}: {e}"
 
-    # Write physics prompt
+    jfc_data = get_jfc_data_dir()
+    templates_dir = jfc_data / "templates"
+
+    variables = {
+        "name": analysis_name,
+        "analysis_type": analysis_type,
+        "conventions_files": _CONVENTIONS_FOR_TYPE.get(analysis_type, ""),
+    }
+
+    # Root CLAUDE.md
+    root_template = templates_dir / "root_claude.md"
+    if root_template.exists():
+        (analysis_root / "CLAUDE.md").write_text(
+            _substitute(root_template.read_text(encoding="utf-8"), variables),
+            encoding="utf-8",
+        )
+
+    # Physics prompt
     (analysis_root / "prompt.md").write_text(
         f"# Physics Prompt\n\n{physics_prompt}\n",
         encoding="utf-8",
     )
 
-    # Write initial experiment log
+    # Experiment log and retrieval log
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     (analysis_root / "experiment_log.md").write_text(
-        f"# Experiment Log — {analysis_name}\n\n"
-        f"Analysis type: {analysis_type}\n"
-        f"Started: {ts}\n\n"
-        "---\n",
+        f"# Experiment Log — {analysis_name}\n\nAnalysis type: "
+        f"{analysis_type}\nStarted: {ts}\n\n---\n",
         encoding="utf-8",
     )
-
-    # Empty retrieval log
     (analysis_root / "retrieval_log.md").write_text(
         f"# Retrieval Log — {analysis_name}\n",
         encoding="utf-8",
@@ -79,53 +114,63 @@ async def _scaffold_impl(
         encoding="utf-8",
     )
 
-    # Phase subdirectories
+    # .analysis_config (data directory isolation hook)
+    (analysis_root / ".analysis_config").write_text(
+        "# Set data_dir to the path where your input ROOT files live.\n"
+        "# Add extra allow= lines for additional paths (one per line).\n"
+        "data_dir=\n"
+        "# allow=/path/to/mc/samples\n",
+        encoding="utf-8",
+    )
+
+    # Phase subdirectories + per-phase CLAUDE.md
     for phase in PHASE_DIRS:
         for sub in PHASE_SUBDIRS:
             (analysis_root / phase / sub).mkdir(parents=True, exist_ok=True)
+
+        template_name = _PHASE_TEMPLATE_MAP.get(phase)
+        if template_name:
+            phase_template = templates_dir / template_name
+            if phase_template.exists():
+                (analysis_root / phase / "CLAUDE.md").write_text(
+                    _substitute(phase_template.read_text(encoding="utf-8"), variables),
+                    encoding="utf-8",
+                )
 
     # Extra results dir for Phase 5
     (analysis_root / "phase5_documentation" / "outputs" / "results").mkdir(
         parents=True, exist_ok=True
     )
 
-    # Symlinks into testarea/jfc/src/
-    jfc_src = _jfc_src()
-    for link_name, src_name in [
-        ("conventions", "conventions"),
-        ("methodology", "methodology"),
-        ("agents", "agents"),
-    ]:
-        link = analysis_root / link_name
-        src = jfc_src / src_name
-        if not link.exists() and src.exists():
-            link.symlink_to(src.resolve())
+    # Stub references.bib for citations
+    (analysis_root / "phase5_documentation" / "outputs" / "references.bib").write_text(
+        "% BibTeX references for the analysis note.\n"
+        "% Add entries as you cite them with [@key] in the AN.\n",
+        encoding="utf-8",
+    )
 
-    # Copy pixi.toml template
-    pixi_template = jfc_src / "templates" / "pixi.toml"
+    # Copy conventions/ and methodology/ into the analysis directory.
+    # agents/ is NOT copied — agent role definitions are internal to hepagent.
+    for dir_name in ("conventions", "methodology"):
+        src = jfc_data / dir_name
+        dest = analysis_root / dir_name
+        if src.exists() and not dest.exists():
+            shutil.copytree(src, dest)
+
+    # pixi.toml from template
+    pixi_template = templates_dir / "pixi.toml"
     if pixi_template.exists():
-        content = pixi_template.read_text(encoding="utf-8")
-        content = content.replace("{name}", analysis_name)
+        content = pixi_template.read_text(encoding="utf-8").replace("{name}", analysis_name)
         (analysis_root / "pixi.toml").write_text(content, encoding="utf-8")
 
     # Git initialization
     try:
-        subprocess.run(
-            ["git", "init"],
-            cwd=analysis_root,
-            check=True,
-            capture_output=True,
+        subprocess.run(["git", "init"], cwd=analysis_root, check=True, capture_output=True)
+        (analysis_root / ".gitignore").write_text(
+            "# pixi\n.pixi/\npixi.lock\n\n# Python\n__pycache__/\n*.pyc\n\n# SLURM\n.slurm_*.out\n",
+            encoding="utf-8",
         )
-        gitignore = (
-            "# pixi\n.pixi/\npixi.lock\n\n# Python\n__pycache__/\n*.pyc\n\n# SLURM\n.slurm_*.out\n"
-        )
-        (analysis_root / ".gitignore").write_text(gitignore, encoding="utf-8")
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=analysis_root,
-            check=True,
-            capture_output=True,
-        )
+        subprocess.run(["git", "add", "-A"], cwd=analysis_root, check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", f"scaffold: initialize {analysis_name} JFC analysis"],
             cwd=analysis_root,
@@ -133,8 +178,7 @@ async def _scaffold_impl(
             capture_output=True,
         )
     except subprocess.CalledProcessError:
-        # Git is optional — log warning but continue
-        pass
+        pass  # git is optional
 
     return str(analysis_root)
 

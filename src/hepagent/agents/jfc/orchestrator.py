@@ -22,7 +22,7 @@ from hepagent.agents.jfc.executor import (
 )
 from hepagent.agents.jfc.fixer import run_fixer
 from hepagent.agents.jfc.review_gate import PhaseEscalationError, ReviewGateResult, run_review_gate
-from hepagent.tools.jfc.scaffold import scaffold_jfc_analysis
+from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
 
 
 class MaxIterationsExceeded(Exception):

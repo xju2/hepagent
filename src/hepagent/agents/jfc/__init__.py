@@ -1,5 +1,6 @@
 """JFC agent factories and orchestration."""
 
+from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.agents.jfc.commitment_checker import (
     CommitmentCheckResult,
     CommitmentsNotResolved,

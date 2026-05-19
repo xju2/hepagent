@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from agents import function_tool
-from hepagent.helpers import get_repo_root
+from hepagent.agents.jfc._data import get_jfc_data_dir
 
 
 @function_tool
@@ -24,7 +24,7 @@ async def compile_analysis_note(
       tectonic → .pdf
 
     Returns the PDF path on success, or error message on failure.
-    Uses testarea/jfc/src/conventions/postprocess_tex.py.
+    Uses hepagent/agents/jfc/data/conventions/postprocess_tex.py.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
@@ -43,10 +43,8 @@ async def compile_analysis_note(
         return f"Error: markdown file not found: {md_path}"
 
     tex_path = md_path.with_suffix(".tex")
-    preamble = get_repo_root() / "testarea" / "jfc" / "src" / "conventions" / "preamble.tex"
-    postprocess = (
-        get_repo_root() / "testarea" / "jfc" / "src" / "conventions" / "postprocess_tex.py"
-    )
+    preamble = get_jfc_data_dir() / "conventions" / "preamble.tex"
+    postprocess = get_jfc_data_dir() / "conventions" / "postprocess_tex.py"
 
     # Step 1: pandoc → .tex
     pandoc_cmd = [
