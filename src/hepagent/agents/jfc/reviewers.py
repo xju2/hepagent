@@ -379,5 +379,5 @@ def create_arbiter(
         name=f"JFC Arbiter (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource],
+        tools=[read_resource, execute_bash_command_with_confirmation],
     )
