@@ -5,12 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents import Agent
-from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import read_resource
+from hepagent.tools.common import read_file
 
 _JFC_SRC = get_jfc_data_dir()
 
@@ -166,7 +165,7 @@ def create_critical_reviewer(
         name=f"JFC Critical Reviewer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource],
+        tools=[read_file],
     )
 
 
@@ -207,7 +206,7 @@ def create_constructive_reviewer(
         name=f"JFC Constructive Reviewer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource],
+        tools=[read_file],
     )
 
 
@@ -220,8 +219,7 @@ def create_plot_validator(
     """
     Return a plot validator agent for the given phase.
 
-    Has execute_bash_command_with_confirmation to run lint_plots.py and
-    inspect figure files. RED FLAG findings are auto-Category A.
+    Has read_file to inspect figure-related files. RED FLAG findings are auto-Category A.
     """
     role_def = _read_agent_def("plot_validator")
     phase_dir = _PHASE_DIR_MAP.get(phase, "")
@@ -250,7 +248,7 @@ def create_plot_validator(
         name=f"JFC Plot Validator (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[execute_bash_command_with_confirmation],
+        tools=[read_file],
     )
 
 
@@ -286,7 +284,7 @@ def create_bibtex_validator(
         name=f"JFC BibTeX Validator (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[execute_bash_command_with_confirmation],
+        tools=[read_file],
     )
 
 
@@ -326,7 +324,7 @@ def create_rendering_reviewer(
         name="JFC Rendering Reviewer",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[execute_bash_command_with_confirmation],
+        tools=[read_file],
     )
 
 
@@ -379,5 +377,5 @@ def create_arbiter(
         name=f"JFC Arbiter (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource, execute_bash_command_with_confirmation],
+        tools=[read_file],
     )

@@ -163,3 +163,39 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
         except Exception as e:
             return f"Error checking SLURM job status: {e}"
         time.sleep(30)  # Check every 30 seconds
+
+
+@function_tool
+def read_file(file_path: str, start_line: int | None = None, end_line: int | None = None) -> str:
+    """Read and return the contents of a file, optionally restricted to a line range.
+
+    Args:
+        file_path: Absolute or relative path to the file to read.
+        start_line: First line to return, 1-indexed inclusive. Defaults to the first line.
+        end_line: Last line to return, 1-indexed inclusive. Defaults to the last line.
+
+    Returns:
+        str: The file contents (or selected lines), or an error message if unreadable.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return f"Error: file not found: {file_path}"
+    if not path.is_file():
+        return f"Error: not a file: {file_path}"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return f"Error reading {file_path}: {e}"
+
+    if start_line is None and end_line is None:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    total = len(lines)
+    lo = max(1, start_line or 1)
+    hi = min(total, end_line or total)
+    if lo > total:
+        return f"Error: start_line {lo} exceeds file length ({total} lines)"
+    selected = lines[lo - 1 : hi]
+    header = f"[Lines {lo}-{min(hi, total)} of {total}]\n"
+    return header + "".join(selected)
