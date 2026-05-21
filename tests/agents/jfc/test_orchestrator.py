@@ -161,6 +161,63 @@ async def test_run_phase_with_review_iterate_then_pass(state_dir):
 
 
 @pytest.mark.asyncio
+async def test_regression_cycle_reruns_affected_phases(state_dir):
+    """Test that _run_regression_cycle calls investigator and re-runs affected phases."""
+    from hepagent.agents.jfc.investigator import RegressionTicket
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        _run_regression_cycle,
+        save_state,
+    )
+    from hepagent.agents.jfc.review_gate import PhaseRegressionError, ReviewGateResult
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test_analysis",
+        analysis_type="measurement",
+        completed_phases=["1", "2", "3"],
+    )
+    save_state(state)
+
+    regress_result = ReviewGateResult(
+        verdict="REGRESS",
+        regression_origin_phase=2,
+        regression_symptom="wrong cut",
+    )
+    err = PhaseRegressionError("3", 2, "wrong cut", regress_result)
+
+    ticket = RegressionTicket(
+        detected_phase="3",
+        origin_phase=2,
+        symptom="wrong cut",
+        affected_phases=[2, 3],
+    )
+
+    rerun_log: list[str] = []
+
+    async def mock_run_phase(s, phase, cb=None):
+        rerun_log.append(str(phase))
+        s.completed_phases.append(str(phase))
+
+    with (
+        patch(
+            "hepagent.agents.jfc.orchestrator.run_investigator",
+            new_callable=AsyncMock,
+            return_value=ticket,
+        ),
+        patch(
+            "hepagent.agents.jfc.orchestrator.run_phase_with_review",
+            side_effect=mock_run_phase,
+        ),
+    ):
+        await _run_regression_cycle(state, err, None)
+
+    # Phases 2 and 3 removed from completed, then re-run in order
+    assert rerun_log == ["2", "3"]
+    assert "1" in state.completed_phases  # unaffected phase preserved
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_exceeded(state_dir):
     """Test that MaxIterationsExceeded is raised after max iterations."""
     from hepagent.agents.jfc.orchestrator import (

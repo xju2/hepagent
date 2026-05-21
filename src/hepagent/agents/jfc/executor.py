@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from agents import Agent
+from agents import Agent, WebSearchTool
 from hepagent.agent_helpers import update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
@@ -157,6 +157,7 @@ def create_phase_executor(
             read_resource,
             update_logbook,
             ask_user_for_info,
+            WebSearchTool(),
             *get_jfc_tools(),
         ],
     )

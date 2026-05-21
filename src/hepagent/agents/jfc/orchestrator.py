@@ -21,7 +21,13 @@ from hepagent.agents.jfc.executor import (
     create_typesetter,
 )
 from hepagent.agents.jfc.fixer import run_fixer
-from hepagent.agents.jfc.review_gate import PhaseEscalationError, ReviewGateResult, run_review_gate
+from hepagent.agents.jfc.investigator import RegressionTicket, run_investigator
+from hepagent.agents.jfc.review_gate import (
+    PhaseEscalationError,
+    PhaseRegressionError,
+    ReviewGateResult,
+    run_review_gate,
+)
 from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
 
 
@@ -201,6 +207,87 @@ async def _human_gate(state: JFCOrchestrationState, pdf_path: Path | None) -> bo
     return False
 
 
+async def _run_regression_cycle(
+    state: JFCOrchestrationState,
+    err: PhaseRegressionError,
+    progress_callback: Callable[[str, str], None] | None,
+) -> None:
+    """
+    Handle a regression verdict:
+    1. Run the investigator to produce REGRESSION_TICKET.md.
+    2. Determine which phases (origin + affected downstream) must be re-run.
+    3. Remove those phases from completed_phases and re-run them in order.
+    """
+    if progress_callback:
+        progress_callback(
+            str(err.detected_phase),
+            f"regression → investigating (origin Phase {err.origin_phase})",
+        )
+
+    ticket: RegressionTicket = await run_investigator(
+        detected_phase=err.detected_phase,
+        origin_phase=err.origin_phase,
+        symptom=err.symptom,
+        analysis_root=state.root,
+        model_provider=state.model_provider,
+        model_name=state.model_name,
+    )
+
+    # Normalize a raw phase value to the type used in PHASE_ORDER (int or str).
+    def _canonical(p: int | str) -> int | str:
+        try:
+            ip = int(p)
+            return ip if ip in PHASE_ORDER else str(p)
+        except (ValueError, TypeError):
+            return str(p)
+
+    phase_rank = {p: i for i, p in enumerate(PHASE_ORDER)}
+
+    # Build the ordered list of phases to re-run.
+    # Use the ticket's affected_phases if populated; fall back to origin..detected.
+    if ticket.affected_phases:
+        phases_to_rerun: list[int | str] = [_canonical(p) for p in ticket.affected_phases]
+    else:
+        origin_c = _canonical(ticket.origin_phase)
+        detected_c = _canonical(err.detected_phase)
+        origin_idx = phase_rank.get(origin_c, 0)
+        detected_idx = phase_rank.get(detected_c, len(PHASE_ORDER) - 1)
+        phases_to_rerun = list(PHASE_ORDER[origin_idx : detected_idx + 1])
+
+    # Ensure detected phase is included
+    detected_c = _canonical(err.detected_phase)
+    if detected_c not in phases_to_rerun:
+        phases_to_rerun.append(detected_c)
+
+    # Deduplicate and sort by canonical phase order
+    phases_to_rerun = sorted(
+        {_canonical(p) for p in phases_to_rerun}, key=lambda p: phase_rank.get(p, 999)
+    )
+
+    if progress_callback:
+        progress_callback(
+            str(err.detected_phase),
+            f"regression cycle: re-running phases {phases_to_rerun}",
+        )
+
+    # Remove affected phases from completed so they are re-run
+    for phase in phases_to_rerun:
+        key = str(phase)
+        if key in state.completed_phases:
+            state.completed_phases.remove(key)
+    save_state(state)
+
+    git_commit_phase(
+        state.root,
+        err.detected_phase,
+        f"regression detected (origin Phase {err.origin_phase}) — rewinding",
+    )
+
+    # Re-run each affected phase in order
+    for phase in phases_to_rerun:
+        await run_phase_with_review(state, phase, progress_callback)
+
+
 async def run_phase_with_review(
     state: JFCOrchestrationState,
     phase: int | str,
@@ -235,7 +322,7 @@ async def run_phase_with_review(
                 model_provider=state.model_provider,
                 model_name=state.model_name,
             )
-        except PhaseEscalationError:
+        except (PhaseEscalationError, PhaseRegressionError):
             save_state(state)
             raise
 
@@ -339,7 +426,13 @@ async def run_jfc_analysis(
             if not commitment_result.all_resolved:
                 raise CommitmentsNotResolved(commitment_result)
 
-        await run_phase_with_review(state, phase, progress_callback)
+        try:
+            await run_phase_with_review(state, phase, progress_callback)
+        except PhaseRegressionError as reg_err:
+            await _run_regression_cycle(state, reg_err, progress_callback)
+            # After the regression cycle the detected phase has been re-run and
+            # marked complete; skip to the next phase in the outer loop.
+            continue
 
         # Human gate after Phase 4b
         if phase == "4b":

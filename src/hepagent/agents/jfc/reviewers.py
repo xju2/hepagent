@@ -9,7 +9,7 @@ from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import read_file
+from hepagent.tools.common import read_file, write_review
 
 _JFC_SRC = get_jfc_data_dir()
 
@@ -47,7 +47,12 @@ List each finding with:
 - ...
 
 ## Verdict
-PASS | ITERATE | ESCALATE
+PASS | ITERATE | ESCALATE | REGRESS(M)
+
+Use REGRESS(M) only when a finding reveals that the root cause lives in an earlier Phase M
+that requires re-execution (e.g. a wrong selection cut from Phase 3 causing bad yields in Phase 4a).
+M must be a valid phase identifier: 1, 2, 3, 4a, 4b, 4c, or 5.
+Write the verdict as exactly: REGRESS(M) — e.g. REGRESS(3) or REGRESS(4a).
 """
 
 
@@ -120,7 +125,7 @@ def create_physics_reviewer(
         name=f"JFC Physics Reviewer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[],  # read-only; no tools needed
+        tools=[read_file, write_review],
     )
 
 
@@ -165,7 +170,7 @@ def create_critical_reviewer(
         name=f"JFC Critical Reviewer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )
 
 
@@ -206,7 +211,7 @@ def create_constructive_reviewer(
         name=f"JFC Constructive Reviewer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )
 
 
@@ -248,7 +253,7 @@ def create_plot_validator(
         name=f"JFC Plot Validator (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )
 
 
@@ -284,7 +289,7 @@ def create_bibtex_validator(
         name=f"JFC BibTeX Validator (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )
 
 
@@ -324,7 +329,7 @@ def create_rendering_reviewer(
         name="JFC Rendering Reviewer",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )
 
 
@@ -363,8 +368,14 @@ def create_arbiter(
                 f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
                 "# REVIEWER OUTPUTS\n\n" + "\n\n---\n\n".join(review_files) if review_files else "",
                 f"# OUTPUT\n\nWrite your adjudication to: `{review_dir}/ADJUDICATION.md`\n\n"
-                f"Produce a structured adjudication table then end with:\n"
-                f"PASS | ITERATE (list Category A items) | ESCALATE\n\n"
+                f"Produce a structured adjudication table then end with one of:\n"
+                f"  PASS\n"
+                f"  ITERATE — list Category A items that must be fixed in this phase\n"
+                f"  ESCALATE — human intervention required\n"
+                f"  REGRESS(M) — root cause lies in an earlier Phase M; re-execution of Phase M\n"
+                f"   is required before this phase can pass. M must be the exact phase identifier\n"
+                f"    (e.g. REGRESS(3) or REGRESS(4a)). Use this only when the fix cannot be made\n"
+                f"    within the current phase.\n\n"
                 f"At Phase 4a, additionally: before rendering verdict, verify all commitments "
                 f"in COMMITMENTS.md are either resolved or formally downscoped. "
                 f"Any pending commitment is automatically Category A.",
@@ -377,5 +388,5 @@ def create_arbiter(
         name=f"JFC Arbiter (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file],
+        tools=[read_file, write_review],
     )

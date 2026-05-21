@@ -199,3 +199,23 @@ def read_file(file_path: str, start_line: int | None = None, end_line: int | Non
     selected = lines[lo - 1 : hi]
     header = f"[Lines {lo}-{min(hi, total)} of {total}]\n"
     return header + "".join(selected)
+
+
+@function_tool
+def write_review(file_path: str, content: str) -> str:
+    """Write review content to a file, creating parent directories as needed.
+
+    Args:
+        file_path: Absolute or relative path to the output file.
+        content: The full text to write.
+
+    Returns:
+        str: Confirmation message or an error message if the write failed.
+    """
+    path = Path(file_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return f"Written {len(content)} characters to {file_path}"
+    except OSError as e:
+        return f"Error writing {file_path}: {e}"

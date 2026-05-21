@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, Runner
+from agents import Agent, Runner, WebSearchTool
 from hepagent.agent_helpers import update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
@@ -70,6 +70,7 @@ def _create_fixer_agent(
             execute_bash_command_with_confirmation,
             read_resource,
             update_logbook,
+            WebSearchTool(),
             *get_jfc_tools(),
         ],
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -30,12 +31,33 @@ class PhaseEscalationError(Exception):
         super().__init__(f"Phase {phase} review escalated to human: {result.category_a_findings}")
 
 
+class PhaseRegressionError(Exception):
+    """Raised when a review finding traces its root cause to an earlier phase."""
+
+    def __init__(
+        self,
+        detected_phase: int | str,
+        origin_phase: int | str,
+        symptom: str,
+        result: ReviewGateResult,
+    ):
+        self.detected_phase = detected_phase
+        self.origin_phase = origin_phase
+        self.symptom = symptom
+        self.result = result
+        super().__init__(
+            f"Phase {detected_phase} regression: root cause in Phase {origin_phase}: {symptom}"
+        )
+
+
 @dataclass
 class ReviewGateResult:
-    verdict: Literal["PASS", "ITERATE", "ESCALATE"]
+    verdict: Literal["PASS", "ITERATE", "ESCALATE", "REGRESS"]
     category_a_findings: list[str] = field(default_factory=list)
     category_b_findings: list[str] = field(default_factory=list)
     adjudication_path: Path | None = None
+    regression_origin_phase: int | str | None = None
+    regression_symptom: str = ""
 
 
 # Maps each phase to which reviewer factories to call
@@ -87,36 +109,55 @@ async def _run_single_reviewer(
     return result.final_output or ""
 
 
+def _parse_origin_phase(raw: str) -> int | str:
+    try:
+        return int(raw)
+    except ValueError:
+        return raw.lower()
+
+
 def _parse_verdict_from_adjudication(
     adjudication_path: Path,
 ) -> tuple[
-    Literal["PASS", "ITERATE", "ESCALATE"],
+    Literal["PASS", "ITERATE", "ESCALATE", "REGRESS"],
     list[str],
     list[str],
+    int | str | None,
 ]:
-    """Parse verdict and findings from ADJUDICATION.md."""
+    """Parse verdict and findings from ADJUDICATION.md.
+
+    Returns (verdict, cat_a_findings, cat_b_findings, regression_origin_phase).
+    regression_origin_phase is non-None only when verdict is REGRESS.
+    """
     content = read_md(adjudication_path)
     if not content:
-        return "ITERATE", ["Adjudication file is empty or missing"], []
+        return "ITERATE", ["Adjudication file is empty or missing"], [], None
+
+    # REGRESS(M) takes priority — checked before ESCALATE/PASS
+    regress_match = re.search(r"\bREGRESS\(([^)]+)\)", content, re.IGNORECASE)
+    if regress_match:
+        origin_phase = _parse_origin_phase(regress_match.group(1).strip())
+        cat_a: list[str] = re.findall(r"\|\s*A\s*\|[^|]*\|([^|]+)\|", content)
+        cat_a = [f.strip() for f in cat_a if f.strip()]
+        cat_b: list[str] = re.findall(r"\|\s*B\s*\|[^|]*\|([^|]+)\|", content)
+        cat_b = [f.strip() for f in cat_b if f.strip()]
+        return "REGRESS", cat_a, cat_b, origin_phase
 
     content_upper = content.upper()
-    if "ESCALATE" in content_upper.split()[-20:] or content_upper.rstrip().endswith("ESCALATE"):
-        verdict: Literal["PASS", "ITERATE", "ESCALATE"] = "ESCALATE"
-    elif "PASS" in content_upper.split()[-20:] or content_upper.rstrip().endswith("PASS"):
+    tail = content_upper.split()[-20:]
+    if "ESCALATE" in tail or content_upper.rstrip().endswith("ESCALATE"):
+        verdict: Literal["PASS", "ITERATE", "ESCALATE", "REGRESS"] = "ESCALATE"
+    elif "PASS" in tail or content_upper.rstrip().endswith("PASS"):
         verdict = "PASS"
     else:
         verdict = "ITERATE"
 
-    # Extract Category A and B findings from the adjudication table/text
-    import re
-
-    cat_a: list[str] = re.findall(r"\|\s*A\s*\|[^|]*\|([^|]+)\|", content)
+    cat_a = re.findall(r"\|\s*A\s*\|[^|]*\|([^|]+)\|", content)
     cat_a = [f.strip() for f in cat_a if f.strip()]
-
-    cat_b: list[str] = re.findall(r"\|\s*B\s*\|[^|]*\|([^|]+)\|", content)
+    cat_b = re.findall(r"\|\s*B\s*\|[^|]*\|([^|]+)\|", content)
     cat_b = [f.strip() for f in cat_b if f.strip()]
 
-    return verdict, cat_a, cat_b
+    return verdict, cat_a, cat_b, None
 
 
 async def run_review_gate(
@@ -163,6 +204,8 @@ async def run_review_gate(
 
     # If this phase uses an arbiter, run it after reviewers complete
     adjudication_path = review_dir / "ADJUDICATION.md"
+    regression_origin: int | str | None = None
+
     if phase in _ARBITER_PHASES:
         arbiter_agent = create_arbiter(phase, analysis_root, model_provider, model_name)
         arbiter_context = AgentContext(agent_name="jfc_arbiter", active_skill="jfc")
@@ -174,12 +217,18 @@ async def run_review_gate(
         )
         # Parse from the written file
         if adjudication_path.exists():
-            verdict, cat_a, cat_b = _parse_verdict_from_adjudication(adjudication_path)
+            verdict, cat_a, cat_b, regression_origin = _parse_verdict_from_adjudication(
+                adjudication_path
+            )
         else:
             # Fall back to parsing arbiter output
             output = arbiter_result.final_output or ""
             output_upper = output.upper()
-            if "ESCALATE" in output_upper:
+            regress_match = re.search(r"\bREGRESS\(([^)]+)\)", output, re.IGNORECASE)
+            if regress_match:
+                verdict = "REGRESS"
+                regression_origin = _parse_origin_phase(regress_match.group(1).strip())
+            elif "ESCALATE" in output_upper:
                 verdict = "ESCALATE"
             elif "PASS" in output_upper and "ITERATE" not in output_upper:
                 verdict = "PASS"
@@ -187,26 +236,38 @@ async def run_review_gate(
                 verdict = "ITERATE"
             cat_a, cat_b = [], []
     else:
-        # No arbiter: parse verdict from the single reviewer output
+        # No arbiter: parse verdict from reviewer outputs
         review_files = sorted(review_dir.glob("*.md"))
         verdict = "PASS"
         cat_a, cat_b = [], []
         for rf in review_files:
-            content = read_md(rf).upper()
-            if "ESCALATE" in content:
+            content = read_md(rf)
+            content_upper = content.upper()
+            regress_match = re.search(r"\bREGRESS\(([^)]+)\)", content, re.IGNORECASE)
+            if regress_match:
+                verdict = "REGRESS"
+                regression_origin = _parse_origin_phase(regress_match.group(1).strip())
+                break
+            if "ESCALATE" in content_upper:
                 verdict = "ESCALATE"
                 break
-            if "ITERATE" in content or "CATEGORY A" in content:
+            if "ITERATE" in content_upper or "CATEGORY A" in content_upper:
                 verdict = "ITERATE"
 
+    symptom = "; ".join(cat_a[:3]) if cat_a else "regression detected by reviewer"
     result = ReviewGateResult(
         verdict=verdict,
         category_a_findings=cat_a,
         category_b_findings=cat_b,
         adjudication_path=adjudication_path if adjudication_path.exists() else None,
+        regression_origin_phase=regression_origin,
+        regression_symptom=symptom,
     )
 
     if verdict == "ESCALATE":
         raise PhaseEscalationError(phase, result)
+
+    if verdict == "REGRESS":
+        raise PhaseRegressionError(phase, regression_origin, symptom, result)
 
     return result

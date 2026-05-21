@@ -93,8 +93,9 @@ def test_parse_verdict_pass(tmp_path):
 
     adj = tmp_path / "ADJUDICATION.md"
     adj.write_text("# Adjudication\n\nAll findings reviewed.\n\nPASS")
-    verdict, cat_a, cat_b = _parse_verdict_from_adjudication(adj)
+    verdict, cat_a, cat_b, origin = _parse_verdict_from_adjudication(adj)
     assert verdict == "PASS"
+    assert origin is None
 
 
 def test_parse_verdict_iterate(tmp_path):
@@ -102,5 +103,37 @@ def test_parse_verdict_iterate(tmp_path):
 
     adj = tmp_path / "ADJUDICATION.md"
     adj.write_text("# Adjudication\n\nCategory A findings found.\n\nITERATE")
-    verdict, cat_a, cat_b = _parse_verdict_from_adjudication(adj)
+    verdict, cat_a, cat_b, origin = _parse_verdict_from_adjudication(adj)
     assert verdict == "ITERATE"
+    assert origin is None
+
+
+def test_parse_verdict_regress_int(tmp_path):
+    from hepagent.agents.jfc.review_gate import _parse_verdict_from_adjudication
+
+    adj = tmp_path / "ADJUDICATION.md"
+    adj.write_text("# Adjudication\n\nRoot cause in Phase 3.\n\nREGRESS(3)")
+    verdict, cat_a, cat_b, origin = _parse_verdict_from_adjudication(adj)
+    assert verdict == "REGRESS"
+    assert origin == 3
+
+
+def test_parse_verdict_regress_subphase(tmp_path):
+    from hepagent.agents.jfc.review_gate import _parse_verdict_from_adjudication
+
+    adj = tmp_path / "ADJUDICATION.md"
+    adj.write_text("# Adjudication\n\nRoot cause in Phase 4a.\n\nREGRESS(4a)")
+    verdict, cat_a, cat_b, origin = _parse_verdict_from_adjudication(adj)
+    assert verdict == "REGRESS"
+    assert origin == "4a"
+
+
+def test_phase_regression_error():
+    from hepagent.agents.jfc.review_gate import PhaseRegressionError, ReviewGateResult
+
+    result = ReviewGateResult(verdict="REGRESS", regression_origin_phase=3)
+    err = PhaseRegressionError("4a", 3, "bad selection cut", result)
+    assert err.detected_phase == "4a"
+    assert err.origin_phase == 3
+    assert err.symptom == "bad selection cut"
+    assert err.result is result
