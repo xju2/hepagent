@@ -116,6 +116,7 @@ async def _run_executor(
     state: JFCOrchestrationState,
     phase: int | str,
     progress_callback: Callable[[str, str], None] | None,
+    max_turns: int = 50,
 ) -> None:
     """Run the executor agent for a phase."""
     if progress_callback:
@@ -133,7 +134,7 @@ async def _run_executor(
         f"Read your system prompt for full instructions. "
         f"Produce the primary artifact to the outputs/ directory."
     )
-    await Runner.run(executor, task, context=context, max_turns=50)
+    await Runner.run(executor, task, context=context, max_turns=max_turns)
 
     if progress_callback:
         progress_callback(str(phase), "executor complete")
@@ -143,6 +144,7 @@ async def _run_note_writer_and_typesetter(
     state: JFCOrchestrationState,
     phase: str,
     progress_callback: Callable[[str, str], None] | None,
+    max_turns: int = 30,
 ) -> Path | None:
     """Run note writer and typesetter for AN phases."""
     if progress_callback:
@@ -160,7 +162,7 @@ async def _run_note_writer_and_typesetter(
         f"Write the analysis note for Phase {phase} to {an_path}. "
         f"Read all available phase artifacts from {state.root}."
     )
-    await Runner.run(note_writer, task, context=context, max_turns=30)
+    await Runner.run(note_writer, task, context=context, max_turns=max_turns)
 
     if progress_callback:
         progress_callback(str(phase), "typesetting analysis note")
@@ -176,7 +178,7 @@ async def _run_note_writer_and_typesetter(
         f"Compile the analysis note at {an_path} to PDF at {pdf_path}. "
         f"Run pandoc → postprocess_tex.py → tectonic. Read and verify the PDF output."
     )
-    await Runner.run(typesetter, type_task, context=type_context, max_turns=20)
+    await Runner.run(typesetter, type_task, context=type_context, max_turns=max_turns)
 
     return pdf_path if pdf_path.exists() else None
 
@@ -211,6 +213,7 @@ async def _run_regression_cycle(
     state: JFCOrchestrationState,
     err: PhaseRegressionError,
     progress_callback: Callable[[str, str], None] | None,
+    max_turns: int | None = None,
 ) -> None:
     """
     Handle a regression verdict:
@@ -224,6 +227,7 @@ async def _run_regression_cycle(
             f"regression → investigating (origin Phase {err.origin_phase})",
         )
 
+    investigator_turns = max_turns if max_turns is not None else 20
     ticket: RegressionTicket = await run_investigator(
         detected_phase=err.detected_phase,
         origin_phase=err.origin_phase,
@@ -231,6 +235,7 @@ async def _run_regression_cycle(
         analysis_root=state.root,
         model_provider=state.model_provider,
         model_name=state.model_name,
+        max_turns=investigator_turns,
     )
 
     # Normalize a raw phase value to the type used in PHASE_ORDER (int or str).
@@ -285,13 +290,14 @@ async def _run_regression_cycle(
 
     # Re-run each affected phase in order
     for phase in phases_to_rerun:
-        await run_phase_with_review(state, phase, progress_callback)
+        await run_phase_with_review(state, phase, progress_callback, max_turns=max_turns)
 
 
 async def run_phase_with_review(
     state: JFCOrchestrationState,
     phase: int | str,
     progress_callback: Callable[[str, str], None] | None = None,
+    max_turns: int | None = None,
 ) -> None:
     """
     Execute a single phase including executor, note writer (if AN phase),
@@ -305,22 +311,28 @@ async def run_phase_with_review(
         save_state(state)
 
         # Executor
-        await _run_executor(state, phase, progress_callback)
+        executor_turns = max_turns if max_turns is not None else 50
+        await _run_executor(state, phase, progress_callback, max_turns=executor_turns)
 
         # Note writer + typesetter for AN phases
+        writer_turns = max_turns if max_turns is not None else 30
         if str(phase) in AN_PHASES:
-            await _run_note_writer_and_typesetter(state, str(phase), progress_callback)
+            await _run_note_writer_and_typesetter(
+                state, str(phase), progress_callback, max_turns=writer_turns
+            )
 
         if progress_callback:
             progress_callback(str(phase), f"review gate (iteration {iteration + 1})")
 
         # Review gate
+        reviewer_turns = max_turns if max_turns is not None else 20
         try:
             result: ReviewGateResult = await run_review_gate(
                 phase,
                 state.root,
                 model_provider=state.model_provider,
                 model_name=state.model_name,
+                max_turns=reviewer_turns,
             )
         except (PhaseEscalationError, PhaseRegressionError):
             save_state(state)
@@ -338,16 +350,20 @@ async def run_phase_with_review(
             if progress_callback:
                 progress_callback(str(phase), f"ITERATE (iteration {iteration + 1})")
             all_findings = result.category_a_findings + result.category_b_findings
+            fixer_turns = max_turns if max_turns is not None else 30
             await run_fixer(
                 phase,
                 state.root,
                 all_findings,
                 model_provider=state.model_provider,
                 model_name=state.model_name,
+                max_turns=fixer_turns,
             )
             # If it's an AN phase, re-typeset after fixing
             if str(phase) in AN_PHASES:
-                await _run_note_writer_and_typesetter(state, str(phase), progress_callback)
+                await _run_note_writer_and_typesetter(
+                    state, str(phase), progress_callback, max_turns=writer_turns
+                )
 
     raise MaxIterationsExceeded(phase, state.max_iterations_per_phase)
 
@@ -361,6 +377,7 @@ async def run_jfc_analysis(
     model_name: str | None = None,
     start_from_phase: int | str = 1,
     max_iterations_per_phase: int = 3,
+    max_turns: int | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
 ) -> Path:
     """
@@ -427,9 +444,9 @@ async def run_jfc_analysis(
                 raise CommitmentsNotResolved(commitment_result)
 
         try:
-            await run_phase_with_review(state, phase, progress_callback)
+            await run_phase_with_review(state, phase, progress_callback, max_turns=max_turns)
         except PhaseRegressionError as reg_err:
-            await _run_regression_cycle(state, reg_err, progress_callback)
+            await _run_regression_cycle(state, reg_err, progress_callback, max_turns=max_turns)
             # After the regression cycle the detected phase has been re-run and
             # marked complete; skip to the next phase in the outer loop.
             continue

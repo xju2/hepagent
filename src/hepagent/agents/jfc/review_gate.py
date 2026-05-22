@@ -81,6 +81,7 @@ async def _run_single_reviewer(
     model_provider: str,
     model_name: str | None,
     context: AgentContext,
+    max_turns: int = 20,
 ) -> str:
     """Run a single reviewer agent and return its output."""
     factory_map = {
@@ -105,7 +106,7 @@ async def _run_single_reviewer(
         f"Review the Phase {phase} artifact for the JFC analysis. "
         f"Write your findings to the review/ directory as instructed in your system prompt."
     )
-    result = await Runner.run(agent, task_prompt, context=context, max_turns=20)
+    result = await Runner.run(agent, task_prompt, context=context, max_turns=max_turns)
     return result.final_output or ""
 
 
@@ -165,6 +166,7 @@ async def run_review_gate(
     analysis_root: Path,
     model_provider: str = "cborg",
     model_name: str | None = None,
+    max_turns: int = 20,
 ) -> ReviewGateResult:
     """
     Run all reviewers for the given phase concurrently, then run arbiter.
@@ -197,7 +199,9 @@ async def run_review_gate(
 
     # Run all reviewers concurrently
     tasks = [
-        _run_single_reviewer(name, phase, analysis_root, model_provider, model_name, context)
+        _run_single_reviewer(
+            name, phase, analysis_root, model_provider, model_name, context, max_turns
+        )
         for name in reviewer_names
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -213,7 +217,7 @@ async def run_review_gate(
             arbiter_agent,
             f"Adjudicate the Phase {phase} review. Write ADJUDICATION.md to {review_dir}/.",
             context=arbiter_context,
-            max_turns=20,
+            max_turns=max_turns,
         )
         # Parse from the written file
         if adjudication_path.exists():

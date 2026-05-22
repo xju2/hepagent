@@ -70,6 +70,7 @@ async def run_investigator(
     analysis_root: Path,
     model_provider: str = "cborg",
     model_name: str | None = None,
+    max_turns: int = 20,
 ) -> RegressionTicket:
     """
     Investigate a regression finding and produce a REGRESSION_TICKET.md.
@@ -145,7 +146,7 @@ async def run_investigator(
         f"Trace through the phase artifacts to confirm the origin and identify all affected "
         f"downstream phases. Write REGRESSION_TICKET.md to {ticket_path}."
     )
-    result = await Runner.run(agent, task, context=context, max_turns=20)
+    result = await Runner.run(agent, task, context=context, max_turns=max_turns)
 
     # Parse the written ticket for structured data
     parsed_origin, affected_phases = (

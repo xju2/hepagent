@@ -405,6 +405,12 @@ def jfc_run(
     max_iterations: int = typer.Option(
         3, "--max-iterations", help="Max review iterations per phase."
     ),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turns",
+        help="Max turns per agent call. "
+        "Defaults: executor=50, note_writer/fixer=30, reviewer/investigator/typesetter=20.",
+    ),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
 ) -> None:
     """Start a new JFC analysis from scratch."""
@@ -439,6 +445,7 @@ def jfc_run(
                 model_provider=model_provider,
                 model_name=model_name,
                 max_iterations_per_phase=max_iterations,
+                max_turns=max_turns,
                 progress_callback=_cb,
             )
         )
@@ -464,6 +471,12 @@ def jfc_resume(
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
     model: str | None = typer.Option(None, "--model", help="Model override."),
     max_iterations: int = typer.Option(3, "--max-iterations"),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turns",
+        help="Max turns per agent call. "
+        "Defaults: executor=50, note_writer/fixer=30, reviewer/investigator/typesetter=20.",
+    ),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
 ) -> None:
     """Resume an interrupted JFC analysis from a specific phase."""
@@ -515,6 +528,7 @@ def jfc_resume(
                 model_provider=model_provider,
                 model_name=model_name,
                 start_from_phase=start_phase,
+                max_turns=max_turns,
                 max_iterations_per_phase=max_iterations,
                 progress_callback=_cb,
             )

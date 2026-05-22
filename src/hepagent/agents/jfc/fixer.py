@@ -82,6 +82,7 @@ async def run_fixer(
     findings: list[str],
     model_provider: str = "cborg",
     model_name: str | None = None,
+    max_turns: int = 30,
 ) -> None:
     """
     Spawn a fixer agent to address Category A/B findings in-place.
@@ -104,4 +105,4 @@ async def run_fixer(
         f"{findings_summary}\n\n"
         f"Read the adjudication file and current artifact, then make minimum effective changes."
     )
-    await Runner.run(agent, task, context=context, max_turns=30)
+    await Runner.run(agent, task, context=context, max_turns=max_turns)
