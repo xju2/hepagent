@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from agents import Agent, WebSearchTool
+from agents import Agent
 from hepagent.agent_helpers import update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import ask_user_for_info, read_resource
+from hepagent.tools.common import ask_user_for_info, read_resource, web_search
 from hepagent.tools.jfc import get_jfc_tools
 
 _JFC_SRC = get_jfc_data_dir()
@@ -157,7 +157,7 @@ def create_phase_executor(
             read_resource,
             update_logbook,
             ask_user_for_info,
-            WebSearchTool(),
+            web_search,
             *get_jfc_tools(),
         ],
     )

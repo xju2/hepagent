@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, Runner, WebSearchTool
+from agents import Agent, Runner
 from hepagent.agent_helpers import update_logbook
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import read_resource
+from hepagent.tools.common import read_resource, web_search
 from hepagent.tools.jfc import get_jfc_tools
 
 _JFC_SRC = get_jfc_data_dir()
@@ -70,7 +70,7 @@ def _create_fixer_agent(
             execute_bash_command_with_confirmation,
             read_resource,
             update_logbook,
-            WebSearchTool(),
+            web_search,
             *get_jfc_tools(),
         ],
     )

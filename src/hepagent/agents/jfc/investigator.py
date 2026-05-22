@@ -6,13 +6,13 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agents import Agent, Runner, WebSearchTool
+from agents import Agent, Runner
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
-from hepagent.tools.common import read_file, write_review
+from hepagent.tools.common import read_file, web_search, write_review
 from hepagent.tools.jfc import get_jfc_tools
 
 _JFC_SRC = get_jfc_data_dir()
@@ -132,7 +132,7 @@ async def run_investigator(
             execute_bash_command_with_confirmation,
             read_file,
             write_review,
-            WebSearchTool(),
+            web_search,
             *get_jfc_tools(),
         ],
     )
