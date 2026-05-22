@@ -134,8 +134,13 @@ def _parse_verdict_from_adjudication(
     if not content:
         return "ITERATE", ["Adjudication file is empty or missing"], [], None
 
-    # REGRESS(M) takes priority — checked before ESCALATE/PASS
-    regress_match = re.search(r"\bREGRESS\(([^)]+)\)", content, re.IGNORECASE)
+    content_upper = content.upper()
+    tail = content_upper.split()[-20:]
+    tail_text = " ".join(tail)
+
+    # REGRESS(M) is only a verdict when it appears in the tail of the document,
+    # not when mentioned in prose (e.g. "no trigger would require REGRESS(M)").
+    regress_match = re.search(r"\bREGRESS\(([^)]+)\)", tail_text, re.IGNORECASE)
     if regress_match:
         origin_phase = _parse_origin_phase(regress_match.group(1).strip())
         cat_a: list[str] = re.findall(r"\|\s*A\s*\|[^|]*\|([^|]+)\|", content)
@@ -144,8 +149,6 @@ def _parse_verdict_from_adjudication(
         cat_b = [f.strip() for f in cat_b if f.strip()]
         return "REGRESS", cat_a, cat_b, origin_phase
 
-    content_upper = content.upper()
-    tail = content_upper.split()[-20:]
     if "ESCALATE" in tail or content_upper.rstrip().endswith("ESCALATE"):
         verdict: Literal["PASS", "ITERATE", "ESCALATE", "REGRESS"] = "ESCALATE"
     elif "PASS" in tail or content_upper.rstrip().endswith("PASS"):
