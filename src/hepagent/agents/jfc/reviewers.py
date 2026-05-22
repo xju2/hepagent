@@ -56,6 +56,21 @@ Write the verdict as exactly: REGRESS(M) — e.g. REGRESS(3) or REGRESS(4a).
 """
 
 
+def _make_agent(
+    name: str,
+    sections: list[str],
+    model_provider: str,
+    model_name: str | None,
+) -> Agent[AgentContext]:
+    instructions = "\n\n".join(filter(None, sections))
+    return Agent[AgentContext](
+        name=name,
+        instructions=instructions,
+        model=get_model_provider(model_provider=model_provider, model_name=model_name),
+        tools=[read_file, write_review],
+    )
+
+
 def _read_agent_def(name: str) -> str:
     return read_md(_JFC_SRC / "agents" / f"{name}.md")
 
@@ -108,24 +123,17 @@ def create_physics_reviewer(
     phase_dir = _PHASE_DIR_MAP.get(phase, "")
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# PHYSICS REVIEWER ROLE\n\n{role_def}" if role_def else "",
-                f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
-                f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
-                f"# OUTPUT\n\nWrite your review to: `{review_dir}/physics_review.md`",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
+    return _make_agent(
         name=f"JFC Physics Reviewer (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+        sections=[
+            f"# PHYSICS REVIEWER ROLE\n\n{role_def}" if role_def else "",
+            f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
+            f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
+            f"# OUTPUT\n\nWrite your review to: `{review_dir}/physics_review.md`",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -150,27 +158,20 @@ def create_critical_reviewer(
     phase_dir = _PHASE_DIR_MAP.get(phase, "")
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# CRITICAL REVIEWER ROLE\n\n{role_def}" if role_def else "",
-                f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
-                f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:4000]}" if review_sec else "",
-                f"# PHASE SPECIFICATION (§3)\n\n{phase_sec[:3000]}" if phase_sec else "",
-                f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
-                f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
-                f"# OUTPUT\n\nWrite your review to: `{review_dir}/critical_review.md`",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
+    return _make_agent(
         name=f"JFC Critical Reviewer (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+        sections=[
+            f"# CRITICAL REVIEWER ROLE\n\n{role_def}" if role_def else "",
+            f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
+            f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:4000]}" if review_sec else "",
+            f"# PHASE SPECIFICATION (§3)\n\n{phase_sec[:3000]}" if phase_sec else "",
+            f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
+            f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
+            f"# OUTPUT\n\nWrite your review to: `{review_dir}/critical_review.md`",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -193,25 +194,18 @@ def create_constructive_reviewer(
     phase_dir = _PHASE_DIR_MAP.get(phase, "")
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# CONSTRUCTIVE REVIEWER ROLE\n\n{role_def}" if role_def else "",
-                f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
-                f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:4000]}" if review_sec else "",
-                f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
-                f"# OUTPUT\n\nWrite your review to: `{review_dir}/constructive_review.md`",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
+    return _make_agent(
         name=f"JFC Constructive Reviewer (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+        sections=[
+            f"# CONSTRUCTIVE REVIEWER ROLE\n\n{role_def}" if role_def else "",
+            f"# PHYSICS PROMPT\n\n{prompt}" if prompt else "",
+            f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:4000]}" if review_sec else "",
+            f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
+            f"# OUTPUT\n\nWrite your review to: `{review_dir}/constructive_review.md`",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -232,28 +226,23 @@ def create_plot_validator(
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
     lint_script = _JFC_SRC / "conventions" / "lint_plots.py"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# PLOT VALIDATOR ROLE\n\n{role_def}" if role_def else "",
-                f"# FIGURES DIRECTORY\n\n`{figures_dir}`" if figures_dir else "",
+    return _make_agent(
+        name=f"JFC Plot Validator (Phase {phase})",
+        sections=[
+            f"# PLOT VALIDATOR ROLE\n\n{role_def}" if role_def else "",
+            f"# FIGURES DIRECTORY\n\n`{figures_dir}`" if figures_dir else "",
+            (
                 f"# LINT SCRIPT\n\nRun: `python {lint_script} {figures_dir}`\n"
                 f"Any RED FLAG line in the output is automatically Category A."
                 if lint_script.exists()
-                else "",
-                f"# OUTPUT\n\nWrite your validation to: `{review_dir}/plot_validation.md`\n"
-                f"List each figure with its status. 'Figures look fine' is not acceptable.",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
-        name=f"JFC Plot Validator (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+                else ""
+            ),
+            f"# OUTPUT\n\nWrite your validation to: `{review_dir}/plot_validation.md`\n"
+            f"List each figure with its status. 'Figures look fine' is not acceptable.",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -273,23 +262,16 @@ def create_bibtex_validator(
     bib_path = analysis_root / "phase5_documentation" / "outputs" / "references.bib"
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# BIBTEX VALIDATOR ROLE\n\n{role_def}" if role_def else "",
-                f"# REFERENCES FILE\n\n`{bib_path}`",
-                f"# OUTPUT\n\nWrite your validation to: `{review_dir}/bibtex_validation.md`",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
+    return _make_agent(
         name=f"JFC BibTeX Validator (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+        sections=[
+            f"# BIBTEX VALIDATOR ROLE\n\n{role_def}" if role_def else "",
+            f"# REFERENCES FILE\n\n`{bib_path}`",
+            f"# OUTPUT\n\nWrite your validation to: `{review_dir}/bibtex_validation.md`",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -307,29 +289,24 @@ def create_rendering_reviewer(
     review_sec_excerpt = _read_methodology("06-review.md")
     review_dir = analysis_root / "phase5_documentation" / "review"
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# RENDERING REVIEWER ROLE\n\n{role_def}" if role_def else "",
+    return _make_agent(
+        name="JFC Rendering Reviewer",
+        sections=[
+            f"# RENDERING REVIEWER ROLE\n\n{role_def}" if role_def else "",
+            (
                 f"# RENDERING CHECKLIST (from §6.4.3)\n\n{review_sec_excerpt[2000:4000]}"
                 if review_sec_excerpt
-                else "",
-                f"# OUTPUT\n\nWrite your review to: `{review_dir}/rendering_review.md`\n\n"
-                f"Check: zero unresolved cross-references, TOC pages correct,"
-                f" no raw LaTeX visible, title symbols render correctly,"
-                f" no $\\pm$ with dollar signs in body text,"
-                f" all composite figure panels legible.",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
-        name="JFC Rendering Reviewer",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+                else ""
+            ),
+            f"# OUTPUT\n\nWrite your review to: `{review_dir}/rendering_review.md`\n\n"
+            f"Check: zero unresolved cross-references, TOC pages correct,"
+            f" no raw LaTeX visible, title symbols render correctly,"
+            f" no $\\pm$ with dollar signs in body text,"
+            f" all composite figure panels legible.",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
 
 
@@ -359,34 +336,27 @@ def create_arbiter(
             if content:
                 review_files.append(f"### {review_file.name}\n\n{content[:2000]}")
 
-    instructions = "\n\n".join(
-        filter(
-            None,
-            [
-                f"# ARBITER ROLE\n\n{role_def}" if role_def else "",
-                f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:5000]}" if review_sec else "",
-                f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
-                "# REVIEWER OUTPUTS\n\n" + "\n\n---\n\n".join(review_files) if review_files else "",
-                f"# OUTPUT\n\nWrite your adjudication to: `{review_dir}/ADJUDICATION.md`\n\n"
-                f"Produce a structured adjudication table then end with one of:\n"
-                f"  PASS\n"
-                f"  ITERATE — list Category A items that must be fixed in this phase\n"
-                f"  ESCALATE — human intervention required\n"
-                f"  REGRESS(M) — root cause lies in an earlier Phase M; re-execution of Phase M\n"
-                f"   is required before this phase can pass. M must be the exact phase identifier\n"
-                f"    (e.g. REGRESS(3) or REGRESS(4a)). Use this only when the fix cannot be made\n"
-                f"    within the current phase.\n\n"
-                f"At Phase 4a, additionally: before rendering verdict, verify all commitments "
-                f"in COMMITMENTS.md are either resolved or formally downscoped. "
-                f"Any pending commitment is automatically Category A.",
-                _EVIDENCE_MANDATE,
-            ],
-        )
-    )
-
-    return Agent[AgentContext](
+    return _make_agent(
         name=f"JFC Arbiter (Phase {phase})",
-        instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_file, write_review],
+        sections=[
+            f"# ARBITER ROLE\n\n{role_def}" if role_def else "",
+            f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:5000]}" if review_sec else "",
+            f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
+            "# REVIEWER OUTPUTS\n\n" + "\n\n---\n\n".join(review_files) if review_files else "",
+            f"# OUTPUT\n\nWrite your adjudication to: `{review_dir}/ADJUDICATION.md`\n\n"
+            f"Produce a structured adjudication table then end with one of:\n"
+            f"  PASS\n"
+            f"  ITERATE — list Category A items that must be fixed in this phase\n"
+            f"  ESCALATE — human intervention required\n"
+            f"  REGRESS(M) — root cause lies in an earlier Phase M; re-execution of Phase M\n"
+            f"   is required before this phase can pass. M must be the exact phase identifier\n"
+            f"    (e.g. REGRESS(3) or REGRESS(4a)). Use this only when the fix cannot be made\n"
+            f"    within the current phase.\n\n"
+            f"At Phase 4a, additionally: before rendering verdict, verify all commitments "
+            f"in COMMITMENTS.md are either resolved or formally downscoped. "
+            f"Any pending commitment is automatically Category A.",
+            _EVIDENCE_MANDATE,
+        ],
+        model_provider=model_provider,
+        model_name=model_name,
     )
