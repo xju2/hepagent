@@ -172,6 +172,10 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
 def read_file(file_path: str, start_line: int | None = None, end_line: int | None = None) -> str:
     """Read and return the contents of a file, optionally restricted to a line range.
 
+    Prefer calling with no start_line/end_line to read the entire file in one call.
+    Only use start_line/end_line when you already know the specific region you need.
+    Do NOT paginate through a file with repeated calls — read it whole instead.
+
     Args:
         file_path: Absolute or relative path to the file to read.
         start_line: First line to return, 1-indexed inclusive. Defaults to the first line.
