@@ -118,7 +118,9 @@ async def test_run_phase_with_review_passes(state_dir):
         await run_phase_with_review(state, 1)
 
         mock_exec.assert_called_once()
-        mock_review.assert_called_once_with(1, state_dir, model_provider="cborg", model_name=None)
+        mock_review.assert_called_once_with(
+            1, state_dir, model_provider="cborg", model_name=None, max_turns=20
+        )
         assert "1" in state.completed_phases
 
 
@@ -195,7 +197,7 @@ async def test_regression_cycle_reruns_affected_phases(state_dir):
 
     rerun_log: list[str] = []
 
-    async def mock_run_phase(s, phase, cb=None):
+    async def mock_run_phase(s, phase, cb=None, **kwargs):
         rerun_log.append(str(phase))
         s.completed_phases.append(str(phase))
 

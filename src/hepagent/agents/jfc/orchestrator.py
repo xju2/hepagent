@@ -118,6 +118,7 @@ async def _run_executor(
     phase: int | str,
     progress_callback: Callable[[str, str], None] | None,
     max_turns: int = 50,
+    codesign_feedback: str | None = None,
 ) -> None:
     """Run the executor agent for a phase."""
     if progress_callback:
@@ -128,6 +129,7 @@ async def _run_executor(
         state.root,
         model_provider=state.model_provider,
         model_name=state.model_name,
+        codesign_feedback=codesign_feedback,
     )
     context = AgentContext(agent_name="jfc_executor", active_skill="jfc")
     task = (
@@ -299,6 +301,7 @@ async def run_phase_with_review(
     phase: int | str,
     progress_callback: Callable[[str, str], None] | None = None,
     max_turns: int | None = None,
+    codesign_feedback: str | None = None,
 ) -> None:
     """
     Execute a single phase including executor, note writer (if AN phase),
@@ -311,9 +314,12 @@ async def run_phase_with_review(
         state.phase_iterations[phase_key] = iteration + 1
         save_state(state)
 
-        # Executor
+        # Executor (codesign_feedback only injected on first iteration; fixer handles later ones)
         executor_turns = max_turns if max_turns is not None else 50
-        await _run_executor(state, phase, progress_callback, max_turns=executor_turns)
+        feedback = codesign_feedback if iteration == iterations else None
+        await _run_executor(
+            state, phase, progress_callback, max_turns=executor_turns, codesign_feedback=feedback
+        )
 
         # Note writer + typesetter for AN phases
         writer_turns = max_turns if max_turns is not None else 30
@@ -467,11 +473,23 @@ async def run_jfc_analysis(
             )
             if codesign_verdict == "REVISE":
                 if progress_callback:
-                    progress_callback("1", "codesign REVISE — re-running Phase 1")
+                    progress_callback(
+                        "1", "codesign REVISE — re-running Phase 1 with human feedback"
+                    )
                 if "1" in state.completed_phases:
                     state.completed_phases.remove("1")
                 save_state(state)
-                await run_phase_with_review(state, 1, progress_callback, max_turns=max_turns)
+                feedback_path = analysis_root / "phase1_strategy" / "codesign" / "HUMAN_FEEDBACK.md"
+                feedback_content = (
+                    feedback_path.read_text(encoding="utf-8") if feedback_path.exists() else None
+                )
+                await run_phase_with_review(
+                    state,
+                    1,
+                    progress_callback,
+                    max_turns=max_turns,
+                    codesign_feedback=feedback_content,
+                )
 
         # Human gate after Phase 4b
         if phase == "4b":

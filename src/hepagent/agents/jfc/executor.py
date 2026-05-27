@@ -82,6 +82,7 @@ def _assemble_executor_prompt(
     phase_dir: str,
     artifact_name: str,
     template_name: str,
+    codesign_feedback: str | None = None,
 ) -> str:
     parts = []
 
@@ -119,6 +120,26 @@ def _assemble_executor_prompt(
         f"Analysis root: `{analysis_root}/`"
     )
 
+    # 6. Codesign human feedback (only present on revision runs)
+    if codesign_feedback:
+        parts.append(
+            "# HUMAN FEEDBACK FROM CODESIGN REVIEW\n\n"
+            "The analysis strategy was reviewed by physicists and open concerns were recorded. "
+            "For each OPEN item below, investigate it using all tools available to you "
+            "(web_search, execute_bash_command_with_confirmation, read_resource, read_file). "
+            "Determine whether the concern can be resolved with existing resources "
+            "(e.g. a published systematic uncertainty table, a simulation configuration file, "
+            "or a data release note). Then do one of the following:\n\n"
+            "- If the concern **can** be resolved: update the strategy to incorporate the "
+            "relevant information and cite the source.\n"
+            "- If the concern **cannot** be resolved because the resource genuinely does not "
+            "exist (e.g. the MC generator provides no systematic uncertainty breakdown): "
+            "document it explicitly as a known limitation in the strategy, state the reason, "
+            "and propose a mitigation or alternative approach.\n\n"
+            "Do not leave any OPEN item unaddressed. Do not remove content that was already "
+            "correct — only revise the sections indicated by the feedback.\n\n" + codesign_feedback
+        )
+
     return "\n\n".join(parts)
 
 
@@ -127,6 +148,7 @@ def create_phase_executor(
     analysis_root: Path,
     model_provider: str = "cborg",
     model_name: str | None = None,
+    codesign_feedback: str | None = None,
 ) -> Agent[AgentContext]:
     """
     Return a role agent configured to execute a specific JFC phase.
@@ -139,13 +161,20 @@ def create_phase_executor(
         analysis_root: Path to the analysis root directory.
         model_provider: Model provider name (default "cborg").
         model_name: Specific model name (default: provider's default).
+        codesign_feedback: Human feedback from the codesign gate (Phase 1 revisions only).
+            When provided, appended as a mandatory revision directive to the executor prompt.
     """
     if phase not in _PHASE_NAME_MAP:
         raise ValueError(f"Unknown phase: {phase}. Valid: {list(_PHASE_NAME_MAP)}")
 
     phase_dir, template_name, artifact_name = _PHASE_NAME_MAP[phase]
     instructions = _assemble_executor_prompt(
-        phase, analysis_root, phase_dir, artifact_name, template_name
+        phase,
+        analysis_root,
+        phase_dir,
+        artifact_name,
+        template_name,
+        codesign_feedback=codesign_feedback,
     )
 
     return Agent[AgentContext](

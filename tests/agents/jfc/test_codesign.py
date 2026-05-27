@@ -30,6 +30,7 @@ def test_create_codesign_agent(analysis_root):
     assert "read_file" in tool_names
     assert "write_review" in tool_names
     assert "ask_user_for_info" in tool_names
+    assert "web_search" not in tool_names
 
 
 def test_create_codesign_agent_instructions_contain_paths(analysis_root):
@@ -322,6 +323,25 @@ async def test_orchestrator_skips_codesign_gate_when_disabled(tmp_path):
             pass
 
     assert not codesign_called, "run_codesign_gate was called despite codesign=False"
+
+
+def test_executor_receives_codesign_feedback_on_revise(analysis_root):
+    """Codesign feedback must appear in the Phase 1 executor prompt on revision runs."""
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    feedback = "## Open Items\n- OPEN: Why template fit instead of unbinned likelihood?\n"
+    agent = create_phase_executor(1, analysis_root, codesign_feedback=feedback)
+    assert "HUMAN FEEDBACK FROM CODESIGN REVIEW" in agent.instructions
+    assert "unbinned likelihood" in agent.instructions
+    assert "known limitation" in agent.instructions
+
+
+def test_executor_no_codesign_feedback_by_default(analysis_root):
+    """Without codesign feedback, the executor prompt must not contain the feedback section."""
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    agent = create_phase_executor(1, analysis_root)
+    assert "HUMAN FEEDBACK FROM CODESIGN REVIEW" not in agent.instructions
 
 
 def test_jfc_run_help_shows_codesign():
