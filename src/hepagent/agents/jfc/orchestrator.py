@@ -11,6 +11,7 @@ from typing import Literal
 
 from agents import Runner
 from hepagent.agents.common import AgentContext
+from hepagent.agents.jfc.codesign import run_codesign_gate
 from hepagent.agents.jfc.commitment_checker import (
     CommitmentsNotResolved,
     check_phase1_commitments,
@@ -379,6 +380,7 @@ async def run_jfc_analysis(
     max_iterations_per_phase: int = 3,
     max_turns: int | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
+    codesign: bool = False,
 ) -> Path:
     """
     Orchestrate a complete JFC analysis from scaffold to published note.
@@ -395,6 +397,9 @@ async def run_jfc_analysis(
         start_from_phase: Phase to start from (for resuming). 1 = start fresh.
         max_iterations_per_phase: Maximum review iterations before raising MaxIterationsExceeded.
         progress_callback: Optional callback(phase_name, status_message) for progress reporting.
+        codesign: If True, run the codesign gate after Phase 1 PASS: generate a human-readable
+            strategy summary, facilitate interactive human review, then re-adjudicate with the
+            arbiter. If verdict is REVISE, Phase 1 is re-run before proceeding to Phase 2.
     """
     analysis_root = Path(base_dir).resolve() / analysis_name
 
@@ -450,6 +455,23 @@ async def run_jfc_analysis(
             # After the regression cycle the detected phase has been re-run and
             # marked complete; skip to the next phase in the outer loop.
             continue
+
+        # Codesign gate after Phase 1 (one-time human review of the strategy)
+        if phase == 1 and codesign:
+            codesign_verdict = await run_codesign_gate(
+                analysis_root,
+                model_provider=state.model_provider,
+                model_name=state.model_name,
+                max_turns=max_turns,
+                progress_callback=progress_callback,
+            )
+            if codesign_verdict == "REVISE":
+                if progress_callback:
+                    progress_callback("1", "codesign REVISE — re-running Phase 1")
+                if "1" in state.completed_phases:
+                    state.completed_phases.remove("1")
+                save_state(state)
+                await run_phase_with_review(state, 1, progress_callback, max_turns=max_turns)
 
         # Human gate after Phase 4b
         if phase == "4b":

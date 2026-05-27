@@ -412,6 +412,14 @@ def jfc_run(
         "Defaults: executor=50, note_writer/fixer=30, reviewer/investigator/typesetter=20.",
     ),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
+    codesign: bool = typer.Option(
+        False,
+        "--codesign",
+        help=(
+            "Enable human codesign review after Phase 1 PASS: generates a strategy summary, "
+            "facilitates interactive Q&A, then re-adjudicates with the arbiter before Phase 2."
+        ),
+    ),
 ) -> None:
     """Start a new JFC analysis from scratch."""
     import asyncio
@@ -447,6 +455,7 @@ def jfc_run(
                 max_iterations_per_phase=max_iterations,
                 max_turns=max_turns,
                 progress_callback=_cb,
+                codesign=codesign,
             )
         )
         typer.echo(f"Analysis complete. Final PDF: {pdf}")

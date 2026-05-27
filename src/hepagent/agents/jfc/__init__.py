@@ -1,6 +1,7 @@
 """JFC agent factories and orchestration."""
 
 from hepagent.agents.jfc._data import get_jfc_data_dir
+from hepagent.agents.jfc.codesign import run_codesign_gate
 from hepagent.agents.jfc.commitment_checker import (
     CommitmentCheckResult,
     CommitmentsNotResolved,
@@ -26,6 +27,7 @@ from hepagent.agents.jfc.review_gate import (
 )
 
 __all__ = [
+    "run_codesign_gate",
     "create_phase_executor",
     "create_note_writer",
     "create_typesetter",
