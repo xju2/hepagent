@@ -140,12 +140,12 @@ Export `ReviewGateResult`, `run_review_gate`.
 
 ## Acceptance Criteria
 
-- [ ] `create_physics_reviewer(phase=1, ...)` returns an `Agent` with the
+- [x] `create_physics_reviewer(phase=1, ...)` returns an `Agent` with the
   correct system prompt (contains physics_reviewer.md body)
-- [ ] `run_review_gate(phase=1, ...)` calls all 4 phase-1 reviewers
-- [ ] Reviewer outputs are written to `review/` subdirectory
-- [ ] `ADJUDICATION.md` is produced by arbiter
-- [ ] Concurrent execution: Phase 1 runs 3 reviewers in parallel (verified
+- [x] `run_review_gate(phase=1, ...)` calls all 4 phase-1 reviewers
+- [x] Reviewer outputs are written to `review/` subdirectory
+- [x] `ADJUDICATION.md` is produced by arbiter
+- [x] Concurrent execution: Phase 1 runs 3 reviewers in parallel (verified
   by timing test or mock concurrency check)
-- [ ] `ReviewGateResult.verdict` is one of PASS/ITERATE/ESCALATE
-- [ ] Unit tests in `tests/agents/jfc/test_review_gate.py`
+- [x] `ReviewGateResult.verdict` is one of PASS/ITERATE/ESCALATE
+- [x] Unit tests in `tests/agents/jfc/test_review_gate.py`

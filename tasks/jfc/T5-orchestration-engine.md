@@ -180,12 +180,12 @@ def git_commit_phase(analysis_root: Path, phase: str, message: str) -> None:
 
 ## Acceptance Criteria
 
-- [ ] `run_jfc_analysis(...)` with a mocked executor+reviewer completes phases
+- [x] `run_jfc_analysis(...)` with a mocked executor+reviewer completes phases
   1, 2, 3 without error
-- [ ] State is saved to `.orchestration_state.json` after each phase
-- [ ] `start_from_phase=3` skips phases 1 and 2 and resumes from phase 3
-- [ ] `MaxIterationsExceeded` is raised after 3 failed review iterations
-- [ ] Human gate pauses execution and prompts the user via `ask_user_for_info`
-- [ ] Git commits are created after each phase (verified by `git log`)
-- [ ] Integration test in `tests/agents/jfc/test_orchestrator.py` (mocked
+- [x] State is saved to `.orchestration_state.json` after each phase
+- [x] `start_from_phase=3` skips phases 1 and 2 and resumes from phase 3
+- [x] `MaxIterationsExceeded` is raised after 3 failed review iterations
+- [x] Human gate pauses execution and prompts the user via `ask_user_for_info`
+- [x] Git commits are created after each phase (verified by `git log`)
+- [x] Integration test in `tests/agents/jfc/test_orchestrator.py` (mocked
   executor and reviewers)

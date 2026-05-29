@@ -6,12 +6,13 @@
 `hepagent` is an AI agent framework tailored for High Energy Physics (HEP) and cosmology workflows. Key features include:
 
 - **Multi-provider LLM support**: seamlessly switch between providers such as `cborg`, `openai`, `amsc`, and `gemini` via a unified CLI (`hepagent run`, `hepagent repl`) or programmatic API, with per-provider configuration managed in `providers.toml`.
-- **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations) that agents load on demand, keeping prompts concise and context-relevant.
+- **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations, accessing CERN Open Data) that agents load on demand, keeping prompts concise and context-relevant.
 - **CLI REPL**: a Claude Code-inspired interactive REPL (`hepagent repl`) with slash commands, streaming transcript output, command approval prompts, and markdown/code rendering.
 - **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **Textual TUI agent**: a rich Terminal User Interface (`TextualAgent`) with real-time display of agent thinking, step navigation, and live cost tracking.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
+- **Autonomous analysis pipeline** *(in development)*: a 5-phase multi-agent orchestration system (`hepagent jfc`) that drives a HEP physics analysis from a natural-language prompt to an analysis note. Each phase (Strategy → Exploration → Processing → Inference → Documentation) is executed by a dedicated executor agent, then evaluated by a panel of parallel reviewer agents (physics reviewer, critical reviewer, constructive reviewer) whose findings are adjudicated by an arbiter before the pipeline advances. Optional physicist co-design gates allow human-in-the-loop review at phase boundaries. Artifacts (STRATEGY.md, EXPLORATION.md, analysis note PDF, etc.) are written to a structured directory and reproduced via `pixi run all`.
 
 ## Installation
 

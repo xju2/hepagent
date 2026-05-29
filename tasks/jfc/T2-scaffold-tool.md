@@ -93,11 +93,11 @@ Add `scaffold_jfc_analysis` to the skilled agent's tools list in
 
 ## Acceptance Criteria
 
-- [ ] `scaffold_jfc_analysis("test_z_boson", "...", "measurement")` creates
+- [x] `scaffold_jfc_analysis("test_z_boson", "...", "measurement")` creates
   the full directory tree
-- [ ] `analyses/test_z_boson/prompt.md` contains the physics prompt
-- [ ] `analyses/test_z_boson/experiment_log.md` has the correct header
-- [ ] All phase subdirectories (`phase1_strategy/outputs/`, etc.) exist
-- [ ] Calling it twice with the same name returns an error, not overwrite
-- [ ] Tool is importable: `from hepagent.tools.jfc.scaffold import scaffold_jfc_analysis`
-- [ ] Unit test in `tests/tools/jfc/test_scaffold.py`
+- [x] `analyses/test_z_boson/prompt.md` contains the physics prompt
+- [x] `analyses/test_z_boson/experiment_log.md` has the correct header
+- [x] All phase subdirectories (`phase1_strategy/outputs/`, etc.) exist
+- [x] Calling it twice with the same name returns an error, not overwrite
+- [x] Tool is importable: `from hepagent.tools.jfc.scaffold import scaffold_jfc_analysis`
+- [x] Unit test in `tests/tools/jfc/test_scaffold.py`

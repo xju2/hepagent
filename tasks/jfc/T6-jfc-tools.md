@@ -172,11 +172,11 @@ def get_jfc_tools() -> list:
 
 ## Acceptance Criteria
 
-- [ ] `run_pixi_task("all", path)` calls `pixi run all` in the analysis dir
-- [ ] `append_experiment_log(path, "Found X")` appends a timestamped entry
-- [ ] `validate_figures(path, "3")` runs `lint_plots.py` and returns output
-- [ ] `update_commitments(path, "D1", "resolved", "closure chi2=1.3")` writes
+- [x] `run_pixi_task("all", path)` calls `pixi run all` in the analysis dir
+- [x] `append_experiment_log(path, "Found X")` appends a timestamped entry
+- [x] `validate_figures(path, "3")` runs `lint_plots.py` and returns output
+- [x] `update_commitments(path, "D1", "resolved", "closure chi2=1.3")` writes
   to COMMITMENTS.md
-- [ ] All tools handle missing directories or files gracefully (return error
+- [x] All tools handle missing directories or files gracefully (return error
   string, not raise)
-- [ ] Unit tests in `tests/tools/jfc/` covering each tool
+- [x] Unit tests in `tests/tools/jfc/` covering each tool
