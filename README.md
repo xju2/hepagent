@@ -125,3 +125,9 @@ Supported slash commands:
 - `/max-turn <turns>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).
+
+
+#### References
+This repository takes inspiration from and builds upon the following works:
+- JFC, https://github.com/jfc-mit/jfc
+- ShellGPT, https://github.com/ther1d/shell_gpt
