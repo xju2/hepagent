@@ -7,9 +7,9 @@ NanoAOD files hosted on the CERN Open Data portal. They are available at Perlmut
 `/global/cfs/cdirs/m3443/data/cern-opendata/record_id_12350/CMS-Higgs2TauTau-OutReach/`.
 
 The datasets include:
-* GluGluToHToTauTau.root gg→H→ττ (mH=125 GeV) Signal
-* VBF_HToTauTau.root VBF H→ττ Signal (subdominant)
-* DYJetsToLL.root Z/γ*→ℓℓ (Drell-Yan) Dominant irreducible background
+* GluGluToHToTauTau.root gg->H->tau-tau (mH=125 GeV) Signal
+* VBF_HToTauTau.root VBF H->tau-tau Signal (subdominant)
+* DYJetsToLL.root Z/gamma*->ll (Drell-Yan) Dominant irreducible background
 * TTbar.root tt̄Background
 * W1JetsToLNu.root, W2JetsToLNu.root, W3JetsToLNu.rootW+jets (1,2,3 jet bins) Background (fake τ_h)
 * Run2012B_SingleMu.root, Run2012C_SingleMu.rootData (SingleMu trigger) Collision data

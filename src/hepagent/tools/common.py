@@ -169,20 +169,14 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
 
 
 @function_tool
-def read_file(file_path: str, start_line: int | None = None, end_line: int | None = None) -> str:
-    """Read and return the contents of a file, optionally restricted to a line range.
-
-    Prefer calling with no start_line/end_line to read the entire file in one call.
-    Only use start_line/end_line when you already know the specific region you need.
-    Do NOT paginate through a file with repeated calls — read it whole instead.
+def read_file(file_path: str) -> str:
+    """Read and return the contents of a file.
 
     Args:
         file_path: Absolute or relative path to the file to read.
-        start_line: First line to return, 1-indexed inclusive. Defaults to the first line.
-        end_line: Last line to return, 1-indexed inclusive. Defaults to the last line.
 
     Returns:
-        str: The file contents (or selected lines), or an error message if unreadable.
+        str: The file contents, or an error message if unreadable.
     """
     path = Path(file_path)
     if not path.exists():
@@ -194,18 +188,7 @@ def read_file(file_path: str, start_line: int | None = None, end_line: int | Non
     except OSError as e:
         return f"Error reading {file_path}: {e}"
 
-    if start_line is None and end_line is None:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    total = len(lines)
-    lo = max(1, start_line or 1)
-    hi = min(total, end_line or total)
-    if lo > total:
-        return f"Error: start_line {lo} exceeds file length ({total} lines)"
-    selected = lines[lo - 1 : hi]
-    header = f"[Lines {lo}-{min(hi, total)} of {total}]\n"
-    return header + "".join(selected)
+    return text
 
 
 @function_tool

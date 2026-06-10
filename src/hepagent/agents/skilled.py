@@ -10,6 +10,15 @@ from hepagent.tools.common import (
     wait_for_slurm_job_completion,
 )
 from hepagent.tools.nyx.transfer_function import create_transfer_function
+from hepagent.tools.tmux import (
+    request_slurm_interactive,
+    tmux_capture_pane,
+    tmux_create_session,
+    tmux_kill_session,
+    tmux_list_sessions,
+    tmux_send_keys,
+    tmux_wait_for_pattern,
+)
 
 
 def create(
@@ -33,6 +42,13 @@ def create(
             ask_user_for_info,  # The "User Interaction" tool
             create_transfer_function,
             wait_for_slurm_job_completion,
+            tmux_list_sessions,
+            tmux_create_session,
+            tmux_send_keys,
+            tmux_capture_pane,
+            tmux_wait_for_pattern,
+            tmux_kill_session,
+            request_slurm_interactive,
         ],
     )
     return agent
