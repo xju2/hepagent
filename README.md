@@ -131,3 +131,6 @@ For more detail, see [docs/REPL.md](docs/REPL.md).
 This repository takes inspiration from and builds upon the following works:
 - JFC, https://github.com/jfc-mit/jfc
 - ShellGPT, https://github.com/ther1d/shell_gpt
+
+Other related works:
+* Archi: Agentic Operations at the CMS Experiment, [paper](https://arxiv.org/pdf/2606.04755), [code](https://github.com/archi-physics/archi)
