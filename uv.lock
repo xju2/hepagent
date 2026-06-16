@@ -1160,7 +1160,7 @@ wheels = [
 
 [[package]]
 name = "hepagent"
-version = "0.3.4"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "camb" },

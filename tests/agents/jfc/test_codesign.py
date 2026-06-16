@@ -350,6 +350,6 @@ def test_jfc_run_help_shows_codesign():
     from hepagent.main import app
 
     runner = CliRunner()
-    result = runner.invoke(app, ["jfc", "run", "--help"])
+    result = runner.invoke(app, ["jfc", "run", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == 0
     assert "--codesign" in result.output

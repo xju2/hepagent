@@ -30,7 +30,7 @@ def test_jfc_help(runner):
 def test_jfc_run_help(runner):
     from hepagent.main import app
 
-    result = runner.invoke(app, ["jfc", "run", "--help"])
+    result = runner.invoke(app, ["jfc", "run", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == 0
     assert "--name" in result.output
     assert "--type" in result.output
