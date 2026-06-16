@@ -1,6 +1,6 @@
 [project]
 name = "hepagent"
-version = "0.3.4"
+version = "0.4.0"
 description = "Agent AI for HEP tasks"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -127,10 +127,92 @@ Supported slash commands:
 For more detail, see [docs/REPL.md](docs/REPL.md).
 
 
+### Autonomous HEP analysis pipeline (`hepagent jfc`)
+
+`hepagent jfc` drives a full HEP physics analysis from a natural-language prompt to a compiled analysis-note PDF. The pipeline runs seven phases sequentially; each phase is executed by a dedicated executor agent and then evaluated by a panel of parallel reviewer agents whose findings are adjudicated by an arbiter before the pipeline advances.
+
+| Phase | Name | Description |
+|-------|------|-------------|
+| 1 | Strategy | Define the analysis strategy and commit to key decisions |
+| 2 | Exploration | Explore datasets, signal/background properties |
+| 3 | Processing | Run selection, reconstruction, and histogram production |
+| 4a | Expected Results | Inference on expected (Asimov) data |
+| 4b | 10% Validation | Inference on 10% of observed data (human gate) |
+| 4c | Full Data | Inference on the full observed dataset |
+| 5 | Documentation | Write and typeset the final analysis note PDF |
+
+#### Start a new analysis
+
+Create a markdown file with your physics question, then run:
+
+```bash
+hepagent jfc run \
+  --name my_analysis \
+  --type measurement \
+  --prompt-file prompt.md
+```
+
+Options:
+
+```
+--name / -n          Analysis name (short identifier, used as directory name)
+--type / -t          Analysis type: measurement or search
+--prompt-file / -p   Path to a markdown file with the physics question
+--model              Model as "provider:model" (e.g. "cborg:claude-sonnet-4-5")
+--base-dir           Parent directory for analyses (default: analyses/)
+--max-iterations     Max review iterations per phase before halting (default: 3)
+--max-turns          Max agent turns per call (defaults: executor=50, note_writer/fixer=30, reviewers=20)
+--yolo               Auto-approve all bash commands
+--codesign           Enable human co-design review after Phase 1: generates a strategy summary,
+                     facilitates interactive Q&A, then re-adjudicates before Phase 2
+```
+
+Example with a specific model and co-design enabled:
+
+```bash
+hepagent jfc run \
+  --name atlas_zprime \
+  --type search \
+  --prompt-file tasks/zprime_search.md \
+  --model cborg:claude-sonnet-4-5 \
+  --codesign
+```
+
+#### Resume an interrupted analysis
+
+State is saved automatically after every phase. Resume from any phase:
+
+```bash
+hepagent jfc resume --name my_analysis --from-phase 3
+hepagent jfc resume --name my_analysis --from-phase 4a
+```
+
+#### Check analysis status
+
+```bash
+hepagent jfc status --name my_analysis
+```
+
+Output lists each phase with its status (`✓ PASS`, `→ IN PROGRESS`, or `○ pending`) and the number of review iterations used.
+
+#### List all analyses
+
+```bash
+hepagent jfc list
+hepagent jfc list --base-dir /path/to/analyses
+```
+
 #### References
 This repository takes inspiration from and builds upon the following works:
 - JFC, https://github.com/jfc-mit/jfc
 - ShellGPT, https://github.com/ther1d/shell_gpt
 
 Other related works:
+* HEPTAPOD: https://github.com/tonymenzo/heptapod
+* Just Furnish Context: https://github.com/jfc-mit/slop-X/tree/main
+* Deer Flow: https://github.com/bytedance/deer-flow
 * Archi: Agentic Operations at the CMS Experiment, [paper](https://arxiv.org/pdf/2606.04755), [code](https://github.com/archi-physics/archi)
+* OpenClaw: https://github.com/openclaw/openclaw
+* Oh My Agent: https://github.com/first-fluke/oh-my-agent
+* Nemo Claw: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
+* Get Physics Done: https://github.com/psi-oss/get-physics-done
