@@ -1,7 +1,10 @@
+import json
+import os
 import re
 import subprocess
 import textwrap
 import time
+import urllib.request
 from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
@@ -163,3 +166,106 @@ def wait_for_slurm_job_completion(ctx: RunContextWrapper[AgentContext], job_id: 
         except Exception as e:
             return f"Error checking SLURM job status: {e}"
         time.sleep(30)  # Check every 30 seconds
+
+
+@function_tool
+def read_file(file_path: str) -> str:
+    """Read and return the contents of a file.
+
+    Args:
+        file_path: Absolute or relative path to the file to read.
+
+    Returns:
+        str: The file contents, or an error message if unreadable.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return f"Error: file not found: {file_path}"
+    if not path.is_file():
+        return f"Error: not a file: {file_path}"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return f"Error reading {file_path}: {e}"
+
+    return text
+
+
+@function_tool
+def write_review(file_path: str, content: str) -> str:
+    """Write review content to a file, creating parent directories as needed.
+
+    Args:
+        file_path: Absolute or relative path to the output file.
+        content: The full text to write.
+
+    Returns:
+        str: Confirmation message or an error message if the write failed.
+    """
+    path = Path(file_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return f"Written {len(content)} characters to {file_path}"
+    except OSError as e:
+        return f"Error writing {file_path}: {e}"
+
+
+@function_tool
+def web_search(query: str, num_results: int = 5) -> str:
+    """Search the web using the Tavily API and return extracted content from results.
+
+    Requires the TAVILY_API_KEY environment variable to be set.
+    Obtain a free key (1000 req/month) at https://tavily.com.
+
+    Args:
+        query: The search query string.
+        num_results: Number of results to return (1-10, default 5).
+
+    Returns:
+        str: Extracted content from search results, or an error message.
+    """
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+    if not api_key:
+        return (
+            "Error: TAVILY_API_KEY environment variable is not set. "
+            "Obtain a free key at https://tavily.com and set the variable to enable web search."
+        )
+
+    num_results = max(1, min(10, num_results))
+    payload = json.dumps(
+        {
+            "api_key": api_key,
+            "query": query,
+            "max_results": num_results,
+            "include_answer": False,
+        }
+    ).encode()
+
+    req = urllib.request.Request(
+        "https://api.tavily.com/search",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return f"Error: Tavily API returned HTTP {e.code}: {e.reason}"
+    except Exception as e:
+        return f"Error calling Tavily API: {e}"
+
+    results = data.get("results", [])
+    if not results:
+        return f"No results found for query: {query!r}"
+
+    lines = [f"Search results for: {query!r}\n"]
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "(no title)")
+        url_r = r.get("url", "")
+        content = r.get("content", "")
+        lines.append(f"{i}. {title}\n   {url_r}\n   {content}")
+
+    return "\n\n".join(lines)

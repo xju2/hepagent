@@ -1,17 +1,18 @@
 # Project
-![coverage](https://img.shields.io/badge/coverage-70%25-green)
+![coverage](https://img.shields.io/badge/coverage-59%25-yellow)
 
 ## Introduction
 
 `hepagent` is an AI agent framework tailored for High Energy Physics (HEP) and cosmology workflows. Key features include:
 
 - **Multi-provider LLM support**: seamlessly switch between providers such as `cborg`, `openai`, `amsc`, and `gemini` via a unified CLI (`hepagent run`, `hepagent repl`) or programmatic API, with per-provider configuration managed in `providers.toml`.
-- **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations) that agents load on demand, keeping prompts concise and context-relevant.
+- **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations, accessing CERN Open Data) that agents load on demand, keeping prompts concise and context-relevant.
 - **CLI REPL**: a Claude Code-inspired interactive REPL (`hepagent repl`) with slash commands, streaming transcript output, command approval prompts, and markdown/code rendering.
 - **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **Textual TUI agent**: a rich Terminal User Interface (`TextualAgent`) with real-time display of agent thinking, step navigation, and live cost tracking.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
+- **Autonomous analysis pipeline** *(in development)*: a 5-phase multi-agent orchestration system (`hepagent jfc`) that drives a HEP physics analysis from a natural-language prompt to an analysis note. Each phase (Strategy → Exploration → Processing → Inference → Documentation) is executed by a dedicated executor agent, then evaluated by a panel of parallel reviewer agents (physics reviewer, critical reviewer, constructive reviewer) whose findings are adjudicated by an arbiter before the pipeline advances. Optional physicist co-design gates allow human-in-the-loop review at phase boundaries. Artifacts (STRATEGY.md, EXPLORATION.md, analysis note PDF, etc.) are written to a structured directory and reproduced via `pixi run all`.
 
 ## Installation
 
@@ -124,3 +125,94 @@ Supported slash commands:
 - `/max-turn <turns>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).
+
+
+### Autonomous HEP analysis pipeline (`hepagent jfc`)
+
+`hepagent jfc` drives a full HEP physics analysis from a natural-language prompt to a compiled analysis-note PDF. The pipeline runs seven phases sequentially; each phase is executed by a dedicated executor agent and then evaluated by a panel of parallel reviewer agents whose findings are adjudicated by an arbiter before the pipeline advances.
+
+| Phase | Name | Description |
+|-------|------|-------------|
+| 1 | Strategy | Define the analysis strategy and commit to key decisions |
+| 2 | Exploration | Explore datasets, signal/background properties |
+| 3 | Processing | Run selection, reconstruction, and histogram production |
+| 4a | Expected Results | Inference on expected (Asimov) data |
+| 4b | 10% Validation | Inference on 10% of observed data (human gate) |
+| 4c | Full Data | Inference on the full observed dataset |
+| 5 | Documentation | Write and typeset the final analysis note PDF |
+
+#### Start a new analysis
+
+Create a markdown file with your physics question, then run:
+
+```bash
+hepagent jfc run \
+  --name my_analysis \
+  --type measurement \
+  --prompt-file prompt.md
+```
+
+Options:
+
+```
+--name / -n          Analysis name (short identifier, used as directory name)
+--type / -t          Analysis type: measurement or search
+--prompt-file / -p   Path to a markdown file with the physics question
+--model              Model as "provider:model" (e.g. "cborg:claude-sonnet-4-5")
+--base-dir           Parent directory for analyses (default: analyses/)
+--max-iterations     Max review iterations per phase before halting (default: 3)
+--max-turns          Max agent turns per call (defaults: executor=50, note_writer/fixer=30, reviewers=20)
+--yolo               Auto-approve all bash commands
+--codesign           Enable human co-design review after Phase 1: generates a strategy summary,
+                     facilitates interactive Q&A, then re-adjudicates before Phase 2
+```
+
+Example with a specific model and co-design enabled:
+
+```bash
+hepagent jfc run \
+  --name atlas_zprime \
+  --type search \
+  --prompt-file tasks/zprime_search.md \
+  --model cborg:claude-sonnet-4-5 \
+  --codesign
+```
+
+#### Resume an interrupted analysis
+
+State is saved automatically after every phase. Resume from any phase:
+
+```bash
+hepagent jfc resume --name my_analysis --from-phase 3
+hepagent jfc resume --name my_analysis --from-phase 4a
+```
+
+#### Check analysis status
+
+```bash
+hepagent jfc status --name my_analysis
+```
+
+Output lists each phase with its status (`✓ PASS`, `→ IN PROGRESS`, or `○ pending`) and the number of review iterations used.
+
+#### List all analyses
+
+```bash
+hepagent jfc list
+hepagent jfc list --base-dir /path/to/analyses
+```
+
+#### References
+This repository takes inspiration from and builds upon the following works:
+- JFC, https://github.com/jfc-mit/jfc
+- ShellGPT, https://github.com/ther1d/shell_gpt
+
+Other related works:
+* HEPTAPOD: https://github.com/tonymenzo/heptapod
+* Just Furnish Context: https://github.com/jfc-mit/slop-X/tree/main
+* Deer Flow: https://github.com/bytedance/deer-flow
+* Archi: Agentic Operations at the CMS Experiment, [paper](https://arxiv.org/pdf/2606.04755), [code](https://github.com/archi-physics/archi)
+* OpenClaw: https://github.com/openclaw/openclaw
+* Oh My Agent: https://github.com/first-fluke/oh-my-agent
+* Nemo Claw: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
+* Get Physics Done: https://github.com/psi-oss/get-physics-done
