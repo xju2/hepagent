@@ -108,6 +108,14 @@ def test_jfc_status_shows_phases(runner, analyses_dir, tmp_path):
     assert "IN PROGRESS" in result.output or "pending" in result.output
 
 
+def _normalize_cli_output(text: str) -> str:
+    """Strip ANSI styling and normalize whitespace for robust assertions."""
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.split())
+
+
 def test_jfc_run_invokes_orchestrator(runner, analyses_dir):
     from hepagent.main import app
 
@@ -131,4 +139,4 @@ def test_jfc_run_invokes_orchestrator(runner, analyses_dir):
             ],
         )
     # Either succeeds or fails, but CLI invocation worked
-    assert "--help" not in result.output
+    assert "--help" not in _normalize_cli_output(result.output)

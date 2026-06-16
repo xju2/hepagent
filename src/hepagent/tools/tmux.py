@@ -36,12 +36,17 @@ def _send_keys(session_name: str, window_name: str, command: str) -> str:
 
 def _capture_pane(session_name: str, window_name: str, lines: int = 200) -> str:
     target = f"{session_name}:{window_name}"
-    out, rc = _run([
-        "tmux", "capture-pane",
-        "-p",
-        "-S", str(-lines),
-        "-t", target,
-    ])
+    out, rc = _run(
+        [
+            "tmux",
+            "capture-pane",
+            "-p",
+            "-S",
+            str(-lines),
+            "-t",
+            target,
+        ]
+    )
     if rc != 0:
         return ""
     return out
@@ -70,6 +75,7 @@ def _wait_for_pattern(
 # ---------------------------------------------------------------------------
 # Public function tools
 # ---------------------------------------------------------------------------
+
 
 @function_tool
 def tmux_list_sessions() -> str:

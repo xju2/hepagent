@@ -344,6 +344,14 @@ def test_executor_no_codesign_feedback_by_default(analysis_root):
     assert "HUMAN FEEDBACK FROM CODESIGN REVIEW" not in agent.instructions
 
 
+def _normalize_cli_output(text: str) -> str:
+    """Strip ANSI styling and normalize whitespace for robust assertions."""
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.split())
+
+
 def test_jfc_run_help_shows_codesign():
     from typer.testing import CliRunner
 
@@ -352,4 +360,4 @@ def test_jfc_run_help_shows_codesign():
     runner = CliRunner()
     result = runner.invoke(app, ["jfc", "run", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == 0
-    assert "--codesign" in result.output
+    assert "--codesign" in _normalize_cli_output(result.output)

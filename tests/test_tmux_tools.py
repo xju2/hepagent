@@ -48,6 +48,7 @@ def _create_session():
 # _run helper
 # ---------------------------------------------------------------------------
 
+
 def test_run_success():
     out, rc = _run(["echo", "hello"])
     assert rc == 0
@@ -62,6 +63,7 @@ def test_run_failure():
 # ---------------------------------------------------------------------------
 # Session lifecycle
 # ---------------------------------------------------------------------------
+
 
 def test_create_session():
     _, rc = _run(["tmux", "new-session", "-d", "-s", SESSION, "-n", WINDOW])
@@ -88,6 +90,7 @@ def test_kill_nonexistent_session_returns_error():
 # _send_keys / _capture_pane
 # ---------------------------------------------------------------------------
 
+
 def test_send_and_capture():
     _create_session()
     _send_keys(SESSION, WINDOW, "echo hepagent_marker")
@@ -109,6 +112,7 @@ def test_capture_pane_missing_returns_empty():
 # ---------------------------------------------------------------------------
 # _wait_for_pattern
 # ---------------------------------------------------------------------------
+
 
 def test_wait_for_pattern_matches():
     _create_session()
