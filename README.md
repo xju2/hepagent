@@ -216,3 +216,4 @@ Other related works:
 * Oh My Agent: https://github.com/first-fluke/oh-my-agent
 * Nemo Claw: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
 * Get Physics Done: https://github.com/psi-oss/get-physics-done
+* US ATLAS marketplace: https://github.com/usatlas/marketplace/tree/main
