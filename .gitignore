@@ -174,3 +174,7 @@ testarea/
 analyses/
 review/
 logs/
+
+notebooks/CAMB_CIC_BBKS_comparison.png
+notebooks/cmb_CAMB.tf
+notebooks/quick_tests.ipynb
