@@ -1,21 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import click
 import typer
 from typer.core import TyperGroup
 
-from agents import SQLiteSession
+from agents import Agent, Runner, SQLiteSession, function_tool
 from agents.run import DEFAULT_MAX_TURNS
-from hepagent.agents.cli_repl import CliRepl
+from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
+from hepagent.agents.cli_repl import (
+    CliRepl,
+    _build_command_feedback,
+    _extract_single_bash_command,
+)
 from hepagent.agents.common import AgentContext
 from hepagent.agents.explorer import create as create_explorer_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
-from hepagent.agents.textual import AgentAdapter, TextualAgent
-from hepagent.agents.textual_bash import BashToolWrapper
-from hepagent.agents.textual_common import AskUserToolWrapper, CompositeToolWrapper
 from hepagent.config.env import env_config
 from hepagent.helpers import (
     bootstrap_hepagent_home,
@@ -126,6 +129,155 @@ def build_runtime(
     }
 
 
+class TerminalRunToolWrapper:
+    """Wrap interactive tools for the headless `hepagent run` command."""
+
+    def __init__(self, *, yolo: bool = False, non_interactive: bool = False):
+        self.yolo = yolo
+        self.non_interactive = non_interactive
+        self.last_rejection_reason: str | None = None
+
+    def wrap_tools(self, tools: list[object]) -> list[object]:
+        wrapped = []
+        for tool in tools:
+            name = getattr(tool, "name", "")
+            if "execute_bash_command" in name:
+                wrapped.append(self._create_bash_tool())
+            elif "ask_user_for_info" in name:
+                wrapped.append(self._create_ask_user_tool())
+            else:
+                wrapped.append(tool)
+        return wrapped
+
+    def wrap_agent(self, agent: Agent) -> Agent:
+        """Return a copy of the agent with terminal-safe tools."""
+        return agent.clone(tools=self.wrap_tools(agent.tools))
+
+    def _read_input(self, prompt: str) -> str:
+        try:
+            return input(prompt)
+        except EOFError:
+            try:
+                with open("/dev/tty", encoding="utf-8") as tty:
+                    print(prompt, end="", flush=True)
+                    return tty.readline().strip()
+            except OSError:
+                return ""
+
+    async def approve_command_async(self) -> bool:
+        self.last_rejection_reason = None
+        if self.yolo or self.non_interactive:
+            mode = "non-interactive" if self.non_interactive else "yolo"
+            typer.echo(f"Auto-approved in {mode} mode.")
+            return True
+
+        response = await asyncio.to_thread(
+            self._read_input,
+            "Approve command? Press Enter to allow, or type a reason to reject: ",
+        )
+        if response.strip():
+            self.last_rejection_reason = response.strip()
+            typer.echo(f"Rejected: {self.last_rejection_reason}")
+            return False
+
+        typer.echo("Approved.")
+        return True
+
+    def render_command_proposal(self, *, cmd: str, cwd: str = "", thought: str = "") -> None:
+        if thought:
+            typer.echo(f"THOUGHT: {thought}")
+        typer.echo("Command:")
+        typer.echo(f"```bash\n{cmd}\n```")
+        if cwd:
+            typer.echo(f"Working directory: {cwd}")
+
+    def render_tool_result(self, result: dict) -> None:
+        typer.echo(f"Return code: {result.get('returncode')}")
+        output = str(result.get("output", ""))
+        if output:
+            typer.echo(output)
+
+    async def execute_bash(self, *, cmd: str, cwd: str = "", thought: str = "") -> dict:
+        self.render_command_proposal(cmd=cmd, cwd=cwd, thought=thought)
+        if not await self.approve_command_async():
+            reason = self.last_rejection_reason or "No reason provided"
+            return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
+
+        result = await asyncio.to_thread(execute_bash_command, cmd, cwd=cwd)
+        self.render_tool_result(result)
+        return result
+
+    def _create_bash_tool(self):
+        @function_tool
+        async def execute_bash_command_with_terminal_confirmation(
+            cmd: str, cwd: str = "", thought: str = ""
+        ) -> dict:
+            """Execute a bash command with plain terminal confirmation."""
+            return await self.execute_bash(cmd=cmd, cwd=cwd, thought=thought)
+
+        return execute_bash_command_with_terminal_confirmation
+
+    def _create_ask_user_tool(self):
+        @function_tool
+        async def ask_user_for_info(prompt: str, thought: str = "") -> str:
+            """Collect missing task information from the terminal."""
+            if thought:
+                typer.echo(f"THOUGHT: {thought}")
+            if self.non_interactive:
+                typer.echo(f"Non-interactive mode: skipped user input for prompt: {prompt}")
+                return ""
+            response = await asyncio.to_thread(self._read_input, f"{prompt}: ")
+            return response.strip()
+
+        return ask_user_for_info
+
+
+async def run_agent_task(
+    *,
+    agent: Agent,
+    task_prompt: str,
+    context: AgentContext,
+    max_turns: int,
+    session: object | None,
+    yolo: bool,
+    non_interactive: bool = False,
+) -> str:
+    """Run one task in plain terminal mode and return the final agent output."""
+    tool_wrapper = TerminalRunToolWrapper(yolo=yolo, non_interactive=non_interactive)
+    current_agent = tool_wrapper.wrap_agent(agent)
+    turn_input: object = task_prompt
+
+    for _ in range(max_turns):
+        result = await Runner.run(
+            current_agent,
+            turn_input,
+            context=context,
+            max_turns=max_turns,
+            session=session,
+        )
+        final_output = "" if result.final_output is None else str(result.final_output)
+        bash_proposal = _extract_single_bash_command(final_output)
+        if bash_proposal is None:
+            return final_output
+
+        command_result = await tool_wrapper.execute_bash(
+            cmd=bash_proposal.cmd,
+            thought=bash_proposal.thought,
+        )
+        feedback = _build_command_feedback(bash_proposal.cmd, command_result)
+        if session is not None:
+            turn_input = feedback
+        else:
+            turn_items = result.to_input_list()
+            turn_items.append({"role": "user", "content": feedback})
+            turn_input = turn_items
+        current_agent = result.last_agent
+
+    raise click.ClickException(
+        f"Max command proposals reached while running task: {max_turns}."
+    )
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -140,6 +292,11 @@ def main(
         False,
         "--yolo",
         help="Auto-approve all bash commands.",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Run without prompting for bash approval or ask_user_for_info input.",
     ),
     max_turns: int = typer.Option(
         DEFAULT_MAX_TURNS,
@@ -179,6 +336,7 @@ def main(
     ctx.obj = {
         "agent_name": agent_name,
         "yolo": yolo,
+        "non_interactive": non_interactive,
         "max_turns": max_turns,
         "model": model,
         "chat": chat,
@@ -207,6 +365,11 @@ def run_task(
         "--yolo",
         help="Auto-approve all bash commands.",
     ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Run without prompting for bash approval or ask_user_for_info input.",
+    ),
     max_turns: int | None = typer.Option(
         None,
         "--max-turn",
@@ -228,6 +391,7 @@ def run_task(
     options = ctx.obj or {}
     agent_name = agent_name.lower() or str(options.get("agent_name", "scientist"))
     yolo = yolo or bool(options.get("yolo", False))
+    non_interactive = non_interactive or bool(options.get("non_interactive", False))
     max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
     model = model or options.get("model")
     chat = chat or options.get("chat")
@@ -239,24 +403,19 @@ def run_task(
         mlflow.openai.autolog()
 
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
-    agent = runtime["agent"]
-    context = runtime["context"]
-    display_model = runtime["display_model"]
-    app_agent = TextualAgent(model=display_model, env={})
-
-    wrapper = CompositeToolWrapper(BashToolWrapper(), AskUserToolWrapper())
-    app_agent.agent = AgentAdapter(agent, app_agent, tool_wrapper=wrapper)
-
-    if yolo:
-        app_agent.agent.config.mode = "yolo"
-
-    exit_status, result = app_agent.run_task(
-        task=task_prompt,
-        context=context,
-        max_turns=max_turns,
-        session=runtime["session"],
+    result = asyncio.run(
+        run_agent_task(
+            agent=runtime["agent"],
+            task_prompt=task_prompt,
+            context=runtime["context"],
+            max_turns=max_turns,
+            session=runtime["session"],
+            yolo=yolo,
+            non_interactive=non_interactive,
+        )
     )
-    typer.echo(f"Agent exited with status: {exit_status}, result: {result}")
+    if result:
+        typer.echo(result)
 
 
 @app.command("repl")

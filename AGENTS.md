@@ -6,8 +6,8 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 ## Core Architecture
 - CLI entrypoint: `src/hepagent/main.py` (`hepagent` command).
 - Main runtime agent: `src/hepagent/agents/skilled.py`.
-- Textual TUI runtime: `src/hepagent/agents/textual.py`.
-- Textual TUI architecture notes and anti-regression guidance: `docs/TEXTUAL.md`.
+- Interactive CLI REPL runtime: `src/hepagent/agents/cli_repl.py`.
+- Headless task runner: `hepagent run` in `src/hepagent/main.py`.
 - Shared instruction registry: `.agents/`:
   - `common/IDENTITY.md`, `common/OPERATION.md`, `common/ETHICS.md`
   - `storage/MEMORY.md`
@@ -22,7 +22,6 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 ## Required Agent Behavior
 - Treat the user task as authoritative; do not change intent.
 - If a domain skill is relevant, call `load_skill_details(<skill>)` first.
-- Before changing Textual TUI behavior, read `docs/TEXTUAL.md` and preserve its invariants.
 - Only read skill resources on demand via `read_resource`.
 - Ask for missing required inputs with `ask_user_for_info` (one clear question at a time).
 - When a tool/action fails or the user corrects you, record it with `update_logbook`.
@@ -42,6 +41,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 
 ## CLI Usage Rules
 - For `hepagent run` (and the default-to-run behavior), `TASK_PROMPT` is a required positional argument.
+- Use `hepagent run --non-interactive "..."` for fully automated runs; it must not prompt for bash approval or `ask_user_for_info` input.
 - Default provider is `cborg`; model spec supports `provider:model` (e.g. `openai:gpt-5-mini`).
 - Example:
   - `uv run hepagent run --agent scientist "List repository files"`

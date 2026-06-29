@@ -17,7 +17,6 @@ dependencies = [
     "openai-agents[litellm]>=0.6.3",
     "prompt_toolkit>=3.0.52",
     "pyyaml>=6.0.3",
-    "textual>=6.11.0",
     "typer>=0.24.1",
 ]
 
