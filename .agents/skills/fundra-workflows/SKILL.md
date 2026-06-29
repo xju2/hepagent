@@ -12,7 +12,7 @@ and bounded reductions.
 
 ## Start Here
 
-1. Work from the repository root.
+1. Work from the repository root: `/pscratch/sd/x/xju/FoundationUniverse/code/foundational_universe`.
 2. Read `AGENTS.md` and preserve its constraints.
 3. If this skill was not already loaded, call
    `load_skill_details("fundra-workflows")`.
@@ -21,8 +21,6 @@ and bounded reductions.
    With HepAgent, run shell commands through
    `execute_bash_command_with_confirmation`; use tmux tools for interactive
    SLURM allocations.
-5. Use `fundra suite propose` when a catalog exists and the user asks what to
-   run next; it can surface exact commands stored in artifact metadata.
 6. Prefer `docs/Workflows.md` as the top-level workflow map, then load one
    resource below only when it matches the task.
 
@@ -40,6 +38,15 @@ and bounded reductions.
 
 HepAgent's `read_resource` reads from the currently active skill, so load this
 skill before reading these resource names.
+
+## NERSC computing resources.
+
+NERSC project ID ordered by their priroity:
+- m5226
+- nyx
+- m3443
+
+Choose one of the project ID for the `-A <project_id>` in SLURM commands.
 
 ## Operating Rules
 

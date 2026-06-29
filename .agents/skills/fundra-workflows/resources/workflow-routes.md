@@ -18,11 +18,11 @@ Main pipeline:
 
 1. Nyx plotfiles or raw HDF5 exist.
 2. Catalog and ingest runs with `fundra suite`.
-3. Convert AMReX plotfiles to HDF5 and compute P1D with shell wrappers.
-4. Chunk HDF5 into MPI chunks or legacy patch arrays.
+3. Convert AMReX plotfiles to HDF5 and compute P1D with shell wrappers with `scripts/submit_post_nyx.sh`.
+4. Chunk HDF5 into MPI chunks or legacy patch arrays with `scripts/submit_chunk_L40_N2048.sh`.
 5. Train VQVAE with `fundra train`.
 6. Tokenize with `stage=predict`.
-7. Evaluate tokenization with `fundra eval tokens`.
+7. Evaluate tokenization with `fundra_vqvae_reco_mpi` wrapped in `scripts/submit_reco_h5.sh`.
 8. Train BERT/GPT prior on token `.pt` files or DDPM on embedding `.pt` files.
 9. Sample, reconstruct, compare, and plot.
 
@@ -60,6 +60,8 @@ Only use `--yes` after the user explicitly approves deletion.
 Use `scripts/post_nyx_config.json` as the shared run manifest for conversion,
 P1D, histograms, and chunk wrappers.
 
+You may have to edit the config to run VQVAE inference for a specific training using checkpoints saved in `/global/cfs/cdirs/m3443/data/foundational_universe/training/logs/vqvae`. For example, the run `L40_N2048_z3_s5_RECO_x0-8-1_v1` means a VQVAE trained one L40 and N2048 dataset using the configuration `x0.8.1`. This is the first inference version `v1` on the `s5` validation data.
+
 AMReX plotfile to HDF5 and P1D:
 
 ```bash
@@ -75,7 +77,7 @@ sbatch scripts/submit_p1d.sh -r L80_N4096_z3_s2_RECO_x0-7-1_v3
 Histograms:
 
 ```bash
-salloc -N 4 -q interactive -C cpu -A m3443 -t 04:00:00
+salloc -N 4 -q interactive -C cpu -A m5226 -t 04:00:00
 ./scripts/run_histogram.sh -r L40_N2048_z3_s1
 ```
 
@@ -87,6 +89,13 @@ srun -n 64 fundra_histogramize_mpi data.hdf5 \
 ```
 
 Use `--cuts "field_a > value && field_b < value"` for scaled-field selections.
+
+VQVAE reconstruction:
+
+```bash
+salloc -C "gpu&hbm40g" -q interactive -N 2 --exclusive -t 4:00:00 -A m5226
+./scripts/submit_reco_h5.sh -r L40_N2048_z3_s5_RECO_x0-8-1_v1
+```
 
 ## Data Preparation
 
@@ -100,7 +109,7 @@ MPI chunking for L40_N2048:
 
 ```bash
 bash scripts/submit_chunk_L40_N2048.sh --dry-run -r L40_N2048_z3_s1
-salloc -N 4 -q interactive -C cpu -A m3443 -t 04:00:00
+salloc -N 4 -q interactive -C cpu -A m5226 -t 04:00:00
 ./scripts/submit_chunk_L40_N2048.sh -r L40_N2048_z3_s1 -r L40_N2048_z3_s2
 ```
 
@@ -159,15 +168,8 @@ uv run fundra eval tokens -f src/fundra/configs/resolved/vqvae/<version>.yaml \
 Reconstruct HDF5:
 
 ```bash
-uv run fundra eval reconstruct-hdf5 -f <config.yaml> \
-    -i input.hdf5 -o reco.hdf5 --ckpt-file best.ckpt
-```
-
-For large files, use the MPI script:
-
-```bash
-srun -n <N> fundra_vqvae_reco_mpi -f <config.yaml> \
-    -c best.ckpt -i input.hdf5 -o reco.hdf5
+salloc -C "gpu&hbm40g" -q interactive -N 2 --exclusive -t 4:00:00 -A m5226
+./scripts/submit_reco_h5.sh -r L40_N2048_z3_s5_RECO_x0-8-1_v1
 ```
 
 ## Prior Models

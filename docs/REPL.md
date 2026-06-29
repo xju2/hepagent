@@ -115,6 +115,11 @@ The REPL uses:
 Assistant responses stream live. Tool calls, tool results, prompts for extra user input,
 and errors are rendered in distinct blocks to keep the transcript readable.
 
+When the provider emits reasoning-summary stream events, the REPL prints them inline as
+`[reasoning] ...` before the final assistant text. If a provider only emits raw reasoning
+activity without summary text, the REPL prints a compact "Reasoning in progress" marker so
+long-running turns do not look stuck. Hidden chain-of-thought is not printed.
+
 ## Related Files
 
 - [src/hepagent/agents/cli_repl.py](../src/hepagent/agents/cli_repl.py):
