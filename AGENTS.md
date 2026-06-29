@@ -46,3 +46,18 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - Example:
   - `uv run hepagent run --agent scientist "List repository files"`
   - `uv run hepagent run --agent scientist "..." --model openai:gpt-5-mini`
+
+## Task and Documentation structure
+- `tasks/`: All tasks go here. Each task file describes a specific implementation or research task, with a clear goal. You may create sub-tasks for a user-defined task.
+- `docs/`: All design, planning, user-facing documents go here. They outline the rationale, approach, and expected outcomes for features or research directions.
+
+### Cross-referencing
+Always link task files and planning docs to each other bidirectionally:
+
+- Every task file (tasks/<task>.md) must open with a "Related documents" section listing the relevant plan doc(s), the original request task file, and any workflow or design docs it touches. Use relative Markdown links.
+- Every plan or design doc section that spawns a concrete implementation task must include a back-link to that task file, e.g. Implementation tracked in [tasks/foo.md](../tasks/foo.md).
+
+## Documentation
+* If you worked on a task defined in `tasks/<task>.md`, update that doc with a short status report. Mark it as "In progress" or "Completed" and add a brief summary of what you did.
+* Put the status report at the end of the task file so the task body stays intact and the file becomes a chronological record of work over time.
+* Keep docs brief and task-oriented unless the user asks for a full guide
