@@ -81,14 +81,13 @@ salloc -N 4 -q interactive -C cpu -A m5226 -t 04:00:00
 ./scripts/run_histogram.sh -r L40_N2048_z3_s1
 ```
 
-For direct MPI histogramization:
+Use `--cuts "field_a > value && field_b < value"` for scaled-field selections.
+
+Compare Histograms:
 
 ```bash
-srun -n 64 fundra_histogramize_mpi data.hdf5 \
-    -f temperature -r ranges.csv -o histograms --apply-scales
+./scripts/compare_histograms.sh -r L40_N2048_z3_s5_RECO_x0-8-1_v1
 ```
-
-Use `--cuts "field_a > value && field_b < value"` for scaled-field selections.
 
 VQVAE reconstruction:
 
