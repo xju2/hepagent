@@ -166,6 +166,24 @@ def _stream_item_label(item: Any) -> str:
     return str(value or "unknown")
 
 
+def _stream_item_arguments(item: Any) -> str:
+    """Return compact tool-call arguments from a stream item, when available."""
+    raw_item = getattr(item, "raw_item", None) or item
+    for attr in ("arguments", "tool_arguments", "input"):
+        value = getattr(raw_item, attr, None)
+        if value not in (None, ""):
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    if len(value) <= 300:
+                        return value
+                    omitted = len(value) - 300
+                    return value[:300] + f"... [truncated: omitted {omitted} chars]"
+            return _format_compact_value(value)
+    return ""
+
+
 def _build_help_text() -> Text:
     """Build richly formatted help text for the REPL panel."""
     text = Text()
@@ -403,8 +421,12 @@ class CliRepl:
         item_type = getattr(event.item, "type", "")
         label = _stream_item_label(event.item)
         if item_type == "tool_call_item":
+            arguments = _stream_item_arguments(event.item)
+            message = f"Calling tool: [bold]{label}[/bold]"
+            if arguments:
+                message += f"\nInput: {escape(arguments)}"
             self._render_status_panel(
-                f"Calling tool: [bold]{label}[/bold]",
+                message,
                 title="tool",
                 border_style="magenta",
             )
@@ -425,8 +447,12 @@ class CliRepl:
         if data_type == "response.function_call_arguments.done":
             self._finish_reasoning_summary()
             name = getattr(data, "name", "unknown")
+            arguments = _stream_item_arguments(data)
+            message = f"Prepared tool call: [bold]{name}[/bold]"
+            if arguments:
+                message += f"\nInput: {escape(arguments)}"
             self._render_status_panel(
-                f"Prepared tool call: [bold]{name}[/bold]",
+                message,
                 title="tool",
                 border_style="magenta",
             )

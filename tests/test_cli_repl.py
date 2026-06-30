@@ -306,6 +306,50 @@ def test_render_stream_tool_call_event():
     assert "load_skill_details" in output
 
 
+def test_render_stream_tool_call_event_shows_arguments():
+    console = _make_console()
+    repl = _make_repl(console=console)
+    event = cli_repl.RunItemStreamEvent(
+        name="tool_called",
+        item=SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(
+                name="load_skill_details",
+                arguments='{"skill_name":"nyx"}',
+            ),
+        ),
+    )
+
+    repl.render_stream_tool_event(event)
+
+    output = console.file.getvalue()
+    assert "Calling tool" in output
+    assert "load_skill_details" in output
+    assert "Input:" in output
+    assert "skill_name" in output
+    assert "nyx" in output
+    assert '\\"skill_name\\"' not in output
+
+
+def test_render_raw_function_call_arguments_done_shows_arguments():
+    console = _make_console()
+    repl = _make_repl(console=console)
+
+    repl.render_raw_stream_progress(
+        SimpleNamespace(
+            type="response.function_call_arguments.done",
+            name="read_resource",
+            arguments='{"path":"resources/setup.md"}',
+        )
+    )
+
+    output = console.file.getvalue()
+    assert "Prepared tool call" in output
+    assert "read_resource" in output
+    assert "Input:" in output
+    assert "resources/setup.md" in output
+
+
 def test_repl_tool_wrapper_replaces_known_tools():
     wrapper = cli_repl.ReplToolWrapper()
     tools = [
