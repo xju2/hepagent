@@ -98,7 +98,9 @@ hepagent run --agent "scientist" --non-interactive "your task here"
 `hepagent run` is the non-interactive task interface: it accepts one task prompt, executes
 agent tool calls or single emitted bash blocks, and prints the final answer. By default it
 asks before bash execution and when an agent calls `ask_user_for_info`; `--non-interactive`
-auto-approves bash and returns empty input for `ask_user_for_info`.
+auto-approves bash and returns empty input for `ask_user_for_info`. `--max-turn` limits
+agent turns per model run; `--max-command-proposals` separately limits emitted bash-block
+continuations.
 
 ### Interactive REPL
 

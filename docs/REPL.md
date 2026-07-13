@@ -30,7 +30,8 @@ pass one prompt and print the final result. By default it can still ask for shel
 and missing user input. Use `--non-interactive` to auto-approve bash execution and return
 empty input for `ask_user_for_info`, so no user interaction is required. Single bash blocks
 emitted by shell-style agents are executed and fed back to the model so `run` can complete
-an end-to-end task.
+an end-to-end task. `--max-turn` limits agent turns per model run, while
+`--max-command-proposals` limits those emitted bash-block continuations.
 
 Implementation tracked in [tasks/1.0-refactorize.md](../tasks/1.0-refactorize.md).
 

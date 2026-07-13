@@ -264,6 +264,7 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
             task_prompt="start",
             context=context,
             max_turns=3,
+            max_command_proposals=2,
             session=None,
             yolo=False,
             non_interactive=True,
@@ -281,6 +282,52 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
     assert "The bash command proposed in your previous response has completed." in calls[1][
         "input"
     ][-1]["content"]
+
+
+def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
+    calls = []
+    executed = []
+
+    class FakeResult:
+        final_output = "```bash\necho again\n```"
+        last_agent = _DummyAgent()
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": self.final_output}]
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, context=None, max_turns=None, session=None):
+            calls.append(max_turns)
+            return FakeResult()
+
+    def fake_execute_bash_command(cmd, cwd=""):
+        executed.append(cmd)
+        return {"output": "again\n", "returncode": 0}
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "execute_bash_command", fake_execute_bash_command)
+
+    try:
+        asyncio.run(
+            main_module.run_agent_task(
+                agent=_DummyAgent(),
+                task_prompt="start",
+                context=main_module.AgentContext(agent_name="shell"),
+                max_turns=5,
+                max_command_proposals=2,
+                session=None,
+                yolo=False,
+                non_interactive=True,
+            )
+        )
+    except main_module.click.ClickException as exc:
+        assert "Max command proposals reached while running task: 2." in str(exc)
+    else:
+        raise AssertionError("Expected max command proposal limit")
+
+    assert calls == [5, 5]
+    assert executed == ["echo again", "echo again"]
 
 
 def test_non_interactive_ask_user_tool_returns_empty_without_reading(monkeypatch):

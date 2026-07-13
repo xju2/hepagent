@@ -53,6 +53,7 @@ class DefaultToRunGroup(TyperGroup):
 
 
 app = typer.Typer(cls=DefaultToRunGroup)
+DEFAULT_MAX_COMMAND_PROPOSALS = 1
 
 
 def create_chat_session(conversation_id: str) -> SQLiteSession:
@@ -241,13 +242,14 @@ async def run_agent_task(
     session: object | None,
     yolo: bool,
     non_interactive: bool = False,
+    max_command_proposals: int = DEFAULT_MAX_COMMAND_PROPOSALS,
 ) -> str:
     """Run one task in plain terminal mode and return the final agent output."""
     tool_wrapper = TerminalRunToolWrapper(yolo=yolo, non_interactive=non_interactive)
     current_agent = tool_wrapper.wrap_agent(agent)
     turn_input: object = task_prompt
 
-    for _ in range(max_turns):
+    for _ in range(max_command_proposals):
         result = await Runner.run(
             current_agent,
             turn_input,
@@ -274,7 +276,7 @@ async def run_agent_task(
         current_agent = result.last_agent
 
     raise click.ClickException(
-        f"Max command proposals reached while running task: {max_turns}."
+        f"Max command proposals reached while running task: {max_command_proposals}."
     )
 
 
@@ -302,6 +304,12 @@ def main(
         DEFAULT_MAX_TURNS,
         "--max-turn",
         help="Maximum number of agent turns (defaults to SDK default).",
+        show_default=True,
+    ),
+    max_command_proposals: int = typer.Option(
+        DEFAULT_MAX_COMMAND_PROPOSALS,
+        "--max-command-proposals",
+        help="Maximum number of text bash proposals to execute during one task.",
         show_default=True,
     ),
     model: str | None = typer.Option(
@@ -338,6 +346,7 @@ def main(
         "yolo": yolo,
         "non_interactive": non_interactive,
         "max_turns": max_turns,
+        "max_command_proposals": max_command_proposals,
         "model": model,
         "chat": chat,
     }
@@ -375,6 +384,11 @@ def run_task(
         "--max-turn",
         help="Maximum number of agent turns (defaults to SDK default).",
     ),
+    max_command_proposals: int | None = typer.Option(
+        None,
+        "--max-command-proposals",
+        help="Maximum number of text bash proposals to execute during one task.",
+    ),
     model: str | None = typer.Option(
         None,
         "--model",
@@ -393,6 +407,9 @@ def run_task(
     yolo = yolo or bool(options.get("yolo", False))
     non_interactive = non_interactive or bool(options.get("non_interactive", False))
     max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
+    max_command_proposals = max_command_proposals or int(
+        options.get("max_command_proposals", DEFAULT_MAX_COMMAND_PROPOSALS)
+    )
     model = model or options.get("model")
     chat = chat or options.get("chat")
 
@@ -409,6 +426,7 @@ def run_task(
             task_prompt=task_prompt,
             context=runtime["context"],
             max_turns=max_turns,
+            max_command_proposals=max_command_proposals,
             session=runtime["session"],
             yolo=yolo,
             non_interactive=non_interactive,
