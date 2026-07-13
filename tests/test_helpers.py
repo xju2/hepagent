@@ -68,6 +68,19 @@ def test_bootstrap_copies_agents_dir(tmp_path):
     assert (tmp_path / "agents").exists()
 
 
+def test_bootstrap_merges_missing_bundled_skills(tmp_path):
+    """Existing user registries should receive newly bundled skill directories."""
+    old_skills = tmp_path / "agents" / "skills" / "nyx"
+    old_skills.mkdir(parents=True)
+    (old_skills / "SKILL.md").write_text("# Custom Nyx\n", encoding="utf-8")
+
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        bootstrap_hepagent_home()
+
+    assert (tmp_path / "agents" / "skills" / "fundra-workflows" / "SKILL.md").exists()
+    assert (old_skills / "SKILL.md").read_text(encoding="utf-8") == "# Custom Nyx\n"
+
+
 def test_bootstrap_creates_user_profile_template(tmp_path):
     """bootstrap_hepagent_home creates ~/.hepagent/USER.md on first run."""
     with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):

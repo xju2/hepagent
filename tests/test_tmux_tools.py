@@ -8,11 +8,13 @@ is also verified via the helpers.
 Requires tmux to be installed and a server to be startable.
 """
 
+import re
 import time
 
 import pytest
 
 from hepagent.tools.tmux import (
+    _SLURM_INTERACTIVE_READY_PATTERN,
     _capture_pane,
     _run,
     _send_keys,
@@ -135,3 +137,16 @@ def test_wait_pattern_on_missing_pane_times_out():
     elapsed = time.monotonic() - start
     assert result.startswith("timeout")
     assert elapsed < 6  # must not hang
+
+
+def test_slurm_interactive_ready_pattern_matches_nersc_ready_output():
+    output = """
+salloc: Granted job allocation 55294948
+salloc: Waiting for resource configuration
+salloc: Nodes nid[004154-004157] are ready for job
+"""
+    assert re.search(_SLURM_INTERACTIVE_READY_PATTERN, output)
+
+
+def test_slurm_interactive_ready_pattern_matches_arrow_prompt():
+    assert re.search(_SLURM_INTERACTIVE_READY_PATTERN, "\n➜   \n")

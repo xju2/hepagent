@@ -6,18 +6,18 @@ This document summarizes the new Claude Code-inspired REPL added to `hepagent`.
 
 - Added a dedicated interactive command:
   - `uv run hepagent repl`
-- Kept the existing one-shot command:
+- Kept the one-shot task command:
   - `uv run hepagent run "your task"`
+- `hepagent run` uses a headless terminal runner.
 - Implemented the REPL as a new prompt-toolkit based terminal loop in
   [src/hepagent/agents/cli_repl.py](../src/hepagent/agents/cli_repl.py).
 - Reused the existing agent/model/session bootstrap logic in
-  [src/hepagent/main.py](src/hepagent/main.py) so `run` and `repl`
+  [src/hepagent/main.py](../src/hepagent/main.py) so `run` and `repl`
   resolve agents, models, and chat sessions consistently.
 
 ## Design Direction
 
-The new REPL does **not** extend the existing Textual UI. Instead, it follows a simpler
-scroll-forward terminal interaction model inspired by Claude Code:
+The REPL follows a scroll-forward terminal interaction model inspired by Claude Code:
 
 - inline prompt loop instead of a full-screen step browser
 - slash commands handled locally before model execution
@@ -25,8 +25,14 @@ scroll-forward terminal interaction model inspired by Claude Code:
 - explicit command approval flow for shell execution
 - markdown and fenced-code rendering for assistant responses
 
-The old Textual flow still exists for `hepagent run`, but it is no longer the target
-implementation for interactive REPL work.
+`hepagent run` is the automated task interface used for terminal-bench style evaluation:
+pass one prompt and print the final result. By default it can still ask for shell approval
+and missing user input. Use `--non-interactive` to auto-approve bash execution and return
+empty input for `ask_user_for_info`, so no user interaction is required. Single bash blocks
+emitted by shell-style agents are executed and fed back to the model so `run` can complete
+an end-to-end task.
+
+Implementation tracked in [tasks/1.0-refactorize.md](../tasks/1.0-refactorize.md).
 
 ## Usage
 
@@ -46,6 +52,14 @@ uv run hepagent repl --chat my-session
 uv run hepagent repl --disable-session
 uv run hepagent repl --yolo
 uv run hepagent repl --max-turn 30
+```
+
+Run one automated task:
+
+```bash
+uv run hepagent run --agent scientist "List repository files"
+uv run hepagent run --agent shell --yolo "Count Python files in this repository"
+uv run hepagent run --agent scientist --non-interactive "Finish this benchmark task"
 ```
 
 ## Supported Slash Commands
@@ -128,9 +142,11 @@ long-running turns do not look stuck. Hidden chain-of-thought is not printed.
   REPL bootstrap and shared runtime wiring
 - [src/hepagent/model_providers.py](../src/hepagent/model_providers.py):
   shared provider/model discovery helpers
-- [tests/test_cli_repl.py](../src/hepagent/tests/test_cli_repl.py):
+- [tests/test_cli_repl.py](../tests/test_cli_repl.py):
   REPL command and rendering coverage
-- [tests/test_main_commands.py](../src/hepagent/tests/test_main_commands.py):
+- [tests/test_main_chat.py](../tests/test_main_chat.py):
+  run/repl CLI bootstrap and session coverage
+- [tests/test_main_commands.py](../tests/test_main_commands.py):
   provider/model listing command coverage
 
 ## Validation Summary
@@ -138,7 +154,7 @@ long-running turns do not look stuck. Hidden chain-of-thought is not printed.
 The current REPL command and provider/model listing behavior was validated with:
 
 ```bash
-uv run pytest tests/test_cli_repl.py tests/test_main_commands.py
+uv run pytest tests/test_main_chat.py tests/test_cli_entrypoint.py tests/test_cli_repl.py tests/test_main_commands.py
 uv run python -m compileall src/hepagent/agents/cli_repl.py src/hepagent/model_providers.py src/hepagent/main.py
 ```
 
