@@ -1,8 +1,7 @@
 """Transport-agnostic protocols connecting the agent run to a web frontend.
 
 The terminal frontends couple human-in-the-loop directly to the console
-(``input()`` in :mod:`hepagent.agents.bash`, ``threading.Event`` in
-:mod:`hepagent.agents.textual`, ``prompt_async`` in
+(``input()`` in :mod:`hepagent.agents.bash`, ``prompt_async`` in
 :mod:`hepagent.agents.cli_repl`). The web UI instead talks to these protocols so
 the approval flow and the streaming loop can be tested without a browser.
 """

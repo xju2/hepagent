@@ -4,6 +4,12 @@ import io
 import json
 from types import SimpleNamespace
 
+from openai.types.responses.response_reasoning_summary_text_delta_event import (
+    ResponseReasoningSummaryTextDeltaEvent,
+)
+from openai.types.responses.response_reasoning_summary_text_done_event import (
+    ResponseReasoningSummaryTextDoneEvent,
+)
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 
 import hepagent.agents.cli_repl as cli_repl
@@ -269,6 +275,79 @@ def test_render_assistant_output_renders_panel_when_not_streamed():
     output = console.file.getvalue()
     assert "assistant" in output
     assert "hello" in output
+
+
+def test_render_raw_reasoning_activity_once():
+    console = _make_console()
+    repl = _make_repl(console=console)
+
+    repl.render_raw_stream_progress(SimpleNamespace(type="response.reasoning_text.delta"))
+    repl.render_raw_stream_progress(SimpleNamespace(type="response.reasoning_text.delta"))
+
+    output = console.file.getvalue()
+    assert output.count("Reasoning in progress") == 1
+
+
+def test_render_stream_tool_call_event():
+    console = _make_console()
+    repl = _make_repl(console=console)
+    event = cli_repl.RunItemStreamEvent(
+        name="tool_called",
+        item=SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(name="load_skill_details"),
+        ),
+    )
+
+    repl.render_stream_tool_event(event)
+
+    output = console.file.getvalue()
+    assert "Calling tool" in output
+    assert "load_skill_details" in output
+
+
+def test_render_stream_tool_call_event_shows_arguments():
+    console = _make_console()
+    repl = _make_repl(console=console)
+    event = cli_repl.RunItemStreamEvent(
+        name="tool_called",
+        item=SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(
+                name="load_skill_details",
+                arguments='{"skill_name":"nyx"}',
+            ),
+        ),
+    )
+
+    repl.render_stream_tool_event(event)
+
+    output = console.file.getvalue()
+    assert "Calling tool" in output
+    assert "load_skill_details" in output
+    assert "Input:" in output
+    assert "skill_name" in output
+    assert "nyx" in output
+    assert '\\"skill_name\\"' not in output
+
+
+def test_render_raw_function_call_arguments_done_shows_arguments():
+    console = _make_console()
+    repl = _make_repl(console=console)
+
+    repl.render_raw_stream_progress(
+        SimpleNamespace(
+            type="response.function_call_arguments.done",
+            name="read_resource",
+            arguments='{"path":"resources/setup.md"}',
+        )
+    )
+
+    output = console.file.getvalue()
+    assert "Prepared tool call" in output
+    assert "read_resource" in output
+    assert "Input:" in output
+    assert "resources/setup.md" in output
 
 
 def test_repl_tool_wrapper_replaces_known_tools():
@@ -646,6 +725,67 @@ def test_run_turn_updates_input_history(monkeypatch):
 
     assert repl.input_items[0]["content"] == "hello"
     assert repl.input_items[-1]["content"] == "Hello from agent"
+
+
+def test_run_turn_streams_reasoning_summary(monkeypatch):
+    reasoning_delta = cli_repl.RawResponsesStreamEvent(
+        data=ResponseReasoningSummaryTextDeltaEvent(
+            delta="Inspecting repository state",
+            type="response.reasoning_summary_text.delta",
+            item_id="i1",
+            output_index=0,
+            sequence_number=0,
+            summary_index=0,
+        )
+    )
+    reasoning_done = cli_repl.RawResponsesStreamEvent(
+        data=ResponseReasoningSummaryTextDoneEvent(
+            text="Inspecting repository state",
+            type="response.reasoning_summary_text.done",
+            item_id="i1",
+            output_index=0,
+            sequence_number=1,
+            summary_index=0,
+        )
+    )
+    text_event = cli_repl.RawResponsesStreamEvent(
+        data=ResponseTextDeltaEvent(
+            delta="Done",
+            type="response.output_text.delta",
+            event_id="e1",
+            item_id="i2",
+            output_index=1,
+            content_index=0,
+            logprobs=[],
+            sequence_number=2,
+        )
+    )
+
+    class FakeResult:
+        last_agent = _make_agent()
+
+        async def stream_events(self):
+            yield reasoning_delta
+            yield reasoning_done
+            yield text_event
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": "Done"}]
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(agent, input=None, context=None, max_turns=None, session=None):
+            return FakeResult()
+
+    console = _make_console()
+    repl = _make_repl(console=console)
+    monkeypatch.setattr(cli_repl, "Runner", FakeRunner)
+
+    asyncio.run(repl._run_turn("hello"))
+
+    output = console.file.getvalue()
+    assert "[reasoning] Inspecting repository state" in output
+    assert "Done" in output
 
 
 def test_run_turn_uses_updated_max_turns(monkeypatch):

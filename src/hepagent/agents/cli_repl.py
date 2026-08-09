@@ -11,12 +11,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from openai.types.responses.response_reasoning_summary_text_delta_event import (
+    ResponseReasoningSummaryTextDeltaEvent,
+)
+from openai.types.responses.response_reasoning_summary_text_done_event import (
+    ResponseReasoningSummaryTextDoneEvent,
+)
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import NestedCompleter
 from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -103,6 +110,18 @@ def _format_tool_output(output: Any) -> str:
     return text[:OUTPUT_TRUNCATE_LENGTH] + f"... [tool output truncated: omitted {omitted} chars]"
 
 
+def _format_compact_value(value: Any, *, limit: int = 300) -> str:
+    """Format event payloads for compact progress messages."""
+    try:
+        text = json.dumps(value, ensure_ascii=False)
+    except Exception:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return text[:limit] + f"... [truncated: omitted {omitted} chars]"
+
+
 def _tool_output_contains_finalize_signal(output: Any) -> bool:
     """Detect explicit finalize markers emitted by guardrails in tool output."""
     try:
@@ -134,6 +153,35 @@ def _build_command_feedback(cmd: str, result: dict[str, Any]) -> str:
         "Continue from this result. If the task is complete, provide a concise final "
         "summary. If another command is needed, emit exactly one bash code block."
     )
+
+
+def _stream_item_label(item: Any) -> str:
+    """Return a readable label for an SDK stream item."""
+    raw_item = getattr(item, "raw_item", None) or item
+    for attr in ("name", "server_label", "type"):
+        value = getattr(raw_item, attr, None)
+        if value:
+            return str(value)
+    value = getattr(item, "type", None)
+    return str(value or "unknown")
+
+
+def _stream_item_arguments(item: Any) -> str:
+    """Return compact tool-call arguments from a stream item, when available."""
+    raw_item = getattr(item, "raw_item", None) or item
+    for attr in ("arguments", "tool_arguments", "input"):
+        value = getattr(raw_item, attr, None)
+        if value not in (None, ""):
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    if len(value) <= 300:
+                        return value
+                    omitted = len(value) - 300
+                    return value[:300] + f"... [truncated: omitted {omitted} chars]"
+            return _format_compact_value(value)
+    return ""
 
 
 def _build_help_text() -> Text:
@@ -301,10 +349,14 @@ class CliRepl:
         self.last_rejection_reason: str | None = None
         self.model = ReplModelState(platform=model_platform, name=model_name)
         self._tool_wrapper = ReplToolWrapper()
+        self._reasoning_summary_open = False
+        self._reasoning_summary_seen = False
+        self._raw_reasoning_notice_shown = False
         self.current_agent = self._build_wrapped_agent(agent_name)
 
     def _render_status_panel(self, message: str, *, title: str, border_style: str) -> None:
         """Render a compact status panel for local REPL events."""
+        self._finish_reasoning_summary()
         self.console.print(
             Panel.fit(
                 Text.from_markup(message),
@@ -312,6 +364,98 @@ class CliRepl:
                 border_style=border_style,
             )
         )
+
+    def _start_turn_progress(self) -> None:
+        """Reset per-turn progress rendering state."""
+        self._reasoning_summary_open = False
+        self._reasoning_summary_seen = False
+        self._raw_reasoning_notice_shown = False
+
+    def _finish_reasoning_summary(self) -> None:
+        """Close an inline streamed reasoning-summary line if one is open."""
+        if not self._reasoning_summary_open:
+            return
+        self.console.file.write("\n")
+        self.console.file.flush()
+        self._reasoning_summary_open = False
+
+    def render_reasoning_summary_delta(self, delta: str) -> None:
+        """Stream a model-provided reasoning summary into the transcript."""
+        if not delta:
+            return
+        self._reasoning_summary_seen = True
+        if not self._reasoning_summary_open:
+            self.console.file.write("\n[reasoning] ")
+            self._reasoning_summary_open = True
+        self.console.file.write(delta)
+        self.console.file.flush()
+
+    def render_reasoning_summary_done(self, text: str) -> None:
+        """Render a completed reasoning summary that was not streamed as deltas."""
+        if self._reasoning_summary_open:
+            self._finish_reasoning_summary()
+            self._reasoning_summary_seen = False
+            return
+        if self._reasoning_summary_seen:
+            self._reasoning_summary_seen = False
+            return
+        stripped = text.strip()
+        if stripped:
+            self.console.print(Panel(stripped, title="reasoning", border_style="yellow"))
+
+    def render_reasoning_activity(self) -> None:
+        """Show that the model is reasoning when no summary text is available."""
+        if self._raw_reasoning_notice_shown:
+            return
+        self._finish_reasoning_summary()
+        self._render_status_panel(
+            "Reasoning in progress",
+            title="reasoning",
+            border_style="yellow",
+        )
+        self._raw_reasoning_notice_shown = True
+
+    def render_stream_tool_event(self, event: RunItemStreamEvent) -> None:
+        """Render compact progress for streamed tool events."""
+        self._finish_reasoning_summary()
+        item_type = getattr(event.item, "type", "")
+        label = _stream_item_label(event.item)
+        if item_type == "tool_call_item":
+            arguments = _stream_item_arguments(event.item)
+            message = f"Calling tool: [bold]{label}[/bold]"
+            if arguments:
+                message += f"\nInput: {escape(arguments)}"
+            self._render_status_panel(
+                message,
+                title="tool",
+                border_style="magenta",
+            )
+        elif item_type == "tool_call_output_item":
+            output = getattr(event.item, "output", "")
+            self._render_status_panel(
+                f"Tool finished: [bold]{label}[/bold]\n{escape(_format_compact_value(output))}",
+                title="tool",
+                border_style="green",
+            )
+
+    def render_raw_stream_progress(self, data: Any) -> None:
+        """Render non-text raw response events that help explain live progress."""
+        data_type = getattr(data, "type", "")
+        if data_type == "response.reasoning_text.delta":
+            self.render_reasoning_activity()
+            return
+        if data_type == "response.function_call_arguments.done":
+            self._finish_reasoning_summary()
+            name = getattr(data, "name", "unknown")
+            arguments = _stream_item_arguments(data)
+            message = f"Prepared tool call: [bold]{name}[/bold]"
+            if arguments:
+                message += f"\nInput: {escape(arguments)}"
+            self._render_status_panel(
+                message,
+                title="tool",
+                border_style="magenta",
+            )
 
     def _build_wrapped_agent(self, agent_name: str) -> Agent:
         base_agent = self.agent_factory(
@@ -429,6 +573,7 @@ class CliRepl:
         return CommandResult(handled=True)
 
     async def _run_turn(self, user_input: str) -> None:
+        self._start_turn_progress()
         user_item = {"role": "user", "content": user_input}
         turn_input = (
             user_input if self.session is not None else list(self.input_items) + [user_item]
@@ -471,20 +616,30 @@ class CliRepl:
                 async for event in result.stream_events():
                     if isinstance(event, RawResponsesStreamEvent):
                         if isinstance(event.data, ResponseTextDeltaEvent):
+                            self._finish_reasoning_summary()
                             saw_text = True
                             deltas.append(event.data.delta)
                             self.console.file.write(event.data.delta)
                             self.console.file.flush()
+                        elif isinstance(event.data, ResponseReasoningSummaryTextDeltaEvent):
+                            self.render_reasoning_summary_delta(event.data.delta)
+                        elif isinstance(event.data, ResponseReasoningSummaryTextDoneEvent):
+                            self.render_reasoning_summary_done(event.data.text)
+                        else:
+                            self.render_raw_stream_progress(event.data)
                     elif isinstance(event, RunItemStreamEvent):
                         saw_tool_event = True
+                        self.render_stream_tool_event(event)
                         if event.item.type == "tool_call_output_item":
                             if _tool_output_contains_finalize_signal(event.item.output):
                                 saw_finalize_signal = True
                     elif isinstance(event, AgentUpdatedStreamEvent):
+                        self._finish_reasoning_summary()
                         self.console.print(f"\n[dim]Agent updated: {event.new_agent.name}[/dim]")
 
                 full_text = "".join(deltas)
                 if saw_text:
+                    self._finish_reasoning_summary()
                     self.console.file.write("\n")
                     self.console.file.flush()
                     self.render_assistant_output(full_text, streamed=True)
@@ -583,6 +738,7 @@ class CliRepl:
 
         if result is None:
             return
+        self._finish_reasoning_summary()
         self.current_agent = result.last_agent
         self.input_items = result.to_input_list()
 

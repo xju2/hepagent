@@ -1,4 +1,4 @@
-# T8: CLI and TUI Integration
+# T8: CLI Integration
 
 **Priority:** P3
 **Depends on:** T5
@@ -7,8 +7,7 @@
 ## Goal
 
 Expose JFC analysis orchestration through HepAgent's existing CLI (`hepagent`)
-and Textual TUI so users can launch, monitor, and resume analyses without
-writing Python.
+so users can launch, monitor, and resume analyses without writing Python.
 
 ## Deliverables
 
@@ -50,17 +49,6 @@ hepagent jfc list
 **`hepagent jfc list`:**
 - Lists analyses in `analyses/` directory with current phase and status.
 
-### Textual TUI integration
-
-In `agents/textual.py`, add a JFC-specific step renderer:
-- Display current phase name and executor progress
-- Show review gate status (which reviewers running, verdicts received)
-- Highlight Category A findings in red, Category B in yellow
-- Show commitment tracking table when relevant
-
-This is a visual enhancement only — the core orchestration runs the same.
-If TUI changes are complex, defer this sub-item and run JFC analyses via CLI only.
-
 ### Progress reporting via `run_jfc_analysis`
 
 `run_jfc_analysis` should accept an optional `progress_callback`:
@@ -72,7 +60,7 @@ async def run_jfc_analysis(
 ) -> Path:
 ```
 
-CLI and TUI pass different callbacks; this keeps the engine decoupled.
+CLI commands pass this callback; this keeps the engine decoupled from presentation.
 
 ### Error handling and user communication
 

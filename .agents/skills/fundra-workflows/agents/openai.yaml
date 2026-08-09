@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fundra Workflows"
+  short_description: "Run Fundra cosmology workflows"
+  default_prompt: "Use $fundra-workflows to carry out a Fundra data, training, evaluation, plotting, or Perlmutter workflow."

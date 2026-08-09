@@ -1,5 +1,36 @@
 # Changelog
 
+## [v0.4.0] – 2026-06-16
+
+### Overview
+
+This release ships the JFC autonomous HEP analysis pipeline — a seven-phase, multi-agent orchestration system that drives a full physics analysis from a natural-language prompt to a compiled analysis-note PDF. It also adds a new `explorer` agent, Ollama local-model support, persistent user profiles, and a rewritten CLI REPL with async skill loading.
+
+---
+
+### What's Changed since v0.3.4
+
+#### New Features
+
+- **JFC autonomous analysis pipeline** (`hepagent jfc`) — Seven-phase orchestration engine (Strategy → Exploration → Processing → Expected Results → 10 % Validation → Full Data → Documentation). Each phase is driven by a dedicated executor agent and evaluated by a panel of parallel reviewer agents (physics, critical, constructive) whose findings are adjudicated by an arbiter. Supports co-design human-in-the-loop review after Phase 1, a 10 % validation human gate after Phase 4b, automatic regression detection and re-run cycles, and `MaxIterationsExceeded` escalation. Artifacts and an analysis-note PDF are written to a structured directory tree. CLI subcommands: `hepagent jfc run`, `resume`, `status`, `list`.
+- **Explorer agent** — New `--agent explorer` role for open-ended research tasks; robust against partial failures and integrated into the REPL (`/agent explorer`).
+- **Ollama provider** — Local self-hosted LLM support via Ollama (`--model ollama:<model>`). Default model: `gemma4:e4b`. No API key required.
+- **Persistent user profile** (`USER.md`) — `~/.hepagent/USER.md` stores durable user context (preferences, projects, expertise). The `update_user_profile` tool appends bullet notes under sections; the file is gracefully skipped on read-only filesystems.
+
+#### Improvements
+
+- **REPL async skill loading** — CLI REPL rebuilt with async execution, per-session skill activation, and interactive user-input support during tool calls.
+- **REPL one-session-for-all** — All REPL interactions now share a single persistent SQLite session, preserving context across slash-command switches.
+- **New default model** — Default model updated to `cborg:lbl/gemma-4`.
+- **Better CLI UI** — Cleaner output formatting, improved streaming display, and additional slash commands (`/agents`, `/platforms`, `/mode`).
+
+#### Fixes
+
+- Fixed chat-session existence check in the REPL causing spurious session resets.
+- Fixed `not thinking` flag propagation for providers that do not support reasoning tokens.
+
+---
+
 ## [v0.3.2] – 2026-03-30
 
 ### Overview
@@ -158,6 +189,7 @@ uv run hepagent --agent "scientist" \
 uv run hepagent list-models --platform cborg
 ```
 
+[v0.4.0]: https://github.com/xju2/hepagent/releases/tag/v0.4.0
 [v0.3.2]: https://github.com/xju2/hepagent/releases/tag/v0.3.2
 [v0.3.0]: https://github.com/xju2/hepagent/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/xju2/hepagent/releases/tag/v0.2.0

@@ -146,8 +146,8 @@ def bootstrap_hepagent_home() -> None:
 
     # --- agents/ directory from repo root (dev install) ---
     agents_dest = home / "agents"
+    repo_agents = get_repo_root() / ".agents"
     if not agents_dest.exists():
-        repo_agents = get_repo_root() / ".agents"
         if repo_agents.exists():
             # In a source/dev environment, copy the bundled .agents directory.
             shutil.copytree(repo_agents, agents_dest)
@@ -158,6 +158,15 @@ def bootstrap_hepagent_home() -> None:
             for subdir in ("", "common", "storage", "skills"):
                 target = agents_dest if not subdir else agents_dest / subdir
                 target.mkdir(parents=True, exist_ok=True)
+    elif repo_agents.exists():
+        repo_skills = repo_agents / "skills"
+        dest_skills = agents_dest / "skills"
+        if repo_skills.exists():
+            dest_skills.mkdir(parents=True, exist_ok=True)
+            for src_skill in repo_skills.iterdir():
+                dest_skill = dest_skills / src_skill.name
+                if src_skill.is_dir() and not dest_skill.exists():
+                    shutil.copytree(src_skill, dest_skill)
 
     # --- USER profile file ---
     ensure_user_profile_file()

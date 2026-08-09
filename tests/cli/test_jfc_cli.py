@@ -7,6 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 
+def _normalize_cli_output(text: str) -> str:
+    """Strip ANSI styling and normalize whitespace for robust assertions."""
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.split())
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -30,11 +38,12 @@ def test_jfc_help(runner):
 def test_jfc_run_help(runner):
     from hepagent.main import app
 
-    result = runner.invoke(app, ["jfc", "run", "--help"])
+    result = runner.invoke(app, ["jfc", "run", "--help"], env={"NO_COLOR": "1"})
+    output = _normalize_cli_output(result.output)
     assert result.exit_code == 0
-    assert "--name" in result.output
-    assert "--type" in result.output
-    assert "--prompt" in result.output
+    assert "--name" in output
+    assert "--type" in output
+    assert "--prompt" in output
 
 
 def test_jfc_list_empty(runner, analyses_dir):
@@ -66,8 +75,9 @@ def test_jfc_list_with_analysis(runner, analyses_dir, tmp_path):
     (analysis_dir / ".orchestration_state.json").write_text(json.dumps(state))
 
     result = runner.invoke(app, ["jfc", "list", "--base-dir", str(analyses_dir)])
+    output = _normalize_cli_output(result.output)
     assert result.exit_code == 0
-    assert "my_analysis" in result.output
+    assert "my_analysis" in output
 
 
 def test_jfc_status_not_found(runner, analyses_dir):
@@ -103,9 +113,10 @@ def test_jfc_status_shows_phases(runner, analyses_dir, tmp_path):
     result = runner.invoke(
         app, ["jfc", "status", "--name", "status_test", "--base-dir", str(analyses_dir)]
     )
+    output = _normalize_cli_output(result.output)
     assert result.exit_code == 0
-    assert "PASS" in result.output or "Strategy" in result.output
-    assert "IN PROGRESS" in result.output or "pending" in result.output
+    assert "PASS" in output or "Strategy" in output
+    assert "IN PROGRESS" in output or "pending" in output
 
 
 def test_jfc_run_invokes_orchestrator(runner, analyses_dir):
@@ -131,4 +142,4 @@ def test_jfc_run_invokes_orchestrator(runner, analyses_dir):
             ],
         )
     # Either succeeds or fails, but CLI invocation worked
-    assert "--help" not in result.output
+    assert "--help" not in _normalize_cli_output(result.output)

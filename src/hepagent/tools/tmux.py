@@ -13,6 +13,10 @@ import time
 
 from agents import function_tool
 
+_SLURM_INTERACTIVE_READY_PATTERN = (
+    r"salloc:\s+Nodes\s+.+\s+are\s+ready\s+for\s+job|[$#>❯➜]\s*$"
+)
+
 
 def _run(args: list[str]) -> tuple[str, int]:
     """Run a tmux subcommand and return (stdout, returncode)."""
@@ -36,12 +40,17 @@ def _send_keys(session_name: str, window_name: str, command: str) -> str:
 
 def _capture_pane(session_name: str, window_name: str, lines: int = 200) -> str:
     target = f"{session_name}:{window_name}"
-    out, rc = _run([
-        "tmux", "capture-pane",
-        "-p",
-        "-S", str(-lines),
-        "-t", target,
-    ])
+    out, rc = _run(
+        [
+            "tmux",
+            "capture-pane",
+            "-p",
+            "-S",
+            str(-lines),
+            "-t",
+            target,
+        ]
+    )
     if rc != 0:
         return ""
     return out
@@ -53,6 +62,7 @@ def _wait_for_pattern(
     pattern: str,
     timeout: int,
     poll_interval: int,
+    after_marker: str | None = None,
 ) -> str:
     target = f"{session_name}:{window_name}"
     deadline = time.monotonic() + timeout
@@ -60,6 +70,12 @@ def _wait_for_pattern(
 
     while time.monotonic() < deadline:
         out = _capture_pane(session_name, window_name)
+        if after_marker is not None:
+            marker_index = out.rfind(after_marker)
+            if marker_index == -1:
+                time.sleep(poll_interval)
+                continue
+            out = out[marker_index + len(after_marker) :]
         if compiled.search(out):
             return f"matched: pattern {pattern!r} found in pane '{target}'."
         time.sleep(poll_interval)
@@ -70,6 +86,7 @@ def _wait_for_pattern(
 # ---------------------------------------------------------------------------
 # Public function tools
 # ---------------------------------------------------------------------------
+
 
 @function_tool
 def tmux_list_sessions() -> str:
@@ -225,18 +242,21 @@ def request_slurm_interactive(
         cmd_parts.append(extra_args)
 
     salloc_cmd = " ".join(cmd_parts)
-    send_result = _send_keys(session_name, window_name, salloc_cmd)
+    marker = f"__hepagent_salloc_start_{time.monotonic_ns()}__"
+    marked_salloc_cmd = f"printf '\\n{marker}\\n'; {salloc_cmd}"
+    send_result = _send_keys(session_name, window_name, marked_salloc_cmd)
     if "Error" in send_result:
         return send_result
 
-    # salloc prints "salloc: Granted job allocation <id>" then drops to a shell prompt.
-    # Match common prompt characters: $, #, >, ❯ at the end of a line.
+    # Bound matching to this request, then accept SLURM's ready line or common prompt
+    # characters if the site drops directly into an allocated shell.
     wait_result = _wait_for_pattern(
         session_name,
         window_name,
-        pattern=r"[$#>❯]\s*$",
+        pattern=_SLURM_INTERACTIVE_READY_PATTERN,
         timeout=300,
         poll_interval=5,
+        after_marker=marker,
     )
     if wait_result.startswith("matched"):
         return f"Interactive SLURM allocation ready in '{session_name}:{window_name}'."

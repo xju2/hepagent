@@ -1,7 +1,8 @@
 # Web UI
 
 This document describes the browser-based chat UI added to `hepagent`, alongside
-the Textual TUI (`hepagent run`) and the prompt-toolkit REPL (`hepagent repl`).
+the headless runner (`hepagent run`) and the prompt-toolkit REPL
+(`hepagent repl`).
 
 ## Usage
 
@@ -35,7 +36,7 @@ hepagent repl --chat web-1a2b3c4d5e6f
 
 | Capability | Web UI |
 | --- | --- |
-| Token-level streaming | yes (the Textual TUI does not stream) |
+| Token-level streaming | yes |
 | Tool calls and outputs | collapsible steps |
 | Bash approval (`confirm`/`yolo`/`human`) | Approve/Reject buttons, rejection reason sent back to the agent |
 | `ask_user_for_info` | inline question in the transcript |
@@ -91,9 +92,9 @@ helpers in [`main.py`](../src/hepagent/main.py) that `run` and `repl` use.
    `chainlit.md`. `server.build_environment()` pins it to `~/.hepagent/web`.
 
 5. **Long-blocking tools must be offloaded.** The Agents SDK invokes synchronous
-   function tools *inline on the event loop*. The Textual frontend gets away
-   with this because it owns a private loop on its own thread; a web server does
-   not. `wait_for_slurm_job_completion` alone would freeze the server for the
+   function tools *inline on the event loop*. A terminal frontend gets away with
+   this because it owns a private loop on its own thread; a web server does not.
+   `wait_for_slurm_job_completion` alone would freeze the server for the
    lifetime of a job. Add any new sleeping/polling/CPU-heavy tool to
    `LONG_BLOCKING_TOOL_NAMES` in `web/tools.py`.
 

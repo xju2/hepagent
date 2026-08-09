@@ -8,11 +8,13 @@ is also verified via the helpers.
 Requires tmux to be installed and a server to be startable.
 """
 
+import re
 import time
 
 import pytest
 
 from hepagent.tools.tmux import (
+    _SLURM_INTERACTIVE_READY_PATTERN,
     _capture_pane,
     _run,
     _send_keys,
@@ -48,6 +50,7 @@ def _create_session():
 # _run helper
 # ---------------------------------------------------------------------------
 
+
 def test_run_success():
     out, rc = _run(["echo", "hello"])
     assert rc == 0
@@ -62,6 +65,7 @@ def test_run_failure():
 # ---------------------------------------------------------------------------
 # Session lifecycle
 # ---------------------------------------------------------------------------
+
 
 def test_create_session():
     _, rc = _run(["tmux", "new-session", "-d", "-s", SESSION, "-n", WINDOW])
@@ -88,6 +92,7 @@ def test_kill_nonexistent_session_returns_error():
 # _send_keys / _capture_pane
 # ---------------------------------------------------------------------------
 
+
 def test_send_and_capture():
     _create_session()
     _send_keys(SESSION, WINDOW, "echo hepagent_marker")
@@ -110,6 +115,7 @@ def test_capture_pane_missing_returns_empty():
 # _wait_for_pattern
 # ---------------------------------------------------------------------------
 
+
 def test_wait_for_pattern_matches():
     _create_session()
     # Shell prompt is visible after session creation; match common prompt chars ($, #, >, ❯)
@@ -131,3 +137,16 @@ def test_wait_pattern_on_missing_pane_times_out():
     elapsed = time.monotonic() - start
     assert result.startswith("timeout")
     assert elapsed < 6  # must not hang
+
+
+def test_slurm_interactive_ready_pattern_matches_nersc_ready_output():
+    output = """
+salloc: Granted job allocation 55294948
+salloc: Waiting for resource configuration
+salloc: Nodes nid[004154-004157] are ready for job
+"""
+    assert re.search(_SLURM_INTERACTIVE_READY_PATTERN, output)
+
+
+def test_slurm_interactive_ready_pattern_matches_arrow_prompt():
+    assert re.search(_SLURM_INTERACTIVE_READY_PATTERN, "\n➜   \n")

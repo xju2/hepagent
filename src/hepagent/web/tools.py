@@ -3,16 +3,16 @@
 Two problems are solved here.
 
 1. **Human-in-the-loop.** The stock ``execute_bash_command_with_confirmation``
-   and ``ask_user_for_info`` tools block on ``input()``. As the Textual and REPL
-   frontends already do, they are swapped for async equivalents that talk to a
+   and ``ask_user_for_info`` tools block on ``input()``. As the REPL frontend
+   already does, they are swapped for async equivalents that talk to a
    :class:`~hepagent.web.bridge.WebBridge`.
 
 2. **Blocking the event loop.** The Agents SDK invokes *synchronous* function
    tools inline on the running event loop (``result = the_func(...)`` in
-   ``agents/tool.py``). That is harmless for the Textual frontend, which owns a
-   private loop on its own thread, but on a web server it stalls the ASGI loop
-   and the websocket dies. Tools known to block for a long time are therefore
-   re-dispatched onto a worker thread.
+   ``agents/tool.py``). That is harmless for a terminal frontend that owns its
+   own loop, but on a web server it stalls the ASGI loop and the websocket dies.
+   Tools known to block for a long time are therefore re-dispatched onto a
+   worker thread.
 """
 
 from __future__ import annotations
@@ -66,9 +66,8 @@ def offload_blocking_tool(tool: FunctionTool) -> FunctionTool:
 class WebToolWrapper:
     """Swap terminal-bound tools for browser-driven equivalents.
 
-    Mirrors :class:`hepagent.agents.cli_repl.ReplToolWrapper` and
-    :class:`hepagent.agents.textual_bash.BashToolWrapper`, including their
-    name-substring tool matching and their return contracts.
+    Mirrors :class:`hepagent.agents.cli_repl.ReplToolWrapper`, including its
+    name-substring tool matching and its return contracts.
     """
 
     def __init__(self, bridge: WebBridge, config: Any):
