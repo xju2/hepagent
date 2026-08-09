@@ -9,6 +9,7 @@
 - **Skill-based domain knowledge**: a modular skill registry (`.agents/skills/`) packages domain-specific instructions (e.g. running Nyx cosmology simulations, accessing CERN Open Data) that agents load on demand, keeping prompts concise and context-relevant.
 - **First-class CLI REPL**: a Claude Code-inspired interactive REPL (`hepagent repl`) for day-to-day exploration, debugging, task progress, slash commands, streaming transcript output, command approval prompts, and markdown/code rendering.
 - **Headless task runner**: an automated one-shot interface (`hepagent run "task"`) for terminal-bench style evaluation and scripted tasks. It prints the final result to stdout.
+- **Web UI**: a browser chat interface (`hepagent web`, optional `web` extra) with token streaming, collapsible tool steps, and click-to-approve command execution, sharing sessions with the terminal frontends.
 - **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
@@ -138,6 +139,34 @@ Supported slash commands:
 
 For more detail, see [docs/REPL.md](docs/REPL.md).
 
+### Web UI
+
+A browser-based chat UI with token streaming, collapsible tool steps, and
+click-to-approve command execution. It needs the optional `web` extra:
+
+```bash
+uv sync --all-extras          # or: uv tool install 'hepagent[web]'
+hepagent web
+```
+
+Examples:
+
+```bash
+hepagent web --agent scientist
+hepagent web --model openai:gpt-5-mini
+hepagent web --chat my-session      # resume a previous conversation
+hepagent web --port 8080 --headless
+```
+
+It supports the same slash commands as the REPL (plus `/status`), and the same
+settings are available from the ⚙ panel next to the chat input. Sessions are
+shared with the terminal frontends, so a chat started in the browser can be
+continued with `hepagent repl --chat <session-id>`.
+
+Bind it to localhost only — the agent's bash tool runs commands as the server
+user, and there is no authentication.
+
+For more detail, see [docs/WEB.md](docs/WEB.md).
 
 ### Autonomous HEP analysis pipeline (`hepagent jfc`)
 

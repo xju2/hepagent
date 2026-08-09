@@ -8,6 +8,8 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 - Main runtime agent: `src/hepagent/agents/skilled.py`.
 - Interactive CLI REPL runtime: `src/hepagent/agents/cli_repl.py`.
 - Headless task runner: `hepagent run` in `src/hepagent/main.py`.
+- Web UI runtime: `src/hepagent/web/` (Chainlit; optional `web` extra).
+- Web UI architecture notes and anti-regression guidance: `docs/WEB.md`.
 - Shared instruction registry: `.agents/`:
   - `common/IDENTITY.md`, `common/OPERATION.md`, `common/ETHICS.md`
   - `storage/MEMORY.md`
@@ -22,6 +24,7 @@ Build and operate reliable AI agents for HEP/cosmology workflows, with strong su
 ## Required Agent Behavior
 - Treat the user task as authoritative; do not change intent.
 - If a domain skill is relevant, call `load_skill_details(<skill>)` first.
+- Before changing web UI behavior, read `docs/WEB.md` and preserve its invariants. In particular: only `web/app.py` may import Chainlit at module scope, command approval must fail closed, and blocking tools must stay in `LONG_BLOCKING_TOOL_NAMES`.
 - Only read skill resources on demand via `read_resource`.
 - Ask for missing required inputs with `ask_user_for_info` (one clear question at a time).
 - When a tool/action fails or the user corrects you, record it with `update_logbook`.

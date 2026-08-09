@@ -178,3 +178,9 @@ logs/
 notebooks/CAMB_CIC_BBKS_comparison.png
 notebooks/cmb_CAMB.tf
 notebooks/quick_tests.ipynb
+
+# Chainlit working files (the web UI pins these to ~/.hepagent/web, but an
+# ad-hoc `import chainlit` from the repo root recreates them here)
+.chainlit/
+.files/
+chainlit.md
