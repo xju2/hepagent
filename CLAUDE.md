@@ -24,13 +24,14 @@ Run the agent:
 uv run hepagent run --agent scientist "List repository files"
 uv run hepagent run --agent scientist "..." --model openai:gpt-5-mini
 uv run hepagent repl --agent shell
+uv run hepagent web            # browser UI; needs the optional `web` extra
 ```
 
 ## Architecture
 
 ### Entry point and CLI
 
-`src/hepagent/main.py` defines the `hepagent` Typer CLI with subcommands: `run`, `repl`, `list-agents`, `list-platforms`, `list-models`. A `DefaultToRunGroup` makes unknown first tokens route to `run` for backward compatibility.
+`src/hepagent/main.py` defines the `hepagent` Typer CLI with subcommands: `run`, `repl`, `web`, `list-agents`, `list-platforms`, `list-models`. A `DefaultToRunGroup` makes unknown first tokens route to `run` for backward compatibility.
 
 ### Agent types
 
@@ -41,6 +42,8 @@ uv run hepagent repl --agent shell
 **Textual TUI** (`agents/textual.py`): A Textual-based full-screen TUI used by `hepagent run`. Agent messages are grouped into reviewable steps; a virtual "task step" is appended after completion to allow new-task entry without clipping history. `VerticalScroll` must remain non-focusable to preserve arrow-key navigation. See `docs/TEXTUAL.md` for invariants — read it before changing TUI behavior.
 
 **CLI REPL** (`agents/cli_repl.py`): A prompt_toolkit REPL used by `hepagent repl`. Supports slash commands (`/agent`, `/model`, `/mode`, `/platforms`, etc.) and streaming output.
+
+**Web UI** (`web/`): A Chainlit browser chat used by `hepagent web`, behind the optional `web` extra. Only `web/app.py` imports Chainlit; `web/bridge.py`, `web/tools.py`, `web/turn.py` and `web/session.py` are transport-agnostic and unit-tested without it. `web/turn.py` ports the REPL's streaming loop (reusing its recovery helpers); `web/tools.py` swaps the terminal-bound tools for browser-driven ones and offloads blocking tools to threads. See `docs/WEB.md` for invariants — read it before changing web behavior.
 
 ### Skill registry (`.agents/`)
 
@@ -66,6 +69,7 @@ Common domain-agnostic tools: `src/hepagent/tools/common.py`. Nyx-specific tools
 
 - If a domain skill is relevant, call `load_skill_details(<skill>)` before proceeding.
 - Before changing Textual TUI behavior, read `docs/TEXTUAL.md` and preserve its invariants.
+- Before changing web UI behavior, read `docs/WEB.md` and preserve its invariants.
 - When a task fails or the user corrects the agent, record it with `update_logbook`.
 - For long HPC runs, use `wait_for_slurm_job_completion(job_id)` instead of polling manually.
 - If a task is described in a markdown file (e.g. `tasks/*.md`), follow the instructions there exactly and update the `## Progress report` section with progress and next steps.

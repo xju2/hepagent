@@ -10,6 +10,7 @@
 - **CLI REPL**: a Claude Code-inspired interactive REPL (`hepagent repl`) with slash commands, streaming transcript output, command approval prompts, and markdown/code rendering.
 - **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **Textual TUI agent**: a rich Terminal User Interface (`TextualAgent`) with real-time display of agent thinking, step navigation, and live cost tracking.
+- **Web UI**: a browser chat interface (`hepagent web`, optional `web` extra) with token streaming, collapsible tool steps, and click-to-approve command execution, sharing sessions with the terminal frontends.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
 - **Autonomous analysis pipeline** *(in development)*: a 5-phase multi-agent orchestration system (`hepagent jfc`) that drives a HEP physics analysis from a natural-language prompt to an analysis note. Each phase (Strategy → Exploration → Processing → Inference → Documentation) is executed by a dedicated executor agent, then evaluated by a panel of parallel reviewer agents (physics reviewer, critical reviewer, constructive reviewer) whose findings are adjudicated by an arbiter before the pipeline advances. Optional physicist co-design gates allow human-in-the-loop review at phase boundaries. Artifacts (STRATEGY.md, EXPLORATION.md, analysis note PDF, etc.) are written to a structured directory and reproduced via `pixi run all`.
@@ -125,6 +126,35 @@ Supported slash commands:
 - `/max-turn <turns>`
 
 For more detail, see [docs/REPL.md](docs/REPL.md).
+
+### Web UI
+
+A browser-based chat UI with token streaming, collapsible tool steps, and
+click-to-approve command execution. It needs the optional `web` extra:
+
+```bash
+uv sync --all-extras          # or: uv tool install 'hepagent[web]'
+hepagent web
+```
+
+Examples:
+
+```bash
+hepagent web --agent scientist
+hepagent web --model openai:gpt-5-mini
+hepagent web --chat my-session      # resume a previous conversation
+hepagent web --port 8080 --headless
+```
+
+It supports the same slash commands as the REPL (plus `/status`), and the same
+settings are available from the ⚙ panel next to the chat input. Sessions are
+shared with the terminal frontends, so a chat started in the browser can be
+continued with `hepagent repl --chat <session-id>`.
+
+Bind it to localhost only — the agent's bash tool runs commands as the server
+user, and there is no authentication.
+
+For more detail, see [docs/WEB.md](docs/WEB.md).
 
 
 #### References

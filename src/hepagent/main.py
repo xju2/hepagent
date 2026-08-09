@@ -331,6 +331,66 @@ def repl(
     cli.run()
 
 
+@app.command("web")
+def web(
+    ctx: typer.Context,
+    agent_name: str = typer.Option(
+        "scientist",
+        "--agent",
+        "-a",
+        help="Agent configuration to use.",
+    ),
+    yolo: bool = typer.Option(
+        False,
+        "--yolo",
+        help="Auto-approve all bash commands.",
+    ),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turn",
+        help="Maximum number of agent turns.",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help='Specify the model as "provider:model" (e.g. "openai:gpt-5-mini") '
+        "or a bare model name (defaults to cborg).",
+    ),
+    chat: str | None = typer.Option(
+        None,
+        "--chat",
+        help="Conversation id to resume for persistent SQLite chat history.",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    port: int = typer.Option(8000, "--port", help="Port to serve on."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Do not open a browser window on startup.",
+    ),
+) -> None:
+    """Start the browser-based chat UI."""
+    from hepagent.web.server import launch_web_ui
+
+    options = ctx.obj or {}
+    agent_name = agent_name.lower() or str(options.get("agent_name", "scientist"))
+    yolo = yolo or bool(options.get("yolo", False))
+    max_turns = max_turns or int(options.get("max_turns", DEFAULT_MAX_TURNS))
+    model = model or options.get("model")
+    chat = chat or options.get("chat")
+
+    launch_web_ui(
+        agent_name=agent_name,
+        model=model,
+        max_turns=max_turns,
+        mode="yolo" if yolo else "confirm",
+        chat=chat,
+        host=host,
+        port=port,
+        headless=headless,
+    )
+
+
 @app.command("list-agents")
 def list_agents() -> None:
     """List available run modes and role agents."""

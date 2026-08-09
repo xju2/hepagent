@@ -172,3 +172,9 @@ cython_debug/
 
 testarea/
 analyses/
+
+# Chainlit working files (the web UI pins these to ~/.hepagent/web, but an
+# ad-hoc `import chainlit` from the repo root recreates them here)
+.chainlit/
+.files/
+chainlit.md

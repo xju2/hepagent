@@ -1,27 +1,73 @@
 #!/usr/bin/env python3
-
-"""Get Globus Auth tokens with required scopes.
-https://gist.github.com/dingp/347b99840d9b3ff2553ee53f47f0bf07
-"""
+from __future__ import annotations
 
 import argparse
 import json
 import os
 import stat
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import globus_sdk
-from globus_sdk.exc import GlobusAPIError
+from globus_sdk.exc import GlobusAPIError, GlobusConnectionError
 
-CLIENT_ID = "fae5c579-490a-4d76-b6eb-d78f65caeb63"  # dingpf iri-nersc
+DEFAULT_CLIENT_ID = "fae5c579-490a-4d76-b6eb-d78f65caeb63"
+ALCF_CLIENT_ID = "8b84fc2d-49e9-49ea-b54d-b3a29a70cf31"
+KNOWN_CLIENT_IDS = (DEFAULT_CLIENT_ID, ALCF_CLIENT_ID)
 RESOURCE_SERVER = "auth.globus.org"
+FACILITY_SCOPE_MAP = {
+    "nersc": {
+        "scope": (
+            "https://auth.globus.org/scopes/"
+            "ed3e577d-f7f3-4639-b96e-ff5a8445d699/iri_api"
+        ),
+        "label": "NERSC IRI API",
+    },
+    "alcf": {
+        "scope": (
+            "https://auth.globus.org/scopes/"
+            "6be511f6-a071-471f-9bc0-02a0d0836723/filesystem"
+        ),
+        "label": "ALCF IRI API",
+    },
+}
+NERSC_IRI_SCOPE = (
+    FACILITY_SCOPE_MAP["nersc"]["scope"]
+)
+ALCF_IRI_SCOPE = (
+    FACILITY_SCOPE_MAP["alcf"]["scope"]
+)
+DEFAULT_FACILITIES = tuple(FACILITY_SCOPE_MAP)
 REQUIRED_SCOPES = {
     "openid",
     "profile",
     "email",
     "urn:globus:auth:scope:auth.globus.org:view_identities",
 }
+DEFAULT_IRI_VALIDATE_URL = "https://api.iri.nersc.gov/api/v1/account/projects"
+ALCF_BASE_URL = "https://api.alcf.anl.gov"
+ALCF_HOME_RESOURCE_ID = "6115bd2c-957a-4543-abff-5fae52992ff2"
+
+SCOPE_LABELS = {
+    config["scope"]: config["label"] for config in FACILITY_SCOPE_MAP.values()
+}
+
+
+def get_client_id(facilities: list[str]) -> str:
+    if "alcf" in facilities:
+        return ALCF_CLIENT_ID
+    return DEFAULT_CLIENT_ID
+
+
+def get_refresh_client_ids(facilities: list[str]) -> list[str]:
+    client_ids = [get_client_id(facilities)]
+    for client_id in KNOWN_CLIENT_IDS:
+        if client_id not in client_ids:
+            client_ids.append(client_id)
+    return client_ids
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,11 +90,85 @@ def parse_args() -> argparse.Namespace:
         help="Print the access token to stdout (off by default).",
     )
     parser.add_argument(
+        "--facilities",
+        nargs="+",
+        choices=sorted(FACILITY_SCOPE_MAP),
+        default=list(DEFAULT_FACILITIES),
+        help=(
+            "Facility tokens to request and manage "
+            f"(default: {' '.join(DEFAULT_FACILITIES)})"
+        ),
+    )
+    parser.add_argument(
         "--force-login",
         action="store_true",
         help="Skip refresh and force interactive browser login.",
     )
+    parser.add_argument(
+        "--refresh-only",
+        action="store_true",
+        help="Refresh saved tokens only; do not fall back to interactive login.",
+    )
+    parser.add_argument(
+        "--prompt-login",
+        action="store_true",
+        help=(
+            "Add prompt=login to the Globus authorize URL to force "
+            "re-authentication. This is implied by --force-login."
+        ),
+    )
+    parser.add_argument(
+        "--no-prompt-login",
+        action="store_true",
+        help=(
+            "Do not add prompt=login when --force-login starts the browser "
+            "auth flow."
+        ),
+    )
+    parser.add_argument(
+        "--validate-iri",
+        action="store_true",
+        help="Validate selected facility tokens by calling IRI endpoints.",
+    )
+    parser.add_argument(
+        "--iri-validate-url",
+        default=None,
+        help=(
+            "Explicit IRI GET endpoint used by --validate-iri. "
+            "Defaults to NERSC account/projects for nersc and ALCF filesystem ls "
+            "for alcf."
+        ),
+    )
+    parser.add_argument(
+        "--alcf-validate-resource-id",
+        default=ALCF_HOME_RESOURCE_ID,
+        help=(
+            "ALCF resource_id used for default --validate-iri filesystem ls "
+            f"(default: {ALCF_HOME_RESOURCE_ID}, Home)."
+        ),
+    )
+    parser.add_argument(
+        "--alcf-validate-path",
+        default=None,
+        help=(
+            "ALCF filesystem path used for default --validate-iri filesystem ls "
+            "(default: /home/$USER/)."
+        ),
+    )
     return parser.parse_args()
+
+
+def get_selected_facilities(args: argparse.Namespace) -> list[str]:
+    # Deduplicate while preserving CLI order.
+    return list(dict.fromkeys(args.facilities))
+
+
+def get_required_other_scopes(facilities: list[str]) -> set[str]:
+    return {FACILITY_SCOPE_MAP[facility]["scope"] for facility in facilities}
+
+
+def get_requested_scopes(facilities: list[str]) -> set[str]:
+    return REQUIRED_SCOPES | get_required_other_scopes(facilities)
 
 
 def parse_scope_string(scope_string: str) -> set[str]:
@@ -80,60 +200,413 @@ def save_tokens(token_file: Path, tokens: dict) -> None:
     os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)
 
 
-def interactive_login(client: globus_sdk.NativeAppAuthClient) -> dict:
-    client.oauth2_start_flow(
-        requested_scopes=" ".join(sorted(REQUIRED_SCOPES)),
-        refresh_tokens=True,
-    )
-    print("Open this URL, login, and consent:")
-    print(client.oauth2_get_authorize_url())
-    code = input("\nEnter authorization code: ").strip()
-    token_response = client.oauth2_exchange_code_for_tokens(code)
-    return token_response.by_resource_server[RESOURCE_SERVER]
+def get_refresh_token(stored_tokens: dict) -> str | None:
+    if "refresh_token" in stored_tokens:
+        return stored_tokens.get("refresh_token")
+
+    auth_tokens = stored_tokens.get(RESOURCE_SERVER)
+    if isinstance(auth_tokens, dict):
+        return auth_tokens.get("refresh_token")
+
+    return None
 
 
-def refresh_tokens(client: globus_sdk.NativeAppAuthClient, refresh_token: str) -> dict | None:
+def get_token_for_scope(
+    token_response_data: dict, scope: str, *, label: str = "auxiliary"
+) -> dict:
+    for token_data in token_response_data.get("other_tokens", []):
+        if scope in parse_scope_string(token_data.get("scope", "")):
+            return token_data
+    raise RuntimeError(f"Missing token for required {label} scope: {scope}")
+
+
+def get_facility_token(token_response_data: dict, facility: str) -> dict:
+    scope = FACILITY_SCOPE_MAP[facility]["scope"]
+    label = FACILITY_SCOPE_MAP[facility]["label"]
+    return get_token_for_scope(token_response_data, scope, label=label)
+
+
+def get_refresh_token_for_scope(stored_tokens: dict, scope: str) -> str | None:
     try:
-        token_response = client.oauth2_refresh_token(refresh_token)
-        return token_response.by_resource_server[RESOURCE_SERVER]
-    except GlobusAPIError as exc:
-        print(f"Refresh failed ({exc.http_status}); switching to interactive login.")
+        return get_token_for_scope(
+            stored_tokens,
+            scope,
+            label=SCOPE_LABELS.get(scope, "auxiliary"),
+        ).get("refresh_token")
+    except RuntimeError:
         return None
 
 
-def main() -> None:
-    args = parse_args()
-    client = globus_sdk.NativeAppAuthClient(CLIENT_ID)
+def replace_token_for_scope(
+    token_response_data: dict, scope: str, refreshed_token_data: dict
+) -> dict:
+    merged = dict(token_response_data)
+    other_tokens = list(merged.get("other_tokens", []))
+    for index, token_data in enumerate(other_tokens):
+        if scope in parse_scope_string(token_data.get("scope", "")):
+            other_tokens[index] = refreshed_token_data
+            break
+    else:
+        other_tokens.append(refreshed_token_data)
+    merged["other_tokens"] = other_tokens
+    return merged
 
-    auth_data = None
-    if not args.force_login:
-        stored = load_tokens(args.token_file)
-        if stored and stored.get("refresh_token"):
-            auth_data = refresh_tokens(client, stored["refresh_token"])
 
-    if auth_data is None:
-        auth_data = interactive_login(client)
+def merge_auth_token_data(
+    token_response_data: dict, refreshed_auth_data: dict
+) -> dict:
+    merged = dict(refreshed_auth_data)
+    merged["other_tokens"] = list(token_response_data.get("other_tokens", []))
+    return merged
+
+
+def validate_auth_data(auth_data: dict, facilities: list[str]) -> dict:
+    if auth_data.get("resource_server") != RESOURCE_SERVER:
+        raise RuntimeError(
+            f"Missing token for required resource server: {RESOURCE_SERVER}"
+        )
 
     granted = parse_scope_string(auth_data.get("scope", ""))
     missing = REQUIRED_SCOPES - granted
     if missing:
         raise RuntimeError(f"Missing required scopes: {sorted(missing)}")
 
+    for facility in facilities:
+        get_facility_token(auth_data, facility)
+
+    return auth_data
+
+
+def default_alcf_validate_path() -> str:
+    username = os.environ.get("USER") or os.environ.get("LOGNAME")
+    if not username:
+        raise RuntimeError(
+            "Could not determine a default ALCF validation path. "
+            "Pass --alcf-validate-path /home/<username>/."
+        )
+    return f"/home/{username}/"
+
+
+def build_alcf_ls_validate_url(resource_id: str, path: str) -> str:
+    quoted_resource_id = urllib.parse.quote(resource_id, safe="")
+    query = urllib.parse.urlencode(
+        {"path": path},
+        quote_via=urllib.parse.quote,
+        safe="/",
+    )
+    return (
+        f"{ALCF_BASE_URL}/api/v1/filesystem/ls/{quoted_resource_id}"
+        f"?{query}"
+    )
+
+
+def get_validate_facilities(
+    args: argparse.Namespace, facilities: list[str]
+) -> list[str]:
+    if args.iri_validate_url and len(facilities) > 1:
+        raise RuntimeError(
+            "--iri-validate-url can only be used when validating one facility. "
+            "Select one facility with --facilities."
+        )
+
+    return facilities
+
+
+def get_validate_url(args: argparse.Namespace, validate_facility: str) -> str:
+    if args.iri_validate_url:
+        return args.iri_validate_url
+
+    if validate_facility == "nersc":
+        return DEFAULT_IRI_VALIDATE_URL
+
+    if validate_facility == "alcf":
+        path = args.alcf_validate_path or default_alcf_validate_path()
+        return build_alcf_ls_validate_url(args.alcf_validate_resource_id, path)
+
+    raise RuntimeError(f"No default validation endpoint for {validate_facility}")
+
+
+def should_prompt_login(args: argparse.Namespace) -> bool:
+    return args.prompt_login or (args.force_login and not args.no_prompt_login)
+
+
+def validate_iri_token(facility_token_data: dict, validate_url: str) -> dict | list:
+    request = urllib.request.Request(
+        validate_url,
+        headers={
+            "accept": "application/json",
+            "Authorization": f"Bearer {facility_token_data['access_token']}",
+            "User-Agent": "iri-api-client/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            body = response.read().decode("utf-8")
+            data = json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        details = body.strip() or exc.reason
+        raise RuntimeError(
+            f"IRI validation failed with HTTP {exc.code} from {validate_url}: {details}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"IRI validation request failed for {validate_url}: {exc.reason}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"IRI validation returned non-JSON data from {validate_url}"
+        ) from exc
+
+    if isinstance(data, dict):
+        session_info = data.get("session_info")
+        if isinstance(session_info, dict):
+            authentications = session_info.get("authentications")
+            if isinstance(authentications, dict) and not authentications:
+                raise RuntimeError(
+                    "IRI validation succeeded but session_info.authentications is empty. "
+                    "Re-run with --force-login and use a Chrome incognito window."
+                )
+
+    return data
+
+
+def interactive_login(
+    client: globus_sdk.NativeAppAuthClient,
+    facilities: list[str],
+    *,
+    prompt_login: bool = False,
+) -> dict:
+    client.oauth2_start_flow(
+        requested_scopes=" ".join(sorted(get_requested_scopes(facilities))),
+        refresh_tokens=True,
+    )
+    print("Open this URL, login, and consent:")
+    prompt = "login" if prompt_login else globus_sdk.MISSING
+    print(client.oauth2_get_authorize_url(prompt=prompt))
+    code = input("\nEnter authorization code: ").strip()
+    if not code:
+        raise RuntimeError(
+            "No authorization code entered. Re-run the script and paste the code "
+            "shown by Globus after login."
+        )
+    try:
+        token_response = client.oauth2_exchange_code_for_tokens(code)
+    except GlobusAPIError as exc:
+        if exc.http_status == 400:
+            raise RuntimeError(
+                "Authorization code exchange failed. The code was empty, invalid, "
+                "expired, or already used. Re-run the script and complete the "
+                "Globus login flow again."
+            ) from exc
+        raise RuntimeError(
+            f"Authorization code exchange failed with HTTP {exc.http_status}. "
+            "Re-run the script and try again."
+        ) from exc
+    return token_response.data
+
+
+def refresh_tokens(
+    client: globus_sdk.NativeAppAuthClient, refresh_token: str
+) -> dict:
+    token_response = client.oauth2_refresh_token(refresh_token)
+    return token_response.data
+
+
+def refresh_tokens_with_client_ids(
+    refresh_token: str,
+    client_ids: list[str],
+    *,
+    token_label: str,
+) -> tuple[dict | None, str | None]:
+    failures = []
+    for client_id in client_ids:
+        client = globus_sdk.NativeAppAuthClient(client_id)
+        try:
+            return refresh_tokens(client, refresh_token), client_id
+        except GlobusAPIError as exc:
+            failures.append(f"{client_id}: HTTP {exc.http_status}")
+        except GlobusConnectionError:
+            failures.append(f"{client_id}: connection error")
+
+    print(
+        f"Refresh failed for {token_label} with known Globus client IDs "
+        f"({'; '.join(failures)})."
+    )
+    return None, None
+
+
+def refresh_stored_tokens(
+    stored_tokens: dict,
+    facilities: list[str],
+    client_ids: list[str],
+) -> tuple[dict | None, bool, list[str]]:
+    refreshed_tokens = dict(stored_tokens)
+    used_refresh = False
+    used_client_ids = []
+    auth_refresh_token = get_refresh_token(stored_tokens)
+    if auth_refresh_token:
+        auth_data, client_id = refresh_tokens_with_client_ids(
+            auth_refresh_token,
+            client_ids,
+            token_label="Globus Auth token",
+        )
+        if auth_data is not None:
+            refreshed_tokens = merge_auth_token_data(refreshed_tokens, auth_data)
+            used_refresh = True
+            if client_id and client_id not in used_client_ids:
+                used_client_ids.append(client_id)
+
+    for facility in facilities:
+        scope = FACILITY_SCOPE_MAP[facility]["scope"]
+        refresh_token = get_refresh_token_for_scope(stored_tokens, scope)
+        if refresh_token:
+            label = FACILITY_SCOPE_MAP[facility]["label"]
+            refreshed_token_data, client_id = refresh_tokens_with_client_ids(
+                refresh_token,
+                client_ids,
+                token_label=f"{label} token",
+            )
+            if refreshed_token_data is not None:
+                refreshed_tokens = replace_token_for_scope(
+                    refreshed_tokens, scope, refreshed_token_data
+                )
+                used_refresh = True
+                if client_id and client_id not in used_client_ids:
+                    used_client_ids.append(client_id)
+
+        try:
+            get_facility_token(refreshed_tokens, facility)
+        except RuntimeError:
+            return None, used_refresh, used_client_ids
+
+    if used_refresh:
+        return refreshed_tokens, True, used_client_ids
+
+    return None, False, used_client_ids
+
+
+def main() -> None:
+    args = parse_args()
+    if args.force_login and args.refresh_only:
+        raise RuntimeError("Choose only one of --force-login or --refresh-only")
+    if args.prompt_login and args.no_prompt_login:
+        raise RuntimeError("Choose only one of --prompt-login or --no-prompt-login")
+    facilities = get_selected_facilities(args)
+    validate_facilities = (
+        get_validate_facilities(args, facilities) if args.validate_iri else []
+    )
+
+    client_id = get_client_id(facilities)
+    client = globus_sdk.NativeAppAuthClient(client_id)
+
+    auth_data = None
+    used_refresh = False
+    used_refresh_client_ids = []
+    if not args.force_login:
+        stored = load_tokens(args.token_file)
+        if stored:
+            auth_data, used_refresh, used_refresh_client_ids = refresh_stored_tokens(
+                stored,
+                facilities,
+                get_refresh_client_ids(facilities),
+            )
+
+    if auth_data is None:
+        if args.refresh_only:
+            facility_labels = ", ".join(
+                FACILITY_SCOPE_MAP[facility]["label"] for facility in facilities
+            )
+            raise RuntimeError(
+                "Refresh-only mode failed. No usable saved refresh token was found "
+                f"or token refresh did not return all required tokens for: {facility_labels}."
+            )
+        auth_data = interactive_login(
+            client, facilities, prompt_login=should_prompt_login(args)
+        )
+
+    try:
+        validate_auth_data(auth_data, facilities)
+    except RuntimeError as exc:
+        if (
+            used_refresh
+            and not args.refresh_only
+            and "Missing token for required " in str(exc)
+        ):
+            print(
+                "Refreshed tokens did not include all required facility tokens; "
+                "switching to interactive login."
+            )
+            auth_data = interactive_login(
+                client, facilities, prompt_login=should_prompt_login(args)
+            )
+            validate_auth_data(auth_data, facilities)
+        else:
+            raise
+
     save_tokens(args.token_file, auth_data)
 
-    expires_at = auth_data.get("expires_at_seconds")
-    if expires_at:
-        ttl = int(expires_at - time.time())
-        print(f"\nAccess token valid for ~{max(ttl, 0)} seconds.")
+    if args.validate_iri:
+        for validate_facility in validate_facilities:
+            validate_token_data = get_facility_token(auth_data, validate_facility)
+            validate_url = get_validate_url(args, validate_facility)
+            validation_data = validate_iri_token(validate_token_data, validate_url)
+            validate_label = FACILITY_SCOPE_MAP[validate_facility]["label"]
+            print(
+                f"IRI validation succeeded for {validate_label} "
+                f"against {validate_url}"
+            )
+            if isinstance(validation_data, dict):
+                session_info = validation_data.get("session_info")
+                if isinstance(session_info, dict):
+                    session_id = session_info.get("session_id")
+                    if session_id:
+                        print(f"{validate_label} session_id: {session_id}")
+                task_id = validation_data.get("task_id")
+                if task_id:
+                    print(f"{validate_label} validation task_id: {task_id}")
+                task_uri = validation_data.get("task_uri")
+                if task_uri:
+                    print(f"{validate_label} validation task_uri: {task_uri}")
+            elif isinstance(validation_data, list):
+                print(
+                    f"{validate_label} validation response items: "
+                    f"{len(validation_data)}"
+                )
 
     print(f"Saved token data to {args.token_file}")
-    print(f"Granted scopes: {auth_data.get('scope', '')}")
+    print(f"Selected facilities: {', '.join(facilities)}")
+    print(f"Globus client ID: {client_id}")
+    if used_refresh_client_ids:
+        print(
+            "Refresh client IDs used: "
+            f"{', '.join(used_refresh_client_ids)}"
+        )
+    print(f"Granted Globus Auth scopes: {auth_data.get('scope', '')}")
+    token_data_by_facility = {
+        facility: get_facility_token(auth_data, facility) for facility in facilities
+    }
+    for facility in facilities:
+        label = FACILITY_SCOPE_MAP[facility]["label"]
+        token_data = token_data_by_facility[facility]
+        expires_at = token_data.get("expires_at_seconds")
+        if expires_at:
+            ttl = int(expires_at - time.time())
+            print(f"{label} access token valid for ~{max(ttl, 0)} seconds.")
+        print(f"{label} token resource server: {token_data.get('resource_server')}")
+        print(f"{label} token scopes: {token_data.get('scope', '')}")
 
     if args.print_token:
-        print("\nAccess token:")
-        print(auth_data["access_token"])
+        for facility in facilities:
+            label = FACILITY_SCOPE_MAP[facility]["label"]
+            print(f"\n{label} access token:")
+            print(token_data_by_facility[facility]["access_token"])
     else:
-        print("Access token not printed (use --print-token to display it).")
+        print(
+            "Selected facility access tokens not printed "
+            "(use --print-token to display them)."
+        )
 
 
 if __name__ == "__main__":
