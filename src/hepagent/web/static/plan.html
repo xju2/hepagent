@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis plan</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2024; --muted: #6b7280;
+  --line: #d6dae0; --node: #ffffff; --node-line: #b8bfc8; --accent: #2563eb;
+  --ok: #15803d; --warn: #b45309; --err: #b91c1c; --err-bg: #fef2f2;
+  --warn-bg: #fffbeb; --informs: #9ca3af; --sel: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a; --panel: #1c2024; --ink: #e6e8ea; --muted: #9aa3ad;
+    --line: #333a42; --node: #232830; --node-line: #444c56; --accent: #60a5fa;
+    --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --err-bg: #2a1a1a;
+    --warn-bg: #2a2416; --informs: #6b7280; --sel: #60a5fa;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
+  font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+header {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .meta { color: var(--muted); font-size: 12px; }
+header .spacer { flex: 1; }
+button {
+  font: inherit; padding: 5px 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--err); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+main { flex: 1; display: flex; min-height: 0; }
+#canvas-wrap { flex: 1; overflow: auto; position: relative; }
+svg { display: block; }
+.node rect {
+  fill: var(--node); stroke: var(--node-line); stroke-width: 1.5; rx: 8;
+}
+.node.selected rect { stroke: var(--sel); stroke-width: 2.5; }
+.node.entry rect { stroke-dasharray: none; stroke-width: 2; }
+.node.invalid rect { stroke: var(--err); }
+.node text { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.node text.sub { fill: var(--muted); font-size: 11px; font-weight: 400; }
+.node text.badge { fill: var(--warn); font-size: 11px; font-weight: 600; }
+.node { cursor: grab; }
+.node.dragging { cursor: grabbing; }
+path.edge { fill: none; stroke: var(--node-line); stroke-width: 1.6; }
+path.edge.informs { stroke: var(--informs); stroke-dasharray: 5 4; }
+path.edge.selected { stroke: var(--sel); stroke-width: 3; }
+path.edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+#side {
+  width: 380px; flex: 0 0 380px; background: var(--panel); overflow-y: auto;
+  border-left: 1px solid var(--line); padding: 14px 16px;
+}
+#side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); margin: 0 0 10px; }
+label { display: block; margin: 10px 0 3px; font-size: 12px; color: var(--muted); }
+input[type=text], input[type=number], textarea, select {
+  width: 100%; font: inherit; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monospace;
+  font-size: 12px; line-height: 1.45; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.checks label { display: flex; align-items: center; gap: 5px; margin: 0;
+  color: var(--ink); font-size: 13px; }
+.checks input { width: auto; }
+#findings { flex: 0 0 auto; max-height: 26vh; overflow-y: auto;
+  border-top: 1px solid var(--line); background: var(--panel); }
+#findings .f { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+#findings .f.error { background: var(--err-bg); color: var(--err); }
+#findings .f.warning { background: var(--warn-bg); color: var(--warn); }
+#findings .f code { font-family: ui-monospace, monospace; font-size: 12px; }
+#findings .clean { padding: 6px 16px; color: var(--ok); font-size: 13px; }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0; }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 99px;
+  border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.pill.dirty { color: var(--warn); border-color: var(--warn); }
+.pill.approved { color: var(--ok); border-color: var(--ok); }
+#toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 16px; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none;
+  max-width: 80vw;
+}
+#toast.err { border-color: var(--err); color: var(--err); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Analysis plan</h1>
+  <span class="meta" id="subtitle"></span>
+  <span class="pill" id="state">loading</span>
+  <span class="spacer"></span>
+  <button id="add-node">+ Node</button>
+  <button id="connect">Connect</button>
+  <button id="relayout">Auto-layout</button>
+  <button id="save">Save</button>
+  <button id="approve" class="primary">Approve &amp; run</button>
+</header>
+<main>
+  <div id="canvas-wrap"><svg id="canvas"></svg></div>
+  <aside id="side"><h2>Nothing selected</h2>
+    <p class="hint">Click a node or an edge to edit it. Drag a node to move it.</p>
+  </aside>
+</main>
+<div id="findings"></div>
+<div id="toast"></div>
+<script>
+"use strict";
+
+const NAME = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
+const API = `/api/plan/${encodeURIComponent(NAME)}`;
+const NW = 210, NH = 62, COL = 300, ROW = 92, PAD = 40;
+const KINDS = ["requires", "informs"];
+const INJECTS = ["full", "summary", "none"];
+const GATES = ["commitments", "human", "codesign"];
+const NODE_TYPES = ["commitment", "dataset", "method", "evidence", "figure", "artifact"];
+const EDGE_TYPES = ["derives_from", "supports", "resolves", "downscopes", "commits_to", "requires"];
+
+let plan = null, layout = {}, findings = [], blocking = false, approved = false;
+let reviewers = [];
+let sel = null;            // {type:"node"|"edge", id} | null
+let dirty = false;
+let connecting = null;     // null | "arm" | {from: id}
+
+const $ = (id) => document.getElementById(id);
+const svg = $("canvas");
+
+/* ---------------------------------------------------------------- helpers */
+
+function toast(message, isError) {
+  const el = $("toast");
+  el.textContent = message;
+  el.className = isError ? "err" : "";
+  el.style.display = "block";
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.style.display = "none"; }, isError ? 6000 : 2600);
+}
+
+function nodeById(id) { return plan.nodes.find((n) => n.id === id); }
+
+function position(node) {
+  const meta = node.metadata || {};
+  if (typeof meta.x === "number" && typeof meta.y === "number") return { x: meta.x, y: meta.y };
+  const [col, row] = layout[node.id] || [0, 0];
+  return { x: PAD + col * COL, y: PAD + row * ROW };
+}
+
+function setPosition(node, x, y) {
+  node.metadata = Object.assign({}, node.metadata, { x: Math.round(x), y: Math.round(y) });
+}
+
+function markDirty() {
+  dirty = true;
+  renderState();
+}
+
+function renderState() {
+  const pill = $("state");
+  if (dirty) { pill.textContent = "unsaved"; pill.className = "pill dirty"; }
+  else if (approved) { pill.textContent = "approved"; pill.className = "pill approved"; }
+  else { pill.textContent = "saved"; pill.className = "pill"; }
+  $("approve").disabled = blocking || dirty;
+  $("approve").title = blocking
+    ? "Resolve the blocking findings first"
+    : dirty ? "Save your changes first" : "Release this plan to the orchestrator";
+}
+
+function nodesWithFindings() {
+  const bad = new Set();
+  for (const f of findings) if (f.severity === "error" && f.node_id) bad.add(f.node_id);
+  return bad;
+}
+
+/* ----------------------------------------------------------------- render */
+
+function render() {
+  const bad = nodesWithFindings();
+  const positions = {};
+  for (const node of plan.nodes) positions[node.id] = position(node);
+
+  let maxX = 0, maxY = 0;
+  for (const p of Object.values(positions)) {
+    maxX = Math.max(maxX, p.x + NW); maxY = Math.max(maxY, p.y + NH);
+  }
+  svg.setAttribute("width", maxX + PAD);
+  svg.setAttribute("height", maxY + PAD);
+  svg.textContent = "";
+
+  const defs = el("defs");
+  defs.appendChild(arrowMarker("arrow", "var(--node-line)"));
+  defs.appendChild(arrowMarker("arrow-informs", "var(--informs)"));
+  defs.appendChild(arrowMarker("arrow-sel", "var(--sel)"));
+  svg.appendChild(defs);
+
+  plan.edges.forEach((edge, index) => {
+    const a = positions[edge.upstream], b = positions[edge.downstream];
+    if (!a || !b) return;
+    const selected = sel && sel.type === "edge" && sel.id === index;
+    const d = edgePath(a, b);
+    const hit = el("path", { class: "edge-hit", d });
+    hit.addEventListener("click", (ev) => { ev.stopPropagation(); select("edge", index); });
+    const line = el("path", {
+      class: `edge ${edge.kind === "informs" ? "informs" : ""} ${selected ? "selected" : ""}`,
+      d,
+      "marker-end": `url(#${selected ? "arrow-sel" : edge.kind === "informs" ? "arrow-informs" : "arrow"})`,
+    });
+    svg.appendChild(line);
+    svg.appendChild(hit);
+  });
+
+  for (const node of plan.nodes) {
+    const p = positions[node.id];
+    const selected = sel && sel.type === "node" && sel.id === node.id;
+    const group = el("g", {
+      class: `node ${selected ? "selected" : ""} ${bad.has(node.id) ? "invalid" : ""}`,
+      transform: `translate(${p.x},${p.y})`,
+      "data-id": node.id,
+    });
+    group.appendChild(el("rect", { width: NW, height: NH }));
+    group.appendChild(text(node.label || node.id, 12, 23, ""));
+    group.appendChild(text(node.id, 12, 40, "sub"));
+    group.appendChild(text(node.artifact || "", 12, 55, "sub"));
+    const gates = (node.gates || []).filter((g) => g.enabled !== false).map((g) => g.name);
+    if (gates.length) group.appendChild(text("⛋ " + gates.join(" "), NW - 12, 23, "badge", "end"));
+    if (node.produces_note) group.appendChild(text("AN", NW - 12, 40, "sub", "end"));
+    attachDrag(group, node);
+    svg.appendChild(group);
+  }
+}
+
+function el(name, attrs) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  return node;
+}
+
+function text(value, x, y, cls, anchor) {
+  const t = el("text", { x, y, class: cls || "" });
+  if (anchor) t.setAttribute("text-anchor", anchor);
+  t.textContent = value;
+  return t;
+}
+
+function arrowMarker(id, color) {
+  const marker = el("marker", {
+    id, viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "6", markerHeight: "6", orient: "auto-start-reverse",
+  });
+  marker.appendChild(el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+  return marker;
+}
+
+function edgePath(a, b) {
+  const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2;
+  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+}
+
+function attachDrag(group, node) {
+  let start = null;
+  group.addEventListener("pointerdown", (ev) => {
+    if (connecting) return;
+    ev.stopPropagation();
+    const p = position(node);
+    start = { px: ev.clientX, py: ev.clientY, x: p.x, y: p.y, moved: false };
+    group.setPointerCapture(ev.pointerId);
+    group.classList.add("dragging");
+  });
+  group.addEventListener("pointermove", (ev) => {
+    if (!start) return;
+    const dx = ev.clientX - start.px, dy = ev.clientY - start.py;
+    if (!start.moved && Math.hypot(dx, dy) < 3) return;
+    start.moved = true;
+    setPosition(node, Math.max(0, start.x + dx), Math.max(0, start.y + dy));
+    render();
+  });
+  group.addEventListener("pointerup", (ev) => {
+    group.classList.remove("dragging");
+    const moved = start && start.moved;
+    start = null;
+    if (moved) markDirty();
+  });
+  group.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (connecting) { onConnectClick(node.id); return; }
+    select("node", node.id);
+  });
+}
+
+/* ------------------------------------------------------------- side panel */
+
+function select(type, id) { sel = { type, id }; render(); renderSide(); }
+
+function field(parent, label, value, onInput, type) {
+  const l = document.createElement("label");
+  l.textContent = label;
+  parent.appendChild(l);
+  const input = document.createElement(type === "textarea" ? "textarea" : "input");
+  if (type && type !== "textarea") input.type = type;
+  input.value = value == null ? "" : value;
+  input.addEventListener("input", () => { onInput(input.value); markDirty(); });
+  parent.appendChild(input);
+  return input;
+}
+
+function choice(parent, label, value, options, onChange) {
+  const l = document.createElement("label");
+  l.textContent = label;
+  parent.appendChild(l);
+  const select_ = document.createElement("select");
+  for (const option of options) {
+    const o = document.createElement("option");
+    o.value = option; o.textContent = option;
+    if (option === value) o.selected = true;
+    select_.appendChild(o);
+  }
+  select_.addEventListener("change", () => { onChange(select_.value); markDirty(); });
+  parent.appendChild(select_);
+  return select_;
+}
+
+function checkboxes(parent, label, all, chosen, onChange) {
+  const l = document.createElement("label");
+  l.textContent = label;
+  parent.appendChild(l);
+  const box = document.createElement("div");
+  box.className = "checks";
+  for (const name of all) {
+    const wrap = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = chosen.includes(name);
+    input.addEventListener("change", () => {
+      const next = all.filter((n) =>
+        n === name ? input.checked : chosen.includes(n));
+      onChange(next);
+      markDirty();
+      renderSide();
+    });
+    wrap.appendChild(input);
+    wrap.appendChild(document.createTextNode(name));
+    box.appendChild(wrap);
+  }
+  parent.appendChild(box);
+}
+
+function toggle(parent, label, value, onChange) {
+  const wrap = document.createElement("label");
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.gap = "6px";
+  wrap.style.marginTop = "10px";
+  wrap.style.color = "var(--ink)";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = !!value;
+  input.style.width = "auto";
+  input.addEventListener("change", () => { onChange(input.checked); markDirty(); renderSide(); });
+  wrap.appendChild(input);
+  wrap.appendChild(document.createTextNode(label));
+  parent.appendChild(wrap);
+}
+
+function renderSide() {
+  const side = $("side");
+  side.textContent = "";
+  if (!sel) {
+    side.appendChild(heading("Nothing selected"));
+    side.appendChild(hint("Click a node or an edge to edit it. Drag a node to move it."));
+    return;
+  }
+  if (sel.type === "node") return renderNodePanel(side, nodeById(sel.id));
+  return renderEdgePanel(side, plan.edges[sel.id], sel.id);
+}
+
+function heading(value) {
+  const h = document.createElement("h2");
+  h.textContent = value;
+  return h;
+}
+
+function hint(value) {
+  const p = document.createElement("p");
+  p.className = "hint";
+  p.textContent = value;
+  return p;
+}
+
+function renderNodePanel(side, node) {
+  if (!node) { sel = null; return renderSide(); }
+  side.appendChild(heading(`Node · ${node.id}`));
+
+  field(side, "Label", node.label, (v) => { node.label = v; render(); });
+  field(side, "Working directory", node.directory, (v) => { node.directory = v; });
+  field(side, "Primary artifact", node.artifact, (v) => { node.artifact = v; render(); });
+
+  toggle(side, "Writes an analysis note", node.produces_note, (v) => {
+    node.produces_note = v; render();
+  });
+  if (node.produces_note) {
+    field(side, "Note artifact (blank = the primary artifact)", node.note_artifact || "",
+      (v) => { node.note_artifact = v; });
+  }
+
+  checkboxes(side, "Reviewers", reviewers, node.reviewers || [],
+    (v) => { node.reviewers = v; });
+  toggle(side, "Arbiter adjudicates this node", node.arbiter, (v) => { node.arbiter = v; });
+
+  const gateNames = (node.gates || []).filter((g) => g.enabled !== false).map((g) => g.name);
+  checkboxes(side, "Gates", GATES, gateNames, (chosen) => {
+    const existing = node.gates || [];
+    node.gates = chosen.map((name) => {
+      const prior = existing.find((g) => g.name === name);
+      return prior
+        ? Object.assign({}, prior, { enabled: true })
+        : { name, when: name === "commitments" ? "before" : "after", enabled: true };
+    });
+    render();
+  });
+  for (const gate of node.gates || []) {
+    choice(side, `“${gate.name}” runs`, gate.when, ["before", "after"], (v) => { gate.when = v; });
+  }
+
+  const contract = node.contract || (node.contract = { node_types: [], edge_types: [] });
+  checkboxes(side, "May create node types", NODE_TYPES, contract.node_types || [],
+    (v) => { contract.node_types = v; });
+  checkboxes(side, "May create edge types", EDGE_TYPES, contract.edge_types || [],
+    (v) => { contract.edge_types = v; });
+
+  const row = document.createElement("div");
+  row.className = "row";
+  side.appendChild(row);
+  const iterations = document.createElement("div");
+  const model = document.createElement("div");
+  row.appendChild(iterations); row.appendChild(model);
+  field(iterations, "Max review iterations", node.max_iterations,
+    (v) => { node.max_iterations = parseInt(v, 10) || 1; }, "number");
+  field(model, "Model override", node.model || "",
+    (v) => { node.model = v || null; });
+
+  field(side, "Executor prompt", node.prompt, (v) => { node.prompt = v; }, "textarea");
+
+  const remove = document.createElement("button");
+  remove.className = "danger";
+  remove.textContent = "Delete this node";
+  remove.style.marginTop = "12px";
+  remove.addEventListener("click", () => {
+    plan.nodes = plan.nodes.filter((n) => n.id !== node.id);
+    plan.edges = plan.edges.filter(
+      (e) => e.upstream !== node.id && e.downstream !== node.id);
+    sel = null; markDirty(); render(); renderSide();
+  });
+  side.appendChild(remove);
+}
+
+function renderEdgePanel(side, edge, index) {
+  if (!edge) { sel = null; return renderSide(); }
+  side.appendChild(heading("Edge"));
+  const p = document.createElement("p");
+  p.className = "hint";
+  p.textContent = `${edge.upstream} → ${edge.downstream}`;
+  side.appendChild(p);
+
+  choice(side, "Kind", edge.kind, KINDS, (v) => { edge.kind = v; render(); });
+  side.appendChild(hint(
+    edge.kind === "informs"
+      ? "Context only: the downstream node does not wait for this."
+      : "Blocking: the downstream node cannot start until this one passes review."));
+
+  choice(side, "Injection", edge.inject, INJECTS, (v) => { edge.inject = v; });
+  side.appendChild(hint(
+    edge.inject === "none"
+      ? "Ordering only — the artifact is not put into the prompt."
+      : edge.inject === "summary"
+        ? "Only the opening of the artifact reaches the prompt."
+        : "The whole artifact reaches the prompt."));
+
+  const remove = document.createElement("button");
+  remove.className = "danger";
+  remove.textContent = "Delete this edge";
+  remove.style.marginTop = "12px";
+  remove.addEventListener("click", () => {
+    plan.edges.splice(index, 1);
+    sel = null; markDirty(); render(); renderSide();
+  });
+  side.appendChild(remove);
+}
+
+/* ------------------------------------------------------------- findings */
+
+function renderFindings() {
+  const box = $("findings");
+  box.textContent = "";
+  if (!findings.length) {
+    const clean = document.createElement("div");
+    clean.className = "clean";
+    clean.textContent = "No findings. This plan is internally consistent.";
+    box.appendChild(clean);
+    return;
+  }
+  for (const f of findings) {
+    const row = document.createElement("div");
+    row.className = `f ${f.severity}`;
+    const rule = document.createElement("code");
+    rule.textContent = f.rule + (f.node_id ? ` [${f.node_id}]` : "");
+    row.appendChild(rule);
+    row.appendChild(document.createTextNode(" " + f.message));
+    if (f.node_id) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => select("node", f.node_id));
+    }
+    box.appendChild(row);
+  }
+}
+
+/* --------------------------------------------------------------- actions */
+
+function applyView(view) {
+  plan = view.plan;
+  layout = view.layout || {};
+  findings = view.findings || [];
+  blocking = !!view.blocking;
+  approved = !!view.approved;
+  dirty = false;
+  $("title").textContent = `${plan.name} — analysis plan`;
+  $("subtitle").textContent =
+    `${plan.analysis_type} · ${plan.nodes.length} nodes · rev ${plan.revision}` +
+    (plan.template ? ` · ${plan.template}` : "");
+  render(); renderSide(); renderFindings(); renderState();
+}
+
+async function load() {
+  const res = await fetch(API);
+  if (!res.ok) {
+    toast(`Could not load the plan: ${res.status} ${await res.text()}`, true);
+    return;
+  }
+  applyView(await res.json());
+}
+
+async function loadReviewers() {
+  // The reviewer list is not its own endpoint: the node panel only needs the
+  // names, and every plan the editor opens already carries the ones in use.
+  const known = new Set(["physics", "critical", "constructive", "plot", "bibtex", "rendering"]);
+  for (const node of plan.nodes) for (const r of node.reviewers || []) known.add(r);
+  reviewers = [...known].sort();
+}
+
+async function save() {
+  const res = await fetch(API, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  if (!res.ok) {
+    toast(`Save failed: ${(await res.json()).detail || res.status}`, true);
+    return false;
+  }
+  applyView(await res.json());
+  toast(`Saved revision ${plan.revision}.`);
+  return true;
+}
+
+async function approve() {
+  if (dirty && !(await save())) return;
+  const res = await fetch(`${API}/approve`, { method: "POST" });
+  if (!res.ok) {
+    toast(`Not approved: ${(await res.json()).detail || res.status}`, true);
+    return;
+  }
+  applyView(await res.json());
+  toast("Approved. The analysis can start.");
+}
+
+function addNode() {
+  const base = "node";
+  let n = 1, id = base + n;
+  while (nodeById(id)) id = base + (++n);
+  plan.nodes.push({
+    id, label: `Node ${n}`, directory: id, artifact: `${id.toUpperCase()}.md`,
+    prompt: "Describe what this node must produce.\n",
+    kind: "work", role: "executor", reviewers: ["critical"], arbiter: false,
+    produces_note: false, note_artifact: "", context_paths: [], gates: [],
+    contract: { node_types: [], edge_types: [] },
+    max_iterations: 3, model: null, tools: null, metadata: {},
+  });
+  markDirty(); select("node", id);
+}
+
+function onConnectClick(id) {
+  if (connecting === "arm") {
+    connecting = { from: id };
+    toast(`Connecting from “${id}” — now click the downstream node.`);
+    return;
+  }
+  const from = connecting.from;
+  connecting = null;
+  $("connect").classList.remove("on");
+  if (from === id) { toast("A node cannot depend on itself.", true); return; }
+  if (plan.edges.some((e) => e.upstream === from && e.downstream === id)) {
+    toast("That edge already exists.", true); return;
+  }
+  plan.edges.push({ upstream: from, downstream: id, kind: "requires", inject: "full",
+                    metadata: {} });
+  markDirty(); render();
+  select("edge", plan.edges.length - 1);
+}
+
+function relayout() {
+  for (const node of plan.nodes) {
+    if (node.metadata) { delete node.metadata.x; delete node.metadata.y; }
+  }
+  markDirty(); render();
+  toast("Positions reset to the computed layout. Save to keep it.");
+}
+
+/* ----------------------------------------------------------------- wiring */
+
+$("save").addEventListener("click", save);
+$("approve").addEventListener("click", approve);
+$("add-node").addEventListener("click", addNode);
+$("relayout").addEventListener("click", relayout);
+$("connect").addEventListener("click", () => {
+  connecting = connecting ? null : "arm";
+  $("connect").classList.toggle("on", !!connecting);
+  toast(connecting ? "Click the upstream node, then the downstream one." : "Cancelled.");
+});
+$("canvas-wrap").addEventListener("click", () => {
+  if (connecting) return;
+  sel = null; render(); renderSide();
+});
+window.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && connecting) {
+    connecting = null; $("connect").classList.remove("on");
+  }
+  if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") { ev.preventDefault(); save(); }
+});
+window.addEventListener("beforeunload", (ev) => {
+  if (dirty) { ev.preventDefault(); ev.returnValue = ""; }
+});
+
+load().then(() => { if (plan) { loadReviewers(); renderSide(); } });
+</script>
+</body>
+</html>

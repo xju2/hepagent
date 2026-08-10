@@ -5,48 +5,42 @@ import json
 import pytest
 
 from hepagent.agents.jfc.graph_builder import (
-    artifact_rel_path,
     bootstrap_graph,
-    ingest_phase,
+    ingest_node,
     ingest_review,
     rebuild,
 )
 from hepagent.graph.query import what_produced
 from hepagent.graph.store import AnalysisGraph
 from hepagent.graph.validation import validate
-
-PHASE_DIRS = [
-    "phase1_strategy",
-    "phase2_exploration",
-    "phase3_selection",
-    "phase4a_inference_expected",
-    "phase4b_inference_partial",
-    "phase4c_inference_observed",
-    "phase5_documentation",
-]
+from hepagent.plan.store import save_plan
 
 COMMITMENTS_HEADER = (
-    "# Phase 1 Commitments\n\n"
+    "# Analysis Commitments\n\n"
     "| ID | Commitment | Status | Evidence | Phase Resolved |\n"
     "|----|-----------|--------|----------|---------------|\n"
 )
 
 
 @pytest.fixture
-def analysis_root(tmp_path):
+def analysis_root(tmp_path, jfc_plan):
     """A scaffolded-looking analysis directory with a bootstrapped graph."""
     root = tmp_path / "zbb"
-    for phase in PHASE_DIRS:
+    for node in jfc_plan.nodes:
         for sub in ("outputs", "outputs/figures", "src", "review", "logs"):
-            (root / phase / sub).mkdir(parents=True, exist_ok=True)
-    (root / "prompt.md").write_text("# Physics Prompt\n\nMeasure the Z→bb cross-section.\n")
+            (root / node.directory / sub).mkdir(parents=True, exist_ok=True)
+    (root / "prompt.md").write_text(f"# Physics Prompt\n\n{jfc_plan.problem}\n")
     (root / "COMMITMENTS.md").write_text(COMMITMENTS_HEADER)
-    bootstrap_graph(root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+    save_plan(root, jfc_plan)
+    bootstrap_graph(root, jfc_plan)
     return root
 
 
-def write_artifact(root, phase, body="content"):
-    path = root / artifact_rel_path(phase)
+def write_artifact(root, node_id, body="content"):
+    """Write the artifact a plan node is expected to produce."""
+    from hepagent.plan.store import load_plan
+
+    path = root / load_plan(root).require_node(node_id).artifact_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
     return path
@@ -63,9 +57,10 @@ def test_bootstrap_creates_problem_root_and_pending_artifacts(analysis_root):
     assert all(a.status == "pending" for a in graph.nodes(type="artifact"))
 
 
-def test_bootstrap_label_uses_the_prompt_first_line(analysis_root):
+def test_bootstrap_label_comes_from_the_plans_problem_statement(analysis_root, jfc_plan):
+    """The plan owns the problem — the graph must not re-derive it from prompt.md."""
     graph = AnalysisGraph.load(analysis_root)
-    assert graph.nodes(type="problem")[0].label == "Measure the Z→bb cross-section."
+    assert graph.nodes(type="problem")[0].label == jfc_plan.problem.splitlines()[0]
 
 
 def test_bootstrap_chains_requires_from_upstream_artifacts(analysis_root):
@@ -76,23 +71,23 @@ def test_bootstrap_chains_requires_from_upstream_artifacts(analysis_root):
     assert "artifact:phase1_strategy/outputs/STRATEGY.md" in prerequisites
 
 
-def test_bootstrap_points_phase1_at_the_problem(analysis_root):
+def test_bootstrap_points_the_entry_node_at_the_problem(analysis_root, jfc_plan):
     graph = AnalysisGraph.load(analysis_root)
     strategy = graph.get_node("artifact:phase1_strategy/outputs/STRATEGY.md")
     prerequisites = {e.dst for e in graph.out_edges(strategy.id, type="requires")}
-    assert prerequisites == {"problem:zbb"}
+    assert prerequisites == {f"problem:{jfc_plan.name}"}
 
 
-def test_bootstrap_is_idempotent(analysis_root):
+def test_bootstrap_is_idempotent(analysis_root, jfc_plan):
     before = (analysis_root / "graph" / "nodes.jsonl").read_text()
-    bootstrap_graph(analysis_root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+    bootstrap_graph(analysis_root, jfc_plan)
     assert (analysis_root / "graph" / "nodes.jsonl").read_text() == before
 
 
-def test_bootstrap_does_not_downgrade_an_ingested_artifact(analysis_root):
+def test_bootstrap_does_not_downgrade_an_ingested_artifact(analysis_root, jfc_plan):
     """A pending placeholder must never overwrite an artifact already produced."""
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
     assert (
         AnalysisGraph.load(analysis_root)
         .get_node("artifact:phase1_strategy/outputs/STRATEGY.md")
@@ -101,7 +96,7 @@ def test_bootstrap_does_not_downgrade_an_ingested_artifact(analysis_root):
     )
 
     before = (analysis_root / "graph" / "nodes.jsonl").read_text()
-    bootstrap_graph(analysis_root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+    bootstrap_graph(analysis_root, jfc_plan)
 
     assert (analysis_root / "graph" / "nodes.jsonl").read_text() == before
     assert (
@@ -112,14 +107,14 @@ def test_bootstrap_does_not_downgrade_an_ingested_artifact(analysis_root):
     )
 
 
-def test_bootstrap_then_rebuild_is_idempotent(analysis_root):
+def test_bootstrap_then_rebuild_is_idempotent(analysis_root, jfc_plan):
     """The `jfc graph rebuild` path: bootstrap followed by rebuild, repeated."""
-    write_artifact(analysis_root, 1)
-    write_artifact(analysis_root, 2)
+    write_artifact(analysis_root, "strategy")
+    write_artifact(analysis_root, "exploration")
     write_review(analysis_root, "phase1_strategy", "ADJUDICATION.md", "ok\n\nPASS")
 
     def pass_once():
-        bootstrap_graph(analysis_root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+        bootstrap_graph(analysis_root, jfc_plan)
         rebuild(analysis_root)
         return (
             (analysis_root / "graph" / "nodes.jsonl").read_text(),
@@ -131,14 +126,14 @@ def test_bootstrap_then_rebuild_is_idempotent(analysis_root):
     assert pass_once() == first
 
 
-# -------------------------------------------------------------- ingest_phase
+# --------------------------------------------------------------- ingest_node
 
 
-def test_ingest_phase_records_artifact_and_lineage(analysis_root):
-    write_artifact(analysis_root, 1)
-    write_artifact(analysis_root, 2)
-    ingest_phase(analysis_root, 1)
-    ingest_phase(analysis_root, 2)
+def test_ingest_node_records_artifact_and_lineage(analysis_root):
+    write_artifact(analysis_root, "strategy")
+    write_artifact(analysis_root, "exploration")
+    ingest_node(analysis_root, "strategy")
+    ingest_node(analysis_root, "exploration")
 
     graph = AnalysisGraph.load(analysis_root)
     exploration = graph.get_node("artifact:phase2_exploration/outputs/EXPLORATION.md")
@@ -147,17 +142,17 @@ def test_ingest_phase_records_artifact_and_lineage(analysis_root):
     assert lineage == {"artifact:phase1_strategy/outputs/STRATEGY.md"}
 
 
-def test_ingest_phase_reports_a_missing_artifact_without_raising(analysis_root):
-    report = ingest_phase(analysis_root, 3)
+def test_ingest_node_reports_a_missing_artifact_without_raising(analysis_root):
+    report = ingest_node(analysis_root, "selection")
     assert any("not on disk yet" in note for note in report.skipped)
 
 
-def test_ingest_phase_records_figures_linked_to_the_artifact(analysis_root):
-    write_artifact(analysis_root, 2)
+def test_ingest_node_records_figures_linked_to_the_artifact(analysis_root):
+    write_artifact(analysis_root, "exploration")
     figures = analysis_root / "phase2_exploration" / "outputs" / "figures"
     (figures / "mjj.png").write_text("png")
     (figures / "notes.txt").write_text("not a figure")
-    ingest_phase(analysis_root, 2)
+    ingest_node(analysis_root, "exploration")
 
     graph = AnalysisGraph.load(analysis_root)
     assert [n.label for n in graph.nodes(type="figure")] == ["mjj.png"]
@@ -165,12 +160,12 @@ def test_ingest_phase_records_figures_linked_to_the_artifact(analysis_root):
     assert graph.out_edges(figure.id, type="derives_from")[0].dst.endswith("EXPLORATION.md")
 
 
-def test_ingest_phase_records_results_json_as_evidence(analysis_root):
-    write_artifact(analysis_root, 3)
+def test_ingest_node_records_results_json_as_evidence(analysis_root):
+    write_artifact(analysis_root, "selection")
     results = analysis_root / "phase3_selection" / "outputs" / "results"
     results.mkdir(parents=True)
     (results / "closure.json").write_text(json.dumps({"chi2": 1.3, "ndf": 36}))
-    ingest_phase(analysis_root, 3)
+    ingest_node(analysis_root, "selection")
 
     graph = AnalysisGraph.load(analysis_root)
     evidence = graph.get_node("evidence:phase3_selection/outputs/results/closure.json")
@@ -178,24 +173,24 @@ def test_ingest_phase_records_results_json_as_evidence(analysis_root):
     assert graph.out_edges(evidence.id, type="supports")[0].dst.endswith("SELECTION.md")
 
 
-def test_ingest_phase_records_scripts_as_executions(analysis_root):
-    write_artifact(analysis_root, 3)
+def test_ingest_node_records_scripts_as_executions(analysis_root):
+    write_artifact(analysis_root, "selection")
     (analysis_root / "phase3_selection" / "src" / "select.py").write_text("print('x')")
-    ingest_phase(analysis_root, 3)
+    ingest_node(analysis_root, "selection")
 
     graph = AnalysisGraph.load(analysis_root)
     assert [n.label for n in graph.nodes(type="execution")] == ["select.py"]
 
 
-def test_ingest_phase_records_commitments_with_closing_evidence(analysis_root):
-    write_artifact(analysis_root, 1)
+def test_ingest_node_records_commitments_with_closing_evidence(analysis_root):
+    write_artifact(analysis_root, "strategy")
     (analysis_root / "COMMITMENTS.md").write_text(
         COMMITMENTS_HEADER
         + "| D1 | Unfold with IBU | resolved | closure chi2/ndf = 1.3/36 | 3 |\n"
         + "| D2 | Generator comparison | pending | | |\n"
         + "| D3 | Alt tagger | downscoped | tagger unavailable in this campaign | 3 |\n"
     )
-    ingest_phase(analysis_root, 1)
+    ingest_node(analysis_root, "strategy")
 
     graph = AnalysisGraph.load(analysis_root)
     assert {n.id for n in graph.nodes(type="commitment")} == {
@@ -210,22 +205,22 @@ def test_ingest_phase_records_commitments_with_closing_evidence(analysis_root):
     assert graph.out_edges("artifact:phase1_strategy/outputs/STRATEGY.md", type="commits_to")
 
 
-def test_ingest_phase_is_idempotent(analysis_root):
-    write_artifact(analysis_root, 1)
+def test_ingest_node_is_idempotent(analysis_root):
+    write_artifact(analysis_root, "strategy")
     (analysis_root / "phase1_strategy" / "outputs" / "figures" / "flagship.png").write_text("png")
-    ingest_phase(analysis_root, 1)
+    ingest_node(analysis_root, "strategy")
     first = (analysis_root / "graph" / "nodes.jsonl").read_text()
     edges_first = (analysis_root / "graph" / "edges.jsonl").read_text()
 
-    ingest_phase(analysis_root, 1)
+    ingest_node(analysis_root, "strategy")
     assert (analysis_root / "graph" / "nodes.jsonl").read_text() == first
     assert (analysis_root / "graph" / "edges.jsonl").read_text() == edges_first
 
 
-def test_ingest_phase_ignores_an_unknown_phase(analysis_root):
-    report = ingest_phase(analysis_root, "99z")
+def test_ingest_node_ignores_an_unknown_node(analysis_root):
+    report = ingest_node(analysis_root, "99z")
     assert report.nodes == []
-    assert any("Unknown phase" in note for note in report.skipped)
+    assert any("Unknown plan node" in note for note in report.skipped)
 
 
 # ------------------------------------------------------------- ingest_review
@@ -239,10 +234,10 @@ def write_review(analysis_root, phase_dir, name, body):
 
 
 def test_ingest_review_attaches_reviewer_documents(analysis_root):
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
     write_review(analysis_root, "phase1_strategy", "critical_review.md", "findings\n\nPASS")
-    ingest_review(analysis_root, 1)
+    ingest_review(analysis_root, "strategy")
 
     graph = AnalysisGraph.load(analysis_root)
     review = graph.get_node("review:phase1_strategy/review/critical_review.md")
@@ -251,10 +246,10 @@ def test_ingest_review_attaches_reviewer_documents(analysis_root):
 
 
 def test_ingest_review_pass_verdict_approves_the_artifact(analysis_root):
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
     write_review(analysis_root, "phase1_strategy", "ADJUDICATION.md", "All good.\n\nPASS")
-    ingest_review(analysis_root, 1)
+    ingest_review(analysis_root, "strategy")
 
     graph = AnalysisGraph.load(analysis_root)
     decision = graph.get_node("decision:phase1_strategy/review/ADJUDICATION.md")
@@ -264,15 +259,15 @@ def test_ingest_review_pass_verdict_approves_the_artifact(analysis_root):
 
 
 def test_ingest_review_iterate_verdict_invalidates_the_artifact(analysis_root):
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
     write_review(
         analysis_root,
         "phase1_strategy",
         "ADJUDICATION.md",
         "| A | x | Missing systematics table |\n\nITERATE",
     )
-    ingest_review(analysis_root, 1)
+    ingest_review(analysis_root, "strategy")
 
     graph = AnalysisGraph.load(analysis_root)
     decision_id = "decision:phase1_strategy/review/ADJUDICATION.md"
@@ -282,17 +277,17 @@ def test_ingest_review_iterate_verdict_invalidates_the_artifact(analysis_root):
 
 
 def test_ingest_review_regress_verdict_points_at_the_origin_phase(analysis_root):
-    write_artifact(analysis_root, 3)
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
-    ingest_phase(analysis_root, 3)
+    write_artifact(analysis_root, "selection")
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
+    ingest_node(analysis_root, "selection")
     write_review(
         analysis_root,
         "phase3_selection",
         "ADJUDICATION.md",
-        "Root cause is the Phase 1 fiducial definition.\n\nREGRESS(1)",
+        "Root cause is the strategy fiducial definition.\n\nREGRESS(strategy)",
     )
-    ingest_review(analysis_root, 3)
+    ingest_review(analysis_root, "selection")
 
     graph = AnalysisGraph.load(analysis_root)
     decision_id = "decision:phase3_selection/review/ADJUDICATION.md"
@@ -305,18 +300,20 @@ def test_ingest_review_regress_verdict_points_at_the_origin_phase(analysis_root)
 def test_ingest_review_attaches_to_a_declared_artifact_before_it_is_produced(analysis_root):
     """The bootstrapped (pending) artifact node is enough to hang a review on."""
     write_review(analysis_root, "phase2_exploration", "plot_validation.md", "fine\n\nPASS")
-    ingest_review(analysis_root, 2)
+    ingest_review(analysis_root, "exploration")
 
     graph = AnalysisGraph.load(analysis_root)
     assert graph.get_node("review:phase2_exploration/review/plot_validation.md") is not None
     assert graph.out_edges("artifact:phase2_exploration/outputs/EXPLORATION.md", type="reviewed_by")
 
 
-def test_ingest_review_without_a_graph_records_the_review_but_no_edges(tmp_path):
+def test_ingest_review_without_a_graph_records_the_review_but_no_edges(tmp_path, jfc_plan):
     """With no bootstrapped graph the review is still captured, just unlinked."""
     root = tmp_path / "bare"
+    root.mkdir()
+    save_plan(root, jfc_plan)
     write_review(root, "phase2_exploration", "plot_validation.md", "fine\n\nPASS")
-    report = ingest_review(root, 2)
+    report = ingest_review(root, "exploration")
 
     graph = AnalysisGraph.load(root)
     assert graph.get_node("review:phase2_exploration/review/plot_validation.md") is not None
@@ -324,19 +321,28 @@ def test_ingest_review_without_a_graph_records_the_review_but_no_edges(tmp_path)
     assert any("artifact node missing" in note for note in report.skipped)
 
 
+def test_ingest_without_a_plan_reports_rather_than_raises(tmp_path):
+    """Graph work must never raise into the orchestrator, plan or no plan."""
+    root = tmp_path / "planless"
+    root.mkdir()
+    for report in (ingest_node(root, "strategy"), ingest_review(root, "strategy")):
+        assert report.nodes == []
+        assert any("could not read the analysis plan" in n.lower() for n in report.skipped)
+
+
 # ------------------------------------------------------------------- rebuild
 
 
-def test_rebuild_reconstructs_the_graph_from_disk_alone(analysis_root):
-    write_artifact(analysis_root, 1)
-    write_artifact(analysis_root, 2)
+def test_rebuild_reconstructs_the_graph_from_disk_alone(analysis_root, jfc_plan):
+    write_artifact(analysis_root, "strategy")
+    write_artifact(analysis_root, "exploration")
     (analysis_root / "phase2_exploration" / "outputs" / "figures" / "mjj.png").write_text("png")
     write_review(analysis_root, "phase1_strategy", "ADJUDICATION.md", "ok\n\nPASS")
 
     # Delete the graph entirely, then rebuild from artifacts.
     (analysis_root / "graph" / "nodes.jsonl").unlink()
     (analysis_root / "graph" / "edges.jsonl").unlink()
-    bootstrap_graph(analysis_root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+    bootstrap_graph(analysis_root, jfc_plan)
     rebuild(analysis_root)
 
     graph = AnalysisGraph.load(analysis_root)
@@ -352,8 +358,8 @@ def test_rebuild_is_idempotent(analysis_root):
     verdict-bearing label, and an earlier version wrote it twice per pass, so
     the log grew on every rebuild.
     """
-    write_artifact(analysis_root, 1)
-    write_artifact(analysis_root, 2)
+    write_artifact(analysis_root, "strategy")
+    write_artifact(analysis_root, "exploration")
     (analysis_root / "phase2_exploration" / "outputs" / "figures" / "mjj.png").write_text("png")
     write_review(analysis_root, "phase1_strategy", "critical_review.md", "findings\n\nPASS")
     write_review(analysis_root, "phase1_strategy", "ADJUDICATION.md", "ok\n\nPASS")
@@ -371,18 +377,18 @@ def test_rebuild_is_idempotent(analysis_root):
 
 
 def test_ingest_review_is_idempotent(analysis_root):
-    write_artifact(analysis_root, 1)
-    ingest_phase(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
+    ingest_node(analysis_root, "strategy")
     write_review(analysis_root, "phase1_strategy", "ADJUDICATION.md", "ok\n\nPASS")
 
-    ingest_review(analysis_root, 1)
+    ingest_review(analysis_root, "strategy")
     lines = (analysis_root / "graph" / "nodes.jsonl").read_text()
-    ingest_review(analysis_root, 1)
+    ingest_review(analysis_root, "strategy")
     assert (analysis_root / "graph" / "nodes.jsonl").read_text() == lines
 
 
 def test_rebuilt_graph_with_an_open_commitment_fails_validation(analysis_root):
-    write_artifact(analysis_root, 1)
+    write_artifact(analysis_root, "strategy")
     (analysis_root / "COMMITMENTS.md").write_text(
         COMMITMENTS_HEADER + "| D2 | Generator comparison | pending | | |\n"
     )

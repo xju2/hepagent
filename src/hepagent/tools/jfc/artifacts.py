@@ -8,43 +8,28 @@ from pathlib import Path
 from typing import Literal
 
 from agents import function_tool
-
-_ARTIFACT_MAP = {
-    "1": ("phase1_strategy", "STRATEGY.md"),
-    "2": ("phase2_exploration", "EXPLORATION.md"),
-    "3": ("phase3_selection", "SELECTION.md"),
-    "4a": ("phase4a_inference_expected", "INFERENCE_EXPECTED.md"),
-    "4b": ("phase4b_inference_partial", "INFERENCE_PARTIAL.md"),
-    "4c": ("phase4c_inference_observed", "INFERENCE_OBSERVED.md"),
-    "5": ("phase5_documentation", "ANALYSIS_NOTE_5_v1.md"),
-}
+from hepagent.tools.jfc._resolve import resolve_node
 
 _MAX_CHARS = 8000
 
 
-def _phase_artifact_path(analysis_root: str, phase: str) -> tuple[Path, str] | tuple[None, str]:
-    if phase not in _ARTIFACT_MAP:
-        return None, f"Unknown phase '{phase}'. Valid values: {', '.join(_ARTIFACT_MAP)}"
-    phase_dir, artifact_name = _ARTIFACT_MAP[phase]
-    path = Path(analysis_root) / phase_dir / "outputs" / artifact_name
-    return path, ""
-
-
 @function_tool
-async def read_phase_artifact(analysis_root: str, phase: str) -> str:
+async def read_phase_artifact(analysis_root: str, node_id: str) -> str:
     """
-    Read the primary artifact markdown for a completed phase.
+    Read the primary artifact markdown a node produces.
 
     Returns the artifact content (truncated to 8000 chars if oversized,
     with a summary header).
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
+        node_id: Plan node id, e.g. "strategy" or "selection_ee". Run
+            `graph_query` with question "nodes" if you are unsure.
     """
-    path, err = _phase_artifact_path(analysis_root, phase)
-    if path is None:
-        return f"Error: {err}"
+    node, err = resolve_node(analysis_root, node_id)
+    if node is None:
+        return err
+    path = Path(analysis_root) / node.artifact_path
     if not path.exists():
         return f"Artifact not found: {path}"
     content = path.read_text(encoding="utf-8")
@@ -57,20 +42,21 @@ async def read_phase_artifact(analysis_root: str, phase: str) -> str:
 
 
 @function_tool
-async def write_phase_artifact(analysis_root: str, phase: str, content: str) -> str:
+async def write_phase_artifact(analysis_root: str, node_id: str, content: str) -> str:
     """
-    Write or overwrite the primary artifact for a phase.
+    Write or overwrite the primary artifact for a node.
 
     Returns the artifact file path on success.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
+        node_id: Plan node id, e.g. "strategy" or "selection_ee".
         content: The markdown content to write.
     """
-    path, err = _phase_artifact_path(analysis_root, phase)
-    if path is None:
-        return f"Error: {err}"
+    node, err = resolve_node(analysis_root, node_id)
+    if node is None:
+        return err
+    path = Path(analysis_root) / node.artifact_path
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -104,14 +90,15 @@ async def append_experiment_log(analysis_root: str, entry: str) -> str:
 @function_tool
 async def read_commitments(analysis_root: str) -> str:
     """
-    Read COMMITMENTS.md for the analysis (Phase 1 commitments [D1]-[DN]).
+    Read COMMITMENTS.md for the analysis — the commitments [D1]-[DN] declared
+    up front, which later nodes must resolve or explicitly downscope.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
     """
     path = Path(analysis_root) / "COMMITMENTS.md"
     if not path.exists():
-        return "COMMITMENTS.md not found. It is created by the Phase 1 executor."
+        return "COMMITMENTS.md not found. It is created by the commitment-declaring node."
     return path.read_text(encoding="utf-8")
 
 
@@ -123,7 +110,7 @@ async def update_commitments(
     evidence: str,
 ) -> str:
     """
-    Mark a Phase 1 commitment as resolved or downscoped with evidence.
+    Mark a declared commitment as resolved or downscoped with evidence.
 
     Updates the row in COMMITMENTS.md for the given commitment ID.
 

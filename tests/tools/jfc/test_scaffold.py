@@ -48,20 +48,90 @@ async def test_scaffold_experiment_log_header(tmp_base):
 
 
 @pytest.mark.asyncio
-async def test_scaffold_phase_subdirs(tmp_base):
+async def test_scaffold_creates_a_tree_per_plan_node(tmp_base):
+    """The directory layout follows the plan — nothing here knows the node count."""
+    from hepagent.plan.store import load_plan
     from hepagent.tools.jfc.scaffold import (
-        PHASE_DIRS,
-        PHASE_SUBDIRS,
+        NODE_SUBDIRS,
         _scaffold_impl as scaffold_jfc_analysis,
     )
 
     result = await scaffold_jfc_analysis("test_phases", "Test", "measurement", tmp_base)
     root = Path(result)
 
-    for phase in PHASE_DIRS:
-        for sub in PHASE_SUBDIRS:
-            d = root / phase / sub
+    for node in load_plan(root).nodes:
+        for sub in NODE_SUBDIRS:
+            d = root / node.directory / sub
             assert d.exists(), f"Missing directory: {d}"
+
+
+@pytest.mark.asyncio
+async def test_scaffold_writes_the_plan_before_anything_derived_from_it(tmp_base):
+    from hepagent.plan.store import load_plan
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis("plan_written", "Test", "measurement", tmp_base)
+    root = Path(result)
+
+    assert (root / "plan.json").exists()
+    plan = load_plan(root)
+    assert plan.name == "plan_written"
+    assert plan.template == "jfc-measurement"
+
+
+@pytest.mark.asyncio
+async def test_each_node_gets_its_prompt_as_that_directorys_claude_md(tmp_base):
+    """The editable prompt is what the executor working there actually reads."""
+    from hepagent.plan.store import load_plan
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis("prompts", "Test", "measurement", tmp_base)
+    root = Path(result)
+
+    for node in load_plan(root).nodes:
+        claude_md = root / node.directory / "CLAUDE.md"
+        assert claude_md.exists(), node.id
+        assert claude_md.read_text(encoding="utf-8") == node.prompt
+
+
+@pytest.mark.asyncio
+async def test_scaffold_honours_an_explicit_plan(tmp_base):
+    """`--plan` and the plan editor hand the scaffold a finished document."""
+    import dataclasses
+
+    from hepagent.plan.store import load_plan
+    from hepagent.plan.templates import instantiate
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    base = instantiate(
+        "jfc-measurement",
+        analysis_name="authored",
+        analysis_type="measurement",
+        physics_prompt="Test",
+    )
+    trimmed = dataclasses.replace(
+        base,
+        nodes=tuple(n for n in base.nodes if n.id in {"strategy", "exploration"}),
+        edges=tuple(
+            e for e in base.edges if {e.upstream, e.downstream} <= {"strategy", "exploration"}
+        ),
+    )
+    result = await scaffold_jfc_analysis("authored", "Test", "measurement", tmp_base, plan=trimmed)
+    root = Path(result)
+
+    assert list(load_plan(root).node_ids()) == ["strategy", "exploration"]
+    assert not (root / "phase3_selection").exists()
+
+
+@pytest.mark.asyncio
+async def test_scaffold_reports_an_unknown_template(tmp_base):
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis(
+        "bad_template", "Test", "measurement", tmp_base, template="no-such-template"
+    )
+    assert result.startswith("Error:")
+    assert "no-such-template" in result
 
 
 @pytest.mark.asyncio
@@ -100,7 +170,7 @@ async def test_scaffold_seeds_the_analysis_graph(tmp_base):
     assert problem[0].metadata["analysis_type"] == "measurement"
     assert graph.nodes(type="analysis_root")
 
-    # One pending artifact node per phase, chained by `requires`.
+    # One pending artifact node per plan node, chained by `requires`.
     artifacts = graph.nodes(type="artifact")
     assert len(artifacts) == 7
     assert all(a.status == "pending" for a in artifacts)

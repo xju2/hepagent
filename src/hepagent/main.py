@@ -32,6 +32,7 @@ from hepagent.model_providers import (
     list_available_models,
     parse_model_spec,
 )
+from hepagent.plan.templates import DEFAULT_TEMPLATE
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -545,8 +546,13 @@ def web(
         "--headless",
         help="Do not open a browser window on startup.",
     ),
+    base_dir: str = typer.Option(
+        "analyses",
+        "--base-dir",
+        help="Parent directory for analyses, used by the plan editor at /plan/<name>.",
+    ),
 ) -> None:
-    """Start the browser-based chat UI."""
+    """Start the browser-based chat UI, including the plan editor at /plan/<name>."""
     from hepagent.web.server import launch_web_ui
 
     options = ctx.obj or {}
@@ -562,6 +568,7 @@ def web(
         max_turns=max_turns,
         mode="yolo" if yolo else "confirm",
         chat=chat,
+        base_dir=base_dir,
         host=host,
         port=port,
         headless=headless,
@@ -618,6 +625,51 @@ jfc_app = typer.Typer(name="jfc", help="JFC autonomous HEP analysis pipeline.")
 app.add_typer(jfc_app)
 
 
+def _analysis_root(name: str, base_dir: str):
+    """Resolve an analysis name to its root directory, or exit."""
+    from pathlib import Path
+
+    root = Path(base_dir).resolve() / name
+    if not root.is_dir():
+        typer.echo(f"Error: analysis not found: {root}", err=True)
+        raise typer.Exit(code=1)
+    return root
+
+
+def _load_plan(analysis_root):
+    """Read an analysis's plan, or exit with a message pointing at `plan migrate`."""
+    from hepagent.plan.store import load_plan
+
+    try:
+        return load_plan(analysis_root)
+    except Exception as exc:  # noqa: BLE001 - turned into a CLI message
+        typer.echo(f"Error: could not read {analysis_root / 'plan.json'}: {exc}", err=True)
+        typer.echo(
+            f"If this analysis predates plans, run: "
+            f"hepagent jfc plan migrate --name {analysis_root.name}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+
+def _read_plan_file(path: str):
+    """Read a plan document from an arbitrary path, or exit."""
+    import json
+    from pathlib import Path
+
+    from hepagent.plan.store import plan_from_dict
+
+    p = Path(path)
+    if not p.is_file():
+        typer.echo(f"Error: plan file not found: {path}", err=True)
+        raise typer.Exit(code=1)
+    try:
+        return plan_from_dict(json.loads(p.read_text(encoding="utf-8")))
+    except Exception as exc:  # noqa: BLE001 - turned into a CLI message
+        typer.echo(f"Error: {path} is not a readable plan: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 @jfc_app.command("run")
 def jfc_run(
     name: str = typer.Option(..., "--name", "-n", help="Analysis name (short identifier)."),
@@ -640,7 +692,7 @@ def jfc_run(
         help='Model as "provider:model" (e.g. "cborg:claude-sonnet-4-5").',
     ),
     max_iterations: int = typer.Option(
-        3, "--max-iterations", help="Max review iterations per phase."
+        3, "--max-iterations", help="Max review iterations per node."
     ),
     max_turns: int | None = typer.Option(
         None,
@@ -653,10 +705,26 @@ def jfc_run(
         False,
         "--codesign",
         help=(
-            "Enable human codesign review after Phase 1 PASS: generates a strategy summary, "
-            "facilitates interactive Q&A, then re-adjudicates with the arbiter before Phase 2."
+            "Enable every codesign gate the plan declares: generates a summary, "
+            "facilitates interactive Q&A, then re-adjudicates with the arbiter."
         ),
     ),
+    template: str = typer.Option(
+        DEFAULT_TEMPLATE,
+        "--template",
+        help="Plan template to start from. See `hepagent jfc templates`.",
+    ),
+    plan_file: str | None = typer.Option(
+        None,
+        "--plan",
+        help="Path to an authored plan.json to run instead of a template.",
+    ),
+    review_plan: bool = typer.Option(
+        False,
+        "--review-plan",
+        help="Open the plan editor and wait for approval before any agent work begins.",
+    ),
+    plan_port: int = typer.Option(8001, "--plan-port", help="Port for the plan editor."),
 ) -> None:
     """Start a new JFC analysis from scratch."""
     import asyncio
@@ -675,33 +743,42 @@ def jfc_run(
         raise typer.Exit(code=1)
     prompt = p.read_text(encoding="utf-8")
 
+    plan = _read_plan_file(plan_file) if plan_file else None
+
     model_provider, model_name = parse_model_spec(model)
 
-    def _cb(phase: str, status: str) -> None:
-        typer.echo(f"[jfc] phase={phase} {status}")
+    def _cb(node_id: str, status: str) -> None:
+        typer.echo(f"[jfc] node={node_id} {status}")
+
+    def _analysis(**extra):
+        return run_jfc_analysis(
+            analysis_name=name,
+            physics_prompt=prompt,
+            analysis_type=analysis_type,  # type: ignore[arg-type]
+            base_dir=base_dir,
+            model_provider=model_provider,
+            model_name=model_name,
+            max_iterations_per_phase=max_iterations,
+            max_turns=max_turns,
+            progress_callback=_cb,
+            codesign=codesign,
+            template=template,
+            plan=plan,
+            **extra,
+        )
 
     try:
-        pdf = asyncio.run(
-            run_jfc_analysis(
-                analysis_name=name,
-                physics_prompt=prompt,
-                analysis_type=analysis_type,  # type: ignore[arg-type]
-                base_dir=base_dir,
-                model_provider=model_provider,
-                model_name=model_name,
-                max_iterations_per_phase=max_iterations,
-                max_turns=max_turns,
-                progress_callback=_cb,
-                codesign=codesign,
-            )
-        )
+        if review_plan:
+            pdf = asyncio.run(_run_reviewed(name, base_dir, plan_port, _analysis))
+        else:
+            pdf = asyncio.run(_analysis())
         typer.echo(f"Analysis complete. Final PDF: {pdf}")
     except MaxIterationsExceeded as e:
         typer.echo(f"Error: {e}", err=True)
         typer.echo(f"Resume with: hepagent jfc resume --name {name}", err=True)
         raise typer.Exit(code=1) from e
     except PhaseEscalationError as e:
-        typer.echo(f"Escalation at phase {e.phase}: {e}", err=True)
+        typer.echo(f"Escalation at node {e.phase}: {e}", err=True)
         raise typer.Exit(code=2) from e
     except KeyboardInterrupt as e:
         typer.echo("\nInterrupted. State saved. Resume with: hepagent jfc resume --name {name}")
@@ -714,9 +791,10 @@ def jfc_resume(
     from_phase: str | None = typer.Option(
         None,
         "--from-phase",
+        "--from-node",
         help=(
-            "Phase to start from, e.g. '3' or '4a'. Omit to let the analysis graph "
-            "pick up from the most recent consistent checkpoint."
+            "Plan node id to start from, e.g. 'selection'. Omit to let the analysis "
+            "graph pick up from the most recent consistent checkpoint."
         ),
     ),
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
@@ -730,7 +808,7 @@ def jfc_resume(
     ),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all bash commands."),
 ) -> None:
-    """Resume an interrupted JFC analysis from a specific phase."""
+    """Resume an interrupted JFC analysis from a specific node."""
     import asyncio
     import os
     from pathlib import Path
@@ -757,28 +835,25 @@ def jfc_resume(
     if state_path.exists():
         s = load_state(analysis_root)
         analysis_type = s.analysis_type
-        completed = s.completed_phases
+        completed = s.completed_nodes
         if not model_provider or model_provider == "cborg":
             model_provider = s.model_provider
             model_name = model_name or s.model_name
 
     if from_phase is None:
         # Ask the graph where the analysis actually still holds up. This is not
-        # "the phase after the last one that finished" — a phase a later review
+        # "the node after the last one that finished" — a node a later review
         # invalidated is not a checkpoint worth resuming past.
         from hepagent.agents.jfc.planner import resume_point
 
         from_phase = resume_point(analysis_root, completed)
-        typer.echo(f"[jfc] resuming from phase {from_phase} (graph checkpoint)")
+        if from_phase is None:
+            typer.echo(f"Nothing left to run for '{name}'.")
+            return
+        typer.echo(f"[jfc] resuming from node {from_phase} (graph checkpoint)")
 
-    # Parse phase
-    try:
-        start_phase: int | str = int(from_phase)
-    except ValueError:
-        start_phase = from_phase
-
-    def _cb(phase: str, status: str) -> None:
-        typer.echo(f"[jfc] phase={phase} {status}")
+    def _cb(node_id: str, status: str) -> None:
+        typer.echo(f"[jfc] node={node_id} {status}")
 
     try:
         pdf = asyncio.run(
@@ -789,7 +864,7 @@ def jfc_resume(
                 base_dir=base_dir,
                 model_provider=model_provider,
                 model_name=model_name,
-                start_from_phase=start_phase,
+                start_from_phase=from_phase,
                 max_turns=max_turns,
                 max_iterations_per_phase=max_iterations,
                 progress_callback=_cb,
@@ -809,10 +884,10 @@ def jfc_status(
     name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
 ) -> None:
-    """Show the current phase status of a JFC analysis."""
+    """Show the current node status of a JFC analysis."""
     from pathlib import Path
 
-    from hepagent.agents.jfc.orchestrator import PHASE_ORDER, load_state
+    from hepagent.agents.jfc.orchestrator import load_state
 
     analysis_root = Path(base_dir).resolve() / name
     if not analysis_root.exists():
@@ -825,36 +900,252 @@ def jfc_status(
         raise typer.Exit(code=1)
 
     state = load_state(analysis_root)
-
-    phase_names = {
-        "1": "Strategy",
-        "2": "Exploration",
-        "3": "Processing",
-        "4a": "Expected Results",
-        "4b": "10% Validation",
-        "4c": "Full Data",
-        "5": "Documentation",
-    }
+    plan = _load_plan(analysis_root)
 
     typer.echo(f"\nJFC Analysis: {name}")
     typer.echo(f"Type: {state.analysis_type}")
+    typer.echo(f"Plan: {plan.template or '(authored)'}  rev {plan.revision}")
     typer.echo(f"Root: {analysis_root}\n")
-    typer.echo(f"{'Phase':<6} {'Name':<22} {'Status'}")
-    typer.echo("-" * 50)
-    for phase in PHASE_ORDER:
-        key = str(phase)
-        pname = phase_names.get(key, key)
-        if key in state.completed_phases:
+    typer.echo(f"{'Node':<24} {'Name':<26} {'Status'}")
+    typer.echo("-" * 70)
+    for node in plan.nodes:
+        if node.id in state.completed_nodes:
             status = "✓ PASS"
-            iters = state.phase_iterations.get(key, 1)
+            iters = state.phase_iterations.get(node.id, 1)
             if iters > 1:
                 status += f"  ({iters} review iterations)"
-        elif key == state.current_subphase:
+        elif node.id == state.current_node:
             status = "→ IN PROGRESS"
         else:
             status = "○ pending"
-        typer.echo(f"{key:<6} {pname:<22} {status}")
+        typer.echo(f"{node.id:<24} {node.label:<26} {status}")
     typer.echo()
+
+
+plan_app = typer.Typer(name="plan", help="Inspect, validate and migrate the analysis plan.")
+jfc_app.add_typer(plan_app)
+
+
+@jfc_app.command("templates")
+def jfc_templates() -> None:
+    """List the built-in plan templates a new analysis can start from."""
+    import textwrap
+
+    from hepagent.plan.templates import describe_templates
+
+    typer.echo("\nPlan templates:\n")
+    for template_name, description in describe_templates():
+        typer.echo(f"  {template_name}")
+        for line in textwrap.wrap(description, width=78):
+            typer.echo(f"      {line}")
+        typer.echo()
+    typer.echo(f"Default: {DEFAULT_TEMPLATE}\n")
+
+
+async def _run_reviewed(name: str, base_dir: str, port: int, analysis):
+    """Serve the plan editor alongside a run that waits for approval.
+
+    One process and one event loop, so the browser's approve button and the
+    orchestrator's `await gate.wait(...)` are the same latch.
+    """
+    import asyncio
+    from pathlib import Path
+
+    from hepagent.web.server import open_when_plan_exists, plan_editor_running
+
+    root = Path(base_dir).resolve() / name
+    url = f"http://127.0.0.1:{port}/plan/{name}"
+
+    async with plan_editor_running(base_dir=base_dir, port=port):
+        typer.echo(f"[jfc] review the plan at {url} — the run starts when you approve it")
+        opener = asyncio.create_task(open_when_plan_exists(root, url))
+        try:
+            return await analysis(require_approval=True)
+        finally:
+            opener.cancel()
+
+
+@plan_app.command("propose")
+def jfc_plan_propose(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name (short identifier)."),
+    prompt_file: str = typer.Option(
+        ..., "--prompt-file", "-p", help="Markdown file holding the physics prompt."
+    ),
+    analysis_type: str = typer.Option(
+        "measurement", "--type", "-t", help="Analysis type: measurement or search."
+    ),
+    template: str = typer.Option(
+        DEFAULT_TEMPLATE, "--template", help="Template the architect edits."
+    ),
+    model: str | None = typer.Option(None, "--model", help="Model override for the architect."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    out: str | None = typer.Option(
+        None,
+        "--out",
+        help="Write the plan here. Defaults to the analysis directory when it exists, "
+        "otherwise <name>-plan.json in the current directory.",
+    ),
+) -> None:
+    """Have the architect propose an analysis plan from the physics prompt."""
+    import asyncio
+    import json
+    from pathlib import Path
+
+    from hepagent.agents.jfc.architect import propose_plan
+    from hepagent.plan.report import to_table
+    from hepagent.plan.store import save_plan
+
+    p = Path(prompt_file)
+    if not p.is_file():
+        typer.echo(f"Error: prompt file not found: {prompt_file}", err=True)
+        raise typer.Exit(code=1)
+
+    model_provider, model_name = parse_model_spec(model)
+    result = asyncio.run(
+        propose_plan(
+            physics_prompt=p.read_text(encoding="utf-8"),
+            analysis_name=name,
+            analysis_type=analysis_type,
+            template=template,
+            model_provider=model_provider,
+            model_name=model_name,
+        )
+    )
+
+    for note in result.notes:
+        typer.echo(f"  {note}")
+    if result.rationale:
+        typer.echo(f"\nArchitect's reasoning:\n{result.rationale}\n")
+    typer.echo(to_table(result.plan))
+
+    analysis_root = Path(base_dir).resolve() / name
+    if out:
+        destination = Path(out)
+        destination.write_text(json.dumps(result.plan.to_dict(), indent=2) + "\n", encoding="utf-8")
+    elif analysis_root.is_dir():
+        save_plan(analysis_root, result.plan)
+        destination = analysis_root / "plan.json"
+    else:
+        destination = Path(f"{name}-plan.json")
+        destination.write_text(json.dumps(result.plan.to_dict(), indent=2) + "\n", encoding="utf-8")
+
+    typer.echo(f"\nPlan written to {destination}")
+    if not analysis_root.is_dir():
+        typer.echo(
+            f"Review it, then run: hepagent jfc run --name {name} --type {analysis_type} "
+            f"--prompt-file {prompt_file} --plan {destination}"
+        )
+
+
+@plan_app.command("show")
+def jfc_plan_show(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table, mermaid or json."
+    ),
+) -> None:
+    """Print the analysis plan as a table, a Mermaid diagram or raw JSON."""
+    import json
+
+    from hepagent.plan.report import to_mermaid, to_table
+
+    plan = _load_plan(_analysis_root(name, base_dir))
+
+    if output_format == "mermaid":
+        typer.echo(to_mermaid(plan))
+    elif output_format == "json":
+        typer.echo(json.dumps(plan.to_dict(), indent=2))
+    elif output_format == "table":
+        typer.echo(to_table(plan))
+    else:
+        typer.echo(
+            f"Error: unknown format '{output_format}'. Use table, mermaid or json.", err=True
+        )
+        raise typer.Exit(code=1)
+
+
+@plan_app.command("edit")
+def jfc_plan_edit(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    port: int = typer.Option(8001, "--port", help="Port to bind."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser."),
+    until_approved: bool = typer.Option(
+        False, "--until-approved", help="Exit once the plan is approved, instead of serving on."
+    ),
+) -> None:
+    """Open the plan editor in a browser. Serves until interrupted."""
+    root = _analysis_root(name, base_dir)
+    _load_plan(root)  # fail fast with a useful message rather than a blank page
+
+    try:
+        from hepagent.web.server import launch_plan_editor
+    except ImportError as exc:  # pragma: no cover - depends on the optional extra
+        typer.echo(
+            "Error: the plan editor requires the 'web' extra. Install it with:\n"
+            "  uv sync --all-extras",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Plan editor for '{name}': http://{host}:{port}/plan/{name}")
+    if not until_approved:
+        typer.echo("Press Ctrl-C to stop.")
+    try:
+        approved = launch_plan_editor(
+            name,
+            base_dir=base_dir,
+            host=host,
+            port=port,
+            open_browser=not no_browser,
+            wait_for_approval=until_approved,
+        )
+    except KeyboardInterrupt:
+        typer.echo("\nEditor stopped.")
+        return
+    if until_approved and approved:
+        typer.echo(f"Plan approved. Run it with: hepagent jfc run --name {name} ...")
+
+
+@plan_app.command("validate")
+def jfc_plan_validate(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """Check the plan for consistency. Exits 1 when findings are blocking."""
+    from hepagent.plan.validate import validate_plan
+
+    report = validate_plan(_load_plan(_analysis_root(name, base_dir)))
+    typer.echo(report.to_markdown())
+    if report.blocking:
+        raise typer.Exit(code=1)
+
+
+@plan_app.command("migrate")
+def jfc_plan_migrate(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    template: str = typer.Option(
+        DEFAULT_TEMPLATE, "--template", help="Template whose node ids the legacy phases map onto."
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing plan.json."),
+) -> None:
+    """Give a pre-plan analysis directory a plan.json and node-keyed state."""
+    from hepagent.plan.migrate import migrate_analysis
+
+    root = _analysis_root(name, base_dir)
+    try:
+        result = migrate_analysis(root, template=template, force=force)
+    except Exception as exc:  # noqa: BLE001 - turned into a CLI message
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    for line in result.notes:
+        typer.echo(f"  {line}")
+    typer.echo(f"Migrated '{name}': {len(result.plan.nodes)} nodes, plan.json written.")
+    typer.echo(f"Next: hepagent jfc graph rebuild --name {name}")
 
 
 graph_app = typer.Typer(name="graph", help="Inspect and rebuild the analysis provenance graph.")
@@ -951,21 +1242,13 @@ def jfc_graph_rebuild(
         typer.echo(f"Error: analysis not found: {analysis_root}", err=True)
         raise typer.Exit(code=1)
 
-    analysis_type = "measurement"
-    state_path = analysis_root / ".orchestration_state.json"
-    if state_path.exists():
-        from hepagent.agents.jfc.orchestrator import load_state
-
-        analysis_type = load_state(analysis_root).analysis_type
-
-    prompt_file = analysis_root / "prompt.md"
-    prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
+    plan = _load_plan(analysis_root)
 
     # Seed the graph only when it is missing; bootstrap declares *pending*
     # placeholders and must not run over a graph that already has real nodes.
     if not (analysis_root / "graph" / "nodes.jsonl").exists():
-        bootstrap_graph(analysis_root, name, analysis_type, prompt)
-    report = rebuild(analysis_root)
+        bootstrap_graph(analysis_root, plan)
+    report = rebuild(analysis_root, plan)
     typer.echo(f"Rebuilt graph for '{name}': {report.summary()}")
     for note in report.skipped:
         typer.echo(f"  skipped: {note}")
@@ -996,9 +1279,12 @@ def jfc_list(
                 from hepagent.agents.jfc.orchestrator import load_state
 
                 state = load_state(analysis_dir)
-                current = state.current_subphase
-                n_complete = len(state.completed_phases)
-                typer.echo(f"  {analysis_dir.name:<30} phase={current}  ({n_complete}/7 complete)")
+                total = len(_load_plan(analysis_dir).nodes)
+                n_complete = len(state.completed_nodes)
+                typer.echo(
+                    f"  {analysis_dir.name:<30} node={state.current_node}  "
+                    f"({n_complete}/{total} complete)"
+                )
             except Exception:
                 typer.echo(f"  {analysis_dir.name:<30} (state unreadable)")
         else:

@@ -14,6 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - import-time only, for type checkers
     from hepagent.agents.jfc._data import get_jfc_data_dir
+    from hepagent.agents.jfc.architect import (
+        ArchitectProposal,
+        ProposalResult,
+        propose_plan,
+    )
     from hepagent.agents.jfc.codesign import run_codesign_gate
     from hepagent.agents.jfc.commitment_checker import (
         CommitmentCheckResult,
@@ -28,7 +33,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only, for type checkers
     )
     from hepagent.agents.jfc.graph_builder import (
         bootstrap_graph,
-        ingest_phase,
+        ingest_node,
         ingest_review,
         rebuild,
     )
@@ -48,6 +53,9 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only, for type checkers
 # Public name -> submodule that defines it.
 _EXPORTS: dict[str, str] = {
     "get_jfc_data_dir": "_data",
+    "ArchitectProposal": "architect",
+    "ProposalResult": "architect",
+    "propose_plan": "architect",
     "run_codesign_gate": "codesign",
     "CommitmentCheckResult": "commitment_checker",
     "CommitmentStatus": "commitment_checker",
@@ -57,7 +65,7 @@ _EXPORTS: dict[str, str] = {
     "create_phase_executor": "executor",
     "create_typesetter": "executor",
     "bootstrap_graph": "graph_builder",
-    "ingest_phase": "graph_builder",
+    "ingest_node": "graph_builder",
     "ingest_review": "graph_builder",
     "rebuild": "graph_builder",
     "JFCOrchestrationState": "orchestrator",

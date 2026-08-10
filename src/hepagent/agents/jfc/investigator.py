@@ -12,6 +12,8 @@ from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
+from hepagent.plan.schema import AnalysisPlan
+from hepagent.plan.store import resolve_plan
 from hepagent.tools.common import read_file, web_search, write_review
 from hepagent.tools.jfc import get_jfc_tools
 
@@ -20,54 +22,53 @@ _JFC_SRC = get_jfc_data_dir()
 
 @dataclass
 class RegressionTicket:
-    detected_phase: int | str
-    origin_phase: int | str
+    """What the investigator concluded about a regression.
+
+    Phases are plan node ids throughout.
+    """
+
+    detected_phase: str
+    origin_phase: str
     symptom: str
     fix_description: str = ""
-    affected_phases: list[int | str] = field(default_factory=list)
+    affected_phases: list[str] = field(default_factory=list)
     ticket_path: Path | None = None
 
 
-def _parse_origin_phase(raw: str) -> int | str:
-    try:
-        return int(raw)
-    except ValueError:
-        return raw.lower()
-
-
-def _parse_regression_ticket(ticket_path: Path) -> tuple[int | str | None, list[int | str]]:
-    """Extract origin_phase and affected_phases from a written REGRESSION_TICKET.md.
+def _parse_regression_ticket(ticket_path: Path) -> tuple[str | None, list[str]]:
+    """Extract origin and affected node ids from a written REGRESSION_TICKET.md.
 
     Expected sections in the ticket:
         ## Origin Phase
-        3
+        selection
 
         ## Affected Downstream Phases
-        3, 4a, 4b
+        selection, inference_expected, inference_partial
     """
     content = ticket_path.read_text(encoding="utf-8")
 
-    origin_phase: int | str | None = None
+    origin_phase: str | None = None
     origin_match = re.search(r"##\s*Origin Phase\s*\n+([^\n#]+)", content)
     if origin_match:
-        origin_phase = _parse_origin_phase(origin_match.group(1).strip())
+        origin_phase = origin_match.group(1).strip().lower() or None
 
-    affected_phases: list[int | str] = []
+    affected_phases: list[str] = []
     affected_match = re.search(r"##\s*Affected Downstream Phases\s*\n+([^\n#]+)", content)
     if affected_match:
         for part in affected_match.group(1).split(","):
-            part = part.strip()
-            if part:
-                affected_phases.append(_parse_origin_phase(part))
+            cleaned = part.strip().lower()
+            if cleaned:
+                affected_phases.append(cleaned)
 
     return origin_phase, affected_phases
 
 
 async def run_investigator(
-    detected_phase: int | str,
-    origin_phase: int | str,
+    detected_phase: str,
+    origin_phase: str,
     symptom: str,
     analysis_root: Path,
+    plan: AnalysisPlan | None = None,
     model_provider: str = "cborg",
     model_name: str | None = None,
     max_turns: int = 20,
@@ -76,18 +77,21 @@ async def run_investigator(
     Investigate a regression finding and produce a REGRESSION_TICKET.md.
 
     The ticket identifies the exact root cause, what must change in the origin
-    phase, and which downstream phases are invalidated vs reusable.
+    node, and which downstream nodes are invalidated vs reusable.
 
     Args:
-        detected_phase: Phase where the regression was detected (N).
-        origin_phase: Earlier phase where the root cause is suspected (M).
+        detected_phase: Node id where the regression was detected.
+        origin_phase: Upstream node id where the root cause is suspected.
         symptom: Description of the regression symptom from the reviewer.
         analysis_root: Path to the analysis root directory.
+        plan: The analysis plan. Read from `plan.json` when omitted.
         model_provider: Model provider name.
         model_name: Specific model name.
     """
+    plan = resolve_plan(analysis_root, plan)
     role_def = read_md(_JFC_SRC / "agents" / "investigator.md")
-    ticket_path = analysis_root / "regressions" / f"phase{detected_phase}" / "REGRESSION_TICKET.md"
+    ticket_path = analysis_root / "regressions" / str(detected_phase) / "REGRESSION_TICKET.md"
+    valid_ids = ", ".join(plan.node_ids()) or "(the plan declares no nodes)"
 
     instructions = "\n\n".join(
         filter(
@@ -97,30 +101,31 @@ async def run_investigator(
                 if role_def
                 else (
                     "# INVESTIGATOR ROLE\n\n"
-                    "You scope regression fixes. Read all phase artifacts from the detected phase "
-                    "backward to the suspected origin phase to confirm the root cause. "
+                    "You scope regression fixes. Read the artifacts from the detected node "
+                    "backward to the suspected origin node to confirm the root cause. "
                     "Produce REGRESSION_TICKET.md identifying what must change, which downstream "
                     "artifacts are invalidated, and estimated rework scope."
                 ),
                 f"# REGRESSION DETECTED\n\n"
-                f"Detected at phase: {detected_phase}\n"
-                f"Suspected origin phase: {origin_phase}\n"
+                f"Detected at node: {detected_phase}\n"
+                f"Suspected origin node: {origin_phase}\n"
                 f"Symptom: {symptom}",
                 f"# ANALYSIS ROOT\n\n`{analysis_root}`",
+                f"# ANALYSIS PLAN\n\nValid node ids: {valid_ids}",
                 f"# OUTPUT\n\nWrite REGRESSION_TICKET.md to: `{ticket_path}`\n\n"
                 f"The ticket MUST contain these sections (used by the orchestrator):\n\n"
                 f"## Origin Phase\n"
-                f"<single phase identifier, e.g. 3 or 4a>\n\n"
+                f"<a single node id from the analysis plan>\n\n"
                 f"## Affected Downstream Phases\n"
-                f"<comma-separated list of phases to re-run in order, e.g. 3, 4a, 4b>\n\n"
+                f"<comma-separated node ids to re-run, in order>\n\n"
                 f"## Root Cause\n"
                 f"<what exactly is wrong and where>\n\n"
                 f"## Required Fix\n"
-                f"<what the executor must change when Phase M is re-run>\n\n"
+                f"<what the executor must change when node M is re-run>\n\n"
                 f"## Reusable Artifacts\n"
-                f"<which phase outputs are unaffected and can be skipped>\n\n"
+                f"<which node outputs are unaffected and can be skipped>\n\n"
                 f"## Estimated Rework Scope\n"
-                f"<agent-hours per phase>",
+                f"<agent-hours per node>",
             ],
         )
     )
@@ -141,10 +146,10 @@ async def run_investigator(
     ticket_path.parent.mkdir(parents=True, exist_ok=True)
     context = AgentContext(agent_name="jfc_investigator", active_skill="jfc")
     task = (
-        f"Investigate the regression detected at Phase {detected_phase}: {symptom}\n\n"
-        f"Suspected root cause is in Phase {origin_phase}. "
-        f"Trace through the phase artifacts to confirm the origin and identify all affected "
-        f"downstream phases. Write REGRESSION_TICKET.md to {ticket_path}."
+        f"Investigate the regression detected at node {detected_phase}: {symptom}\n\n"
+        f"Suspected root cause is in node {origin_phase}. "
+        f"Trace through the artifacts to confirm the origin and identify all affected "
+        f"downstream nodes. Write REGRESSION_TICKET.md to {ticket_path}."
     )
     result = await Runner.run(agent, task, context=context, max_turns=max_turns)
 

@@ -87,3 +87,36 @@ def fake_api_keys(monkeypatch):
     monkeypatch.setenv("CBORG_API_KEY", "test-cborg-api-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-api-key")
     monkeypatch.setenv("AMSC_API_KEY", "test-amsc-api-key")
+
+
+JFC_PROMPT = "Measure the Z->bb cross section in 140/fb of ATLAS Run 2 data."
+
+
+@pytest.fixture
+def jfc_plan():
+    """The shipped seven-node measurement plan, instantiated for a test analysis.
+
+    Tests that exercise the JFC runtime use this rather than a hand-built plan:
+    it is the structure users actually get, so a template change that would break
+    the runtime shows up here.
+    """
+    from hepagent.plan.templates import instantiate
+
+    return instantiate(
+        "jfc-measurement",
+        analysis_name="demo",
+        analysis_type="measurement",
+        physics_prompt=JFC_PROMPT,
+    )
+
+
+@pytest.fixture
+def jfc_analysis(tmp_path, jfc_plan):
+    """An analysis root carrying `plan.json` and `prompt.md`, but no artifacts yet."""
+    from hepagent.plan.store import save_plan
+
+    root = tmp_path / "demo"
+    root.mkdir()
+    (root / "prompt.md").write_text(f"# Physics Prompt\n\n{JFC_PROMPT}\n", encoding="utf-8")
+    save_plan(root, jfc_plan)
+    return root

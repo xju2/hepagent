@@ -7,92 +7,60 @@ dataset is the one the selection was tuned on, that this closure test is what
 resolves commitment D1.
 
 These tools let an executor write that meaning down, bounded by a **write-back
-contract**: each phase may create only the node and edge types that belong to it.
+contract**: each node may create only the node and edge types that belong to it.
 A call outside the contract is refused with an explanation rather than silently
-widening what the phase is allowed to assert.
+widening what the node is allowed to assert.
+
+The contract is authored, not hardcoded: it is `PlanNode.contract`, edited in the
+plan alongside everything else about the node.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from pathlib import Path
 
 from agents import function_tool
 from hepagent.graph.query import ancestors, describe, to_table, unresolved_commitments
 from hepagent.graph.schema import Edge, GraphSchemaError, Node, make_id
 from hepagent.graph.store import AnalysisGraph
-
-# Per-phase write-back contract: which node and edge types each phase may create.
-# Phase 1 declares commitments and the methods/datasets it intends to use; the
-# middle phases attach evidence and figures; only Phase 5 writes new artifacts.
-PHASE_CONTRACTS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "1": (
-        frozenset({"commitment", "method", "dataset"}),
-        frozenset({"commits_to", "requires"}),
-    ),
-    "2": (
-        frozenset({"dataset", "evidence", "figure"}),
-        frozenset({"derives_from", "supports"}),
-    ),
-    "3": (
-        frozenset({"method", "evidence", "figure"}),
-        frozenset({"derives_from", "supports", "resolves"}),
-    ),
-    "4a": (
-        frozenset({"evidence", "figure", "method"}),
-        frozenset({"derives_from", "supports", "resolves", "downscopes"}),
-    ),
-    "4b": (
-        frozenset({"evidence", "figure", "method"}),
-        frozenset({"derives_from", "supports", "resolves", "downscopes"}),
-    ),
-    "4c": (
-        frozenset({"evidence", "figure", "method"}),
-        frozenset({"derives_from", "supports", "resolves", "downscopes"}),
-    ),
-    "5": (
-        frozenset({"artifact", "evidence", "figure"}),
-        frozenset({"derives_from", "supports"}),
-    ),
-}
+from hepagent.plan.schema import PlanNode
+from hepagent.tools.jfc._resolve import resolve_node
 
 
-def contract_for(phase: str) -> tuple[frozenset[str], frozenset[str]]:
-    """Return the (node types, edge types) a phase may create.
+def contract_for(node: PlanNode) -> tuple[frozenset[str], frozenset[str]]:
+    """Return the (node types, edge types) a plan node may create.
 
-    An unknown phase gets an empty contract — it may read the graph but not
-    write to it.
+    A node that declares no contract may read the graph but not write to it.
     """
-    return PHASE_CONTRACTS.get(str(phase), (frozenset(), frozenset()))
+    return frozenset(node.contract.node_types), frozenset(node.contract.edge_types)
 
 
-def contract_summary(phase: str) -> str:
-    """Render a phase's contract for injection into an executor prompt."""
-    node_types, edge_types = contract_for(phase)
+def contract_summary(node: PlanNode) -> str:
+    """Render a node's contract for injection into an executor prompt."""
+    node_types, edge_types = contract_for(node)
     if not node_types:
-        return f"Phase {phase} has no graph write-back allowance."
+        return f"Node '{node.id}' has no graph write-back allowance."
     return (
-        f"Phase {phase} may create these node types: {', '.join(sorted(node_types))}.\n"
-        f"Phase {phase} may create these edge types: {', '.join(sorted(edge_types))}."
+        f"Node '{node.id}' may create these node types: {', '.join(sorted(node_types))}.\n"
+        f"Node '{node.id}' may create these edge types: {', '.join(sorted(edge_types))}."
     )
 
 
-def _contract_error(phase: str, kind: str, requested: str, allowed: frozenset[str]) -> str:
+def _contract_error(node_id: str, kind: str, requested: str, allowed: Collection[str]) -> str:
     if not allowed:
-        return (
-            f"Error: phase '{phase}' has no graph write-back allowance. "
-            f"Valid phases: {', '.join(sorted(PHASE_CONTRACTS))}"
-        )
+        return f"Error: node '{node_id}' has no graph write-back allowance."
     return (
-        f"Error: phase '{phase}' may not create {kind} '{requested}'. "
-        f"Allowed {kind}s for this phase: {', '.join(sorted(allowed))}."
+        f"Error: node '{node_id}' may not create {kind} '{requested}'. "
+        f"Allowed {kind}s for this node: {', '.join(sorted(allowed))}."
     )
 
 
 @function_tool
 async def graph_add_node(
     analysis_root: str,
-    phase: str,
+    node_id: str,
     node_type: str,
     label: str,
     content_ref: str = "",
@@ -106,14 +74,17 @@ async def graph_add_node(
     closes a commitment. Figures and artifacts already on disk are picked up
     automatically — you do not need to add them by hand.
 
-    Returns the node id on success, or an error string starting with "Error:".
+    Returns the id of the created graph node, or an error string starting with
+    "Error:".
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
-        node_type: Node type; must be permitted for this phase (see your
-            write-back contract). One of: commitment, dataset, method, evidence,
-            figure, artifact.
+        node_id: The plan node you are working on, e.g. "strategy" or
+            "selection_ee". This is the id from the analysis plan, not a graph
+            node id.
+        node_type: Graph node type; must be permitted for your plan node (see
+            your write-back contract). One of: commitment, dataset, method,
+            evidence, figure, artifact.
         label: Short human-readable name, e.g. "mc23a ttbar PowhegPythia8".
         content_ref: Optional path to the backing file, relative to the
             analysis root.
@@ -122,9 +93,13 @@ async def graph_add_node(
             derivation, lumi_fb, reco_tag, trigger, region, syst_source,
             np_name, generator.
     """
-    allowed_nodes, _ = contract_for(phase)
+    plan_node, error = resolve_node(analysis_root, node_id)
+    if plan_node is None:
+        return error
+
+    allowed_nodes, _ = contract_for(plan_node)
     if node_type not in allowed_nodes:
-        return _contract_error(phase, "node type", node_type, allowed_nodes)
+        return _contract_error(plan_node.id, "node type", node_type, allowed_nodes)
 
     metadata: dict = {}
     if metadata_json.strip():
@@ -136,34 +111,30 @@ async def graph_add_node(
             return "Error: metadata_json must be a JSON object."
         metadata = parsed
 
-    root = Path(analysis_root)
-    if not root.is_dir():
-        return f"Error: analysis root not found: {analysis_root}"
-
-    graph = AnalysisGraph.load(root)
+    graph = AnalysisGraph.load(Path(analysis_root))
     graph.ensure_dir()
-    node_id = make_id(node_type, content_ref or label)
+    graph_node_id = make_id(node_type, content_ref or label)
     try:
         graph.add_node(
             Node(
-                id=node_id,
+                id=graph_node_id,
                 type=node_type,
                 label=label,
                 content_ref=content_ref or None,
                 metadata=metadata,
-                phase=str(phase),
-                created_by=f"phase{phase}_executor",
+                phase=plan_node.id,
+                created_by=f"{plan_node.id}_executor",
             )
         )
     except GraphSchemaError as exc:
         return f"Error: {exc}"
-    return node_id
+    return graph_node_id
 
 
 @function_tool
 async def graph_add_edge(
     analysis_root: str,
-    phase: str,
+    node_id: str,
     src_id: str,
     edge_type: str,
     dst_id: str,
@@ -186,16 +157,21 @@ async def graph_add_edge(
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
-        src_id: Source node id, e.g. "commitment:D1".
-        edge_type: Edge type; must be permitted for this phase.
-        dst_id: Target node id.
+        node_id: The plan node you are working on, e.g. "strategy". This is the
+            id from the analysis plan, not a graph node id.
+        src_id: Source graph node id, e.g. "commitment:D1".
+        edge_type: Edge type; must be permitted for your plan node.
+        dst_id: Target graph node id.
         evidence_ref: Path or short locator backing this link. Required for
             downscopes edges — a narrowed commitment must say why.
     """
-    _, allowed_edges = contract_for(phase)
+    plan_node, error = resolve_node(analysis_root, node_id)
+    if plan_node is None:
+        return error
+
+    _, allowed_edges = contract_for(plan_node)
     if edge_type not in allowed_edges:
-        return _contract_error(phase, "edge type", edge_type, allowed_edges)
+        return _contract_error(plan_node.id, "edge type", edge_type, allowed_edges)
 
     if edge_type == "downscopes" and not evidence_ref.strip():
         return (
@@ -203,11 +179,7 @@ async def graph_add_edge(
             "attempted and why the commitment could not be met in full."
         )
 
-    root = Path(analysis_root)
-    if not root.is_dir():
-        return f"Error: analysis root not found: {analysis_root}"
-
-    graph = AnalysisGraph.load(root)
+    graph = AnalysisGraph.load(Path(analysis_root))
     graph.ensure_dir()
     try:
         graph.add_edge(
@@ -216,8 +188,8 @@ async def graph_add_edge(
                 dst=dst_id,
                 type=edge_type,
                 evidence_ref=evidence_ref or None,
-                phase=str(phase),
-                created_by=f"phase{phase}_executor",
+                phase=plan_node.id,
+                created_by=f"{plan_node.id}_executor",
             )
         )
     except GraphSchemaError as exc:

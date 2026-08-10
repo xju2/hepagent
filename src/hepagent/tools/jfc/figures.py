@@ -7,35 +7,26 @@ from pathlib import Path
 
 from agents import function_tool
 from hepagent.agents.jfc._data import get_jfc_data_dir
-
-_PHASE_DIR_MAP = {
-    "1": "phase1_strategy",
-    "2": "phase2_exploration",
-    "3": "phase3_selection",
-    "4a": "phase4a_inference_expected",
-    "4b": "phase4b_inference_partial",
-    "4c": "phase4c_inference_observed",
-    "5": "phase5_documentation",
-}
+from hepagent.tools.jfc._resolve import resolve_node
 
 
 @function_tool
-async def validate_figures(analysis_root: str, phase: str) -> str:
+async def validate_figures(analysis_root: str, node_id: str) -> str:
     """
-    Run lint_plots.py on figures in the phase outputs directory.
+    Run lint_plots.py on figures in a node's outputs directory.
 
     Returns the linter output. Any RED FLAG lines indicate Category A issues.
     Wraps hepagent/agents/jfc/data/conventions/lint_plots.py.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
+        node_id: Plan node id, e.g. "selection" or "inference_expected".
     """
-    phase_dir = _PHASE_DIR_MAP.get(phase)
-    if not phase_dir:
-        return f"Error: unknown phase '{phase}'. Valid: {', '.join(_PHASE_DIR_MAP)}"
+    node, err = resolve_node(analysis_root, node_id)
+    if node is None:
+        return err
 
-    figures_dir = Path(analysis_root) / phase_dir / "outputs" / "figures"
+    figures_dir = Path(analysis_root) / node.outputs_dir / "figures"
     if not figures_dir.exists():
         return f"No figures directory found at {figures_dir}"
 
@@ -60,19 +51,19 @@ async def validate_figures(analysis_root: str, phase: str) -> str:
 
 
 @function_tool
-async def list_phase_figures(analysis_root: str, phase: str) -> str:
+async def list_phase_figures(analysis_root: str, node_id: str) -> str:
     """
-    List figure files in the phase outputs/figures/ directory.
+    List figure files in a node's outputs/figures/ directory.
 
     Args:
         analysis_root: Absolute path to the analysis root directory.
-        phase: Phase identifier: "1", "2", "3", "4a", "4b", "4c", or "5".
+        node_id: Plan node id, e.g. "selection" or "inference_expected".
     """
-    phase_dir = _PHASE_DIR_MAP.get(phase)
-    if not phase_dir:
-        return f"Error: unknown phase '{phase}'. Valid: {', '.join(_PHASE_DIR_MAP)}"
+    node, err = resolve_node(analysis_root, node_id)
+    if node is None:
+        return err
 
-    figures_dir = Path(analysis_root) / phase_dir / "outputs" / "figures"
+    figures_dir = Path(analysis_root) / node.outputs_dir / "figures"
     if not figures_dir.exists():
         return f"No figures directory at {figures_dir}"
 

@@ -203,3 +203,80 @@ async def test_model_switch_validates_against_the_platform(monkeypatch):
     outcome = await state.handle_command("/model b-model")
     assert outcome.settings_changed is True
     assert state.model.name == "b-model"
+
+
+# ------------------------------------------------------------ /plan command
+
+
+@pytest.mark.asyncio
+async def test_plan_lists_analyses_when_given_no_name(monkeypatch, tmp_path, jfc_plan):
+    from hepagent.plan.service import BASE_DIR_ENV
+    from hepagent.plan.store import save_plan
+
+    base = tmp_path / "analyses"
+    (base / "zbb").mkdir(parents=True)
+    save_plan(base / "zbb", jfc_plan)
+    (base / "not_an_analysis").mkdir()
+    monkeypatch.setenv(BASE_DIR_ENV, str(base))
+
+    outcome = await _make_state().handle_command("/plan")
+    assert outcome.handled
+    assert "zbb" in outcome.message
+    assert "not_an_analysis" not in outcome.message
+    assert "/plan/zbb" in outcome.message  # the editor link
+
+
+@pytest.mark.asyncio
+async def test_plan_renders_a_named_plan_as_mermaid(monkeypatch, tmp_path, jfc_plan):
+    from hepagent.plan.service import BASE_DIR_ENV
+    from hepagent.plan.store import save_plan
+
+    base = tmp_path / "analyses"
+    (base / "zbb").mkdir(parents=True)
+    save_plan(base / "zbb", jfc_plan)
+    monkeypatch.setenv(BASE_DIR_ENV, str(base))
+
+    outcome = await _make_state().handle_command("/plan zbb")
+    assert "```mermaid" in outcome.message
+    assert "strategy -->|requires| exploration" in outcome.message
+    assert "7 nodes" in outcome.message
+    assert "No blocking findings" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_plan_flags_a_plan_that_cannot_run(monkeypatch, tmp_path, jfc_plan):
+    import dataclasses
+
+    from hepagent.plan.schema import PlanEdge
+    from hepagent.plan.service import BASE_DIR_ENV
+    from hepagent.plan.store import save_plan
+
+    base = tmp_path / "analyses"
+    (base / "zbb").mkdir(parents=True)
+    save_plan(
+        base / "zbb",
+        dataclasses.replace(
+            jfc_plan,
+            edges=jfc_plan.edges + (PlanEdge(upstream="documentation", downstream="strategy"),),
+        ),
+    )
+    monkeypatch.setenv(BASE_DIR_ENV, str(base))
+
+    outcome = await _make_state().handle_command("/plan zbb")
+    assert "blocking finding" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_plan_reports_an_unreadable_analysis_without_raising(monkeypatch, tmp_path):
+    from hepagent.plan.service import BASE_DIR_ENV
+
+    monkeypatch.setenv(BASE_DIR_ENV, str(tmp_path))
+    outcome = await _make_state().handle_command("/plan ghost")
+    assert outcome.handled
+    assert "Could not read the plan" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_plan_is_listed_in_help():
+    outcome = await _make_state().handle_command("/help")
+    assert "/plan" in outcome.message

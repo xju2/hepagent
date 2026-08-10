@@ -4,9 +4,14 @@ Nothing here calls a model. Everything the builder writes is derived by parsing
 files the pipeline already produces, reusing the pipeline's own parsers so the
 graph cannot drift from what the agents actually read:
 
-- `UPSTREAM_ARTIFACTS` / `PHASE_SPECS` (executor) define the dependency edges.
-- `check_phase1_commitments` (commitment_checker) yields commitment nodes.
+- the **analysis plan** (`plan.json`) defines the nodes and the dependency edges;
+- `check_phase1_commitments` (commitment_checker) yields commitment nodes;
 - `parse_verdict_from_adjudication` (review_gate) yields decision nodes.
+
+The plan replaced the hardcoded `PHASE_SPECS` / `UPSTREAM_ARTIFACTS` tables, so
+what a node produces and what it depends on is now authored rather than declared
+in code — but the compiled graph is the same shape, and `plan.compile` is the one
+place the plan's data-flow edges become the graph's dependency edges.
 
 Agents enrich the graph on top of this through the write-back tools in
 `hepagent.tools.jfc.graph`; ingestion runs afterwards and merges, never clobbers.
@@ -19,16 +24,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hepagent.agents.jfc.commitment_checker import check_phase1_commitments
-from hepagent.agents.jfc.executor import PHASE_SPECS, UPSTREAM_ARTIFACTS
 from hepagent.agents.jfc.review_gate import parse_verdict_from_adjudication
 from hepagent.graph.schema import Edge, GraphSchemaError, Node, make_id
 from hepagent.graph.store import AnalysisGraph
+from hepagent.plan.compile import plan_to_graph
+from hepagent.plan.schema import AnalysisPlan, PlanNode
+from hepagent.plan.store import resolve_plan
 
 BUILDER = "builder"
-
-# Phase execution order, mirrored from the orchestrator. Imported lazily in
-# `rebuild` to avoid a circular import (the orchestrator imports this module).
-_PHASE_ORDER: tuple[int | str, ...] = (1, 2, 3, "4a", "4b", "4c", 5)
 
 _FIGURE_SUFFIXES = (".png", ".pdf", ".jpg", ".jpeg", ".svg")
 
@@ -38,7 +41,7 @@ class IngestReport:
     """What one ingestion pass added to the graph.
 
     Args:
-        phase: The phase that was ingested, as a string key.
+        phase: The plan node that was ingested, by id.
         nodes: Ids of nodes created or updated.
         edges: `(src, type, dst)` triples created.
         skipped: Human-readable notes about things that could not be linked.
@@ -62,36 +65,19 @@ class IngestReport:
 # ------------------------------------------------------------------ helpers
 
 
-def phase_key(phase: int | str) -> str:
-    """Normalise a phase identifier to its string key ("1", "4a", ...)."""
-    return str(phase)
+def commitment_owner(plan: AnalysisPlan) -> PlanNode | None:
+    """Return the node that declares the analysis's commitments.
 
-
-def phase_dir(phase: int | str) -> str:
-    """Return the directory name for a phase, or "" if the phase is unknown."""
-    spec = PHASE_SPECS.get(phase) or PHASE_SPECS.get(_coerce_phase(phase))
-    return spec[0] if spec else ""
-
-
-def artifact_rel_path(phase: int | str) -> str:
-    """Return the phase's primary artifact path, relative to the analysis root."""
-    spec = PHASE_SPECS.get(phase) or PHASE_SPECS.get(_coerce_phase(phase))
-    if not spec:
-        return ""
-    directory, _template, artifact = spec
-    return f"{directory}/outputs/{artifact}"
-
-
-def _coerce_phase(phase: int | str) -> int | str:
-    """Map "1" -> 1 so string and int phase keys both hit `PHASE_SPECS`."""
-    try:
-        return int(phase)
-    except (TypeError, ValueError):
-        return str(phase)
-
-
-def _upstream_for(phase: int | str) -> list[str]:
-    return UPSTREAM_ARTIFACTS.get(phase) or UPSTREAM_ARTIFACTS.get(_coerce_phase(phase)) or []
+    That is the node whose write-back contract lets it create `commits_to`
+    edges — Phase 1 in the shipped templates, but a plan is free to put it
+    elsewhere. Falls back to the first starting node so a plan that never
+    declared a contract still attaches its commitments somewhere sensible.
+    """
+    for node in plan.nodes:
+        if "commits_to" in node.contract.edge_types:
+            return node
+    entries = plan.entry_nodes()
+    return entries[0] if entries else None
 
 
 def _add_node(graph: AnalysisGraph, report: IngestReport, node: Node) -> Node:
@@ -114,105 +100,42 @@ def _add_edge(graph: AnalysisGraph, report: IngestReport, edge: Edge) -> bool:
 # ---------------------------------------------------------------- bootstrap
 
 
-def bootstrap_graph(
-    analysis_root: Path | str,
-    analysis_name: str,
-    analysis_type: str,
-    physics_prompt: str = "",
-) -> AnalysisGraph:
-    """Create the initial graph for a freshly scaffolded analysis.
+def bootstrap_graph(analysis_root: Path | str, plan: AnalysisPlan | None = None) -> AnalysisGraph:
+    """Seed the graph for an analysis from its plan.
 
-    Writes the problem node, the analysis root node, one *pending* artifact node
-    per phase, and the `requires` chain between them. Pending artifact nodes are
-    the plan: they carry the path the phase will write but do not yet assert that
-    the file exists, so validation treats them as declarations rather than claims.
+    Writes the problem node, the analysis-root node, one *pending* artifact node
+    per plan node, and the `requires` chain between them. Pending artifact nodes
+    are the declaration: they carry the path a node will write without yet
+    asserting the file exists, so validation treats them as plans rather than
+    claims.
+
+    The whole shape comes from `plan.compile.plan_to_graph`; this function only
+    decides what to merge. A pending placeholder never overwrites an artifact
+    that has already been ingested.
 
     Args:
         analysis_root: The analysis root directory.
-        analysis_name: Short analysis identifier.
-        analysis_type: "measurement" or "search".
-        physics_prompt: The physics question, stored as node metadata.
+        plan: The analysis plan. Read from `plan.json` when omitted.
 
     Returns:
         The populated `AnalysisGraph`.
     """
     root = Path(analysis_root)
+    plan = resolve_plan(root, plan)
     graph = AnalysisGraph.load(root)
     graph.ensure_dir()
     report = IngestReport(phase="bootstrap")
 
-    problem_id = make_id("problem", analysis_name)
-    _add_node(
-        graph,
-        report,
-        Node(
-            id=problem_id,
-            type="problem",
-            label=_first_line(physics_prompt) or f"{analysis_name} physics question",
-            content_ref="prompt.md",
-            metadata={"analysis_type": analysis_type},
-            created_by=BUILDER,
-        ),
-    )
+    nodes, edges = plan_to_graph(plan)
 
-    root_id = make_id("analysis_root", analysis_name)
-    _add_node(
-        graph,
-        report,
-        Node(
-            id=root_id,
-            type="analysis_root",
-            label=analysis_name,
-            metadata={"analysis_type": analysis_type},
-            created_by=BUILDER,
-        ),
-    )
-    _add_edge(graph, report, Edge(src=root_id, dst=problem_id, type="requires", created_by=BUILDER))
-
-    # One pending artifact node per phase, chained by `requires`.
-    for phase in _PHASE_ORDER:
-        rel = artifact_rel_path(phase)
-        if not rel:
+    for node in nodes:
+        # A pending artifact placeholder must never downgrade a real one.
+        if node.status == "pending" and graph.has_node(node.id):
             continue
-        key = phase_key(phase)
-        node_id = make_id("artifact", rel)
-        # Only declare the placeholder if the phase has not been ingested yet —
-        # a pending plan must never overwrite an artifact already on disk.
-        if not graph.has_node(node_id):
-            _add_node(
-                graph,
-                report,
-                Node(
-                    id=node_id,
-                    type="artifact",
-                    label=Path(rel).name,
-                    content_ref=rel,
-                    status="pending",
-                    phase=key,
-                    created_by=BUILDER,
-                ),
-            )
+        _add_node(graph, report, node)
 
-        upstream = _upstream_for(phase)
-        prerequisites = [u for u in upstream if u.endswith(".md") and "/outputs/" in u]
-        if not prerequisites:
-            _add_edge(
-                graph,
-                report,
-                Edge(src=node_id, dst=problem_id, type="requires", phase=key, created_by=BUILDER),
-            )
-        for rel_upstream in prerequisites:
-            _add_edge(
-                graph,
-                report,
-                Edge(
-                    src=node_id,
-                    dst=make_id("artifact", rel_upstream),
-                    type="requires",
-                    phase=key,
-                    created_by=BUILDER,
-                ),
-            )
+    for edge in edges:
+        _add_edge(graph, report, edge)
 
     return graph
 
@@ -220,32 +143,43 @@ def bootstrap_graph(
 # ---------------------------------------------------------------- ingestion
 
 
-def ingest_phase(analysis_root: Path | str, phase: int | str) -> IngestReport:
-    """Ingest everything a completed phase left on disk.
+def ingest_node(
+    analysis_root: Path | str,
+    node_id: str,
+    plan: AnalysisPlan | None = None,
+) -> IngestReport:
+    """Ingest everything a completed plan node left on disk.
 
     Records the primary artifact and its lineage, figures, machine-readable
     results, analysis scripts, and the current state of every commitment.
 
     Args:
         analysis_root: The analysis root directory.
-        phase: Phase identifier (1, 2, 3, "4a", "4b", "4c", 5).
+        node_id: Id of the plan node to ingest.
+        plan: The analysis plan. Read from `plan.json` when omitted.
     """
     root = Path(analysis_root)
-    key = phase_key(phase)
-    graph = AnalysisGraph.load(root)
-    graph.ensure_dir()
-    report = IngestReport(phase=key)
+    report = IngestReport(phase=str(node_id))
 
-    directory = phase_dir(phase)
-    if not directory:
-        report.skipped.append(f"Unknown phase '{key}' — nothing ingested")
+    try:
+        plan = resolve_plan(root, plan)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised into the orchestrator
+        report.skipped.append(f"Could not read the analysis plan: {exc}")
         return report
 
-    artifact_id = _ingest_artifact(graph, report, root, phase, key)
-    _ingest_figures(graph, report, root, key, directory, artifact_id)
-    _ingest_results(graph, report, root, key, directory, artifact_id)
-    _ingest_scripts(graph, report, root, key, directory, artifact_id)
-    _ingest_commitments(graph, report, root, key)
+    node = plan.node(str(node_id))
+    if node is None:
+        report.skipped.append(f"Unknown plan node '{node_id}' — nothing ingested")
+        return report
+
+    graph = AnalysisGraph.load(root)
+    graph.ensure_dir()
+
+    artifact_id = _ingest_artifact(graph, report, root, plan, node)
+    _ingest_figures(graph, report, root, node, artifact_id)
+    _ingest_results(graph, report, root, node, artifact_id)
+    _ingest_scripts(graph, report, root, node, artifact_id)
+    _ingest_commitments(graph, report, root, plan, node)
     return report
 
 
@@ -253,13 +187,14 @@ def _ingest_artifact(
     graph: AnalysisGraph,
     report: IngestReport,
     root: Path,
-    phase: int | str,
-    key: str,
+    plan: AnalysisPlan,
+    node: PlanNode,
 ) -> str | None:
-    """Record the phase's primary artifact and its `derives_from` lineage."""
-    rel = artifact_rel_path(phase)
-    if not rel or not (root / rel).exists():
-        report.skipped.append(f"Phase {key} artifact not on disk yet ({rel or 'unknown'})")
+    """Record the node's primary artifact and its `derives_from` lineage."""
+    key = node.id
+    rel = node.artifact_path
+    if not (root / rel).exists():
+        report.skipped.append(f"Node {key} artifact not on disk yet ({rel})")
         return None
 
     artifact_id = make_id("artifact", rel)
@@ -277,7 +212,7 @@ def _ingest_artifact(
         ),
     )
 
-    for rel_upstream in _upstream_for(phase):
+    for rel_upstream in _lineage_paths(plan, node):
         if not (root / rel_upstream).exists():
             continue
         upstream_id = make_id("artifact", rel_upstream)
@@ -308,15 +243,33 @@ def _ingest_artifact(
     return artifact_id
 
 
+def _lineage_paths(plan: AnalysisPlan, node: PlanNode) -> list[str]:
+    """Artifacts a node's output derives from: its upstreams plus its context files.
+
+    Both count as lineage. Only `requires` edges order execution, but an
+    `informs` upstream and an ambient context file still fed the work, and
+    provenance should say so.
+    """
+    paths: list[str] = []
+    for edge in plan.upstream_edges(node.id):
+        upstream = plan.node(edge.upstream)
+        if upstream is not None and upstream.artifact_path not in paths:
+            paths.append(upstream.artifact_path)
+    for rel in node.context_paths:
+        if rel not in paths:
+            paths.append(rel)
+    return paths
+
+
 def _ingest_figures(
     graph: AnalysisGraph,
     report: IngestReport,
     root: Path,
-    key: str,
-    directory: str,
+    node: PlanNode,
     artifact_id: str | None,
 ) -> None:
-    """Record every figure the phase produced, linked back to its artifact."""
+    """Record every figure the node produced, linked back to its artifact."""
+    key, directory = node.id, node.directory
     figures_dir = root / directory / "outputs" / "figures"
     if not figures_dir.is_dir():
         return
@@ -355,8 +308,7 @@ def _ingest_results(
     graph: AnalysisGraph,
     report: IngestReport,
     root: Path,
-    key: str,
-    directory: str,
+    node: PlanNode,
     artifact_id: str | None,
 ) -> None:
     """Record machine-readable results as evidence supporting the artifact.
@@ -365,6 +317,7 @@ def _ingest_results(
     analysis note, so each file becomes an evidence node. Top-level keys are
     captured as metadata to make the evidence searchable without reopening it.
     """
+    key, directory = node.id, node.directory
     outputs = root / directory / "outputs"
     candidates = sorted(outputs.glob("results/*.json")) + sorted(outputs.glob("*.json"))
     for result in candidates:
@@ -404,11 +357,11 @@ def _ingest_scripts(
     graph: AnalysisGraph,
     report: IngestReport,
     root: Path,
-    key: str,
-    directory: str,
+    node: PlanNode,
     artifact_id: str | None,
 ) -> None:
-    """Record the analysis code that produced the phase output."""
+    """Record the analysis code that produced the node's output."""
+    key, directory = node.id, node.directory
     src_dir = root / directory / "src"
     if not src_dir.is_dir():
         return
@@ -446,16 +399,21 @@ def _ingest_commitments(
     graph: AnalysisGraph,
     report: IngestReport,
     root: Path,
-    key: str,
+    plan: AnalysisPlan,
+    node: PlanNode,
 ) -> None:
     """Turn every COMMITMENTS.md row into a node, closed by an evidence edge.
 
-    Reuses `check_phase1_commitments` so the graph and the Phase 4a gate can
-    never disagree about what a commitment's status is.
+    Reuses `check_phase1_commitments` so the graph and the commitment gate can
+    never disagree about what a commitment's status is. Commitments belong to the
+    node that declares them — the one whose contract allows `commits_to` — not to
+    whichever node happens to be ingesting.
     """
+    key = node.id
     result = check_phase1_commitments(root)
-    strategy_rel = artifact_rel_path(1)
-    strategy_id = make_id("artifact", strategy_rel) if strategy_rel else None
+    owner = commitment_owner(plan)
+    owner_key = owner.id if owner else key
+    owner_id = make_id("artifact", owner.artifact_path) if owner else None
 
     for item in result.pending + result.resolved + result.downscoped:
         commitment_id = make_id("commitment", item.id)
@@ -469,20 +427,20 @@ def _ingest_commitments(
                 content_ref="COMMITMENTS.md",
                 metadata={"phase_resolved": item.phase_resolved},
                 status=item.status,
-                phase="1",
+                phase=owner_key,
                 created_by=BUILDER,
             ),
         )
 
-        if strategy_id and graph.has_node(strategy_id):
+        if owner_id and graph.has_node(owner_id):
             _add_edge(
                 graph,
                 report,
                 Edge(
-                    src=strategy_id,
+                    src=owner_id,
                     dst=commitment_id,
                     type="commits_to",
-                    phase="1",
+                    phase=owner_key,
                     created_by=BUILDER,
                 ),
             )
@@ -517,38 +475,49 @@ def _ingest_commitments(
         )
 
 
-def ingest_review(analysis_root: Path | str, phase: int | str) -> IngestReport:
-    """Ingest the review round for a phase: reviewer findings and the verdict.
+def ingest_review(
+    analysis_root: Path | str,
+    node_id: str,
+    plan: AnalysisPlan | None = None,
+) -> IngestReport:
+    """Ingest the review round for a node: reviewer findings and the verdict.
 
     Reviewer documents become `review` nodes attached to the artifact by
     `reviewed_by`. `ADJUDICATION.md` becomes a `decision` node whose verdict
     drives the outgoing edge: PASS approves the artifact, ITERATE and ESCALATE
-    invalidate it, and REGRESS(M) points at the phase-M artifact instead.
+    invalidate it, and REGRESS(M) points at node M's artifact instead.
 
     Args:
         analysis_root: The analysis root directory.
-        phase: Phase identifier whose review directory should be ingested.
+        node_id: Id of the plan node whose review directory should be ingested.
+        plan: The analysis plan. Read from `plan.json` when omitted.
     """
     root = Path(analysis_root)
-    key = phase_key(phase)
+    report = IngestReport(phase=str(node_id))
+
+    try:
+        plan = resolve_plan(root, plan)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised into the orchestrator
+        report.skipped.append(f"Could not read the analysis plan: {exc}")
+        return report
+
+    node = plan.node(str(node_id))
+    if node is None:
+        report.skipped.append(f"Unknown plan node '{node_id}' — no review ingested")
+        return report
+
+    key, directory = node.id, node.directory
     graph = AnalysisGraph.load(root)
     graph.ensure_dir()
-    report = IngestReport(phase=key)
-
-    directory = phase_dir(phase)
-    if not directory:
-        report.skipped.append(f"Unknown phase '{key}' — no review ingested")
-        return report
 
     review_dir = root / directory / "review"
     if not review_dir.is_dir():
         return report
 
-    artifact_rel = artifact_rel_path(phase)
-    artifact_id = make_id("artifact", artifact_rel) if artifact_rel else None
-    if artifact_id and not graph.has_node(artifact_id):
+    artifact_id: str | None = make_id("artifact", node.artifact_path)
+    if not graph.has_node(artifact_id):
         artifact_id = None
-        report.skipped.append(f"Phase {key} artifact node missing — reviews left unattached")
+        report.skipped.append(f"Node {key} artifact node missing — reviews left unattached")
 
     for review_file in sorted(review_dir.glob("*.md")):
         rel = f"{directory}/review/{review_file.name}"
@@ -557,7 +526,7 @@ def ingest_review(analysis_root: Path | str, phase: int | str) -> IngestReport:
         # label can carry the verdict. Writing it here first would append a
         # second revision on every ingestion pass.
         if review_file.name.upper().startswith("ADJUDICATION"):
-            _ingest_verdict(graph, report, key, artifact_id, review_file, rel)
+            _ingest_verdict(graph, report, plan, key, artifact_id, review_file, rel)
             continue
 
         node_id = make_id("review", rel)
@@ -593,6 +562,7 @@ def ingest_review(analysis_root: Path | str, phase: int | str) -> IngestReport:
 def _ingest_verdict(
     graph: AnalysisGraph,
     report: IngestReport,
+    plan: AnalysisPlan,
     key: str,
     artifact_id: str | None,
     adjudication_path: Path,
@@ -652,9 +622,9 @@ def _ingest_verdict(
     if verdict != "REGRESS" or regression_origin is None:
         return
 
-    # A regression additionally points at the earlier phase that caused it.
-    origin_rel = artifact_rel_path(regression_origin)
-    origin_id = make_id("artifact", origin_rel) if origin_rel else ""
+    # A regression additionally points at the earlier node that caused it.
+    origin = plan.node(str(regression_origin))
+    origin_id = make_id("artifact", origin.artifact_path) if origin else ""
     if not origin_id or not graph.has_node(origin_id):
         report.skipped.append(f"REGRESS({regression_origin}) target artifact is not in the graph")
         return
@@ -672,30 +642,29 @@ def _ingest_verdict(
     )
 
 
-def rebuild(analysis_root: Path | str) -> IngestReport:
-    """Re-derive the deterministic graph for every phase from the files on disk.
+def rebuild(analysis_root: Path | str, plan: AnalysisPlan | None = None) -> IngestReport:
+    """Re-derive the deterministic graph for every plan node from files on disk.
 
     Safe to run repeatedly: node ids are content-addressed, so an unchanged
     directory produces an unchanged graph.
 
     Args:
         analysis_root: The analysis root directory.
+        plan: The analysis plan. Read from `plan.json` when omitted.
     """
     root = Path(analysis_root)
     combined = IngestReport(phase="rebuild")
-    for phase in _PHASE_ORDER:
-        combined.merge(ingest_phase(root, phase))
-        combined.merge(ingest_review(root, phase))
+
+    try:
+        plan = resolve_plan(root, plan)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised into the orchestrator
+        combined.skipped.append(f"Could not read the analysis plan: {exc}")
+        return combined
+
+    for node in plan.nodes:
+        combined.merge(ingest_node(root, node.id, plan))
+        combined.merge(ingest_review(root, node.id, plan))
     return combined
-
-
-def _first_line(text: str) -> str:
-    """Return the first non-empty, non-heading line, trimmed for use as a label."""
-    for line in (text or "").splitlines():
-        stripped = line.strip().lstrip("#").strip()
-        if stripped:
-            return stripped[:120]
-    return ""
 
 
 def _json_keys(path: Path) -> list[str]:

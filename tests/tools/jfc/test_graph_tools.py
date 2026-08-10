@@ -1,4 +1,4 @@
-"""Tests for the agent-facing graph write-back tools and their phase contract."""
+"""Tests for the agent-facing graph write-back tools and their node contract."""
 
 import json
 
@@ -7,8 +7,9 @@ import pytest
 from hepagent.agents.jfc.graph_builder import bootstrap_graph
 from hepagent.graph.schema import Node
 from hepagent.graph.store import AnalysisGraph
+from hepagent.plan.schema import PlanNode
+from hepagent.plan.store import save_plan
 from hepagent.tools.jfc.graph import (
-    PHASE_CONTRACTS,
     contract_for,
     contract_summary,
     graph_add_edge,
@@ -27,34 +28,42 @@ async def call(tool, **kwargs):
 
 
 @pytest.fixture
-def analysis_root(tmp_path):
+def analysis_root(tmp_path, jfc_plan):
     root = tmp_path / "zbb"
     (root / "phase1_strategy" / "outputs").mkdir(parents=True)
-    (root / "prompt.md").write_text("Measure the Z→bb cross-section.")
-    (root / "COMMITMENTS.md").write_text("# Phase 1 Commitments\n")
-    bootstrap_graph(root, "zbb", "measurement", "Measure the Z→bb cross-section.")
+    (root / "prompt.md").write_text(jfc_plan.problem)
+    (root / "COMMITMENTS.md").write_text("# Analysis Commitments\n")
+    save_plan(root, jfc_plan)
+    bootstrap_graph(root, jfc_plan)
     return root
+
+
+def _bare_node():
+    """A node that declares no write-back contract at all."""
+    return PlanNode(id="bare", label="Bare", directory="bare", artifact="BARE.md")
 
 
 # ------------------------------------------------------------------ contract
 
 
-def test_every_pipeline_phase_has_a_contract():
-    assert set(PHASE_CONTRACTS) == {"1", "2", "3", "4a", "4b", "4c", "5"}
+def test_every_pipeline_node_declares_a_contract(jfc_plan):
+    """The shipped template must not leave a node unable to write anything back."""
+    for node in jfc_plan.nodes:
+        assert contract_for(node)[0], f"{node.id} declares no node types"
 
 
-def test_contract_for_unknown_phase_is_empty():
-    assert contract_for("99") == (frozenset(), frozenset())
+def test_contract_for_a_node_without_one_is_empty():
+    assert contract_for(_bare_node()) == (frozenset(), frozenset())
 
 
-def test_contract_summary_lists_allowed_types():
-    summary = contract_summary("1")
+def test_contract_summary_lists_allowed_types(jfc_plan):
+    summary = contract_summary(jfc_plan.require_node("strategy"))
     assert "commitment" in summary
     assert "commits_to" in summary
 
 
-def test_contract_summary_for_unknown_phase_says_no_allowance():
-    assert "no graph write-back allowance" in contract_summary("99")
+def test_contract_summary_without_an_allowance_says_so():
+    assert "no graph write-back allowance" in contract_summary(_bare_node())
 
 
 # ------------------------------------------------------------ graph_add_node
@@ -65,7 +74,7 @@ async def test_add_node_within_contract_succeeds(analysis_root):
     result = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="1",
+        node_id="strategy",
         node_type="commitment",
         label="D1 unfold with IBU",
     )
@@ -78,7 +87,7 @@ async def test_add_node_outside_contract_is_refused(analysis_root):
     result = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="1",
+        node_id="strategy",
         node_type="figure",
         label="mjj.png",
     )
@@ -93,15 +102,15 @@ async def test_add_node_stores_atlas_metadata(analysis_root):
     node_id = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         node_type="dataset",
         label="mc23a Zbb PowhegPythia8",
         metadata_json=json.dumps(metadata),
     )
     node = AnalysisGraph.load(analysis_root).get_node(node_id)
     assert node.metadata == metadata
-    assert node.phase == "2"
-    assert node.created_by == "phase2_executor"
+    assert node.phase == "exploration"
+    assert node.created_by == "exploration_executor"
 
 
 @pytest.mark.asyncio
@@ -109,7 +118,7 @@ async def test_add_node_rejects_malformed_metadata(analysis_root):
     result = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         node_type="dataset",
         label="x",
         metadata_json="{not json",
@@ -122,7 +131,7 @@ async def test_add_node_rejects_non_object_metadata(analysis_root):
     result = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         node_type="dataset",
         label="x",
         metadata_json="[1, 2]",
@@ -131,11 +140,24 @@ async def test_add_node_rejects_non_object_metadata(analysis_root):
 
 
 @pytest.mark.asyncio
+async def test_add_node_reports_an_unknown_node_id(analysis_root):
+    result = await call(
+        add_node,
+        analysis_root=str(analysis_root),
+        node_id="phase1",
+        node_type="commitment",
+        label="D1",
+    )
+    assert result.startswith("Error: unknown node 'phase1'")
+    assert "strategy" in result  # the message names what is valid
+
+
+@pytest.mark.asyncio
 async def test_add_node_reports_a_missing_analysis_root(tmp_path):
     result = await call(
         add_node,
         analysis_root=str(tmp_path / "nope"),
-        phase="1",
+        node_id="strategy",
         node_type="commitment",
         label="D1",
     )
@@ -150,21 +172,21 @@ async def test_add_edge_within_contract_succeeds(analysis_root):
     commitment = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="3",
+        node_id="selection",
         node_type="method",
         label="IBU unfolding",
     )
     evidence = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="3",
+        node_id="selection",
         node_type="evidence",
         label="closure chi2/ndf = 1.3/36",
     )
     result = await call(
         add_edge,
         analysis_root=str(analysis_root),
-        phase="3",
+        node_id="selection",
         src_id=evidence,
         edge_type="supports",
         dst_id=commitment,
@@ -178,7 +200,7 @@ async def test_add_edge_outside_contract_is_refused(analysis_root):
     result = await call(
         add_edge,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         src_id="a",
         edge_type="invalidates",
         dst_id="b",
@@ -192,7 +214,7 @@ async def test_downscope_edge_requires_a_documented_reason(analysis_root):
     result = await call(
         add_edge,
         analysis_root=str(analysis_root),
-        phase="4a",
+        node_id="inference_expected",
         src_id="commitment:D1",
         edge_type="downscopes",
         dst_id="evidence:x",
@@ -205,7 +227,7 @@ async def test_add_edge_with_a_missing_endpoint_is_refused(analysis_root):
     result = await call(
         add_edge,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         src_id="dataset:ghost",
         edge_type="supports",
         dst_id="artifact:phase2_exploration/outputs/EXPLORATION.md",
@@ -219,14 +241,14 @@ async def test_add_edge_enforces_the_type_domain(analysis_root):
     dataset = await call(
         add_node,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         node_type="dataset",
         label="mc23a Zbb",
     )
     result = await call(
         add_edge,
         analysis_root=str(analysis_root),
-        phase="2",
+        node_id="exploration",
         src_id=dataset,
         edge_type="supports",
         dst_id="artifact:phase2_exploration/outputs/EXPLORATION.md",
@@ -247,11 +269,11 @@ async def test_query_summary_counts_nodes(analysis_root):
 
 
 @pytest.mark.asyncio
-async def test_query_nodes_filters_by_type(analysis_root):
+async def test_query_nodes_filters_by_type(analysis_root, jfc_plan):
     result = await call(
         run_query, analysis_root=str(analysis_root), question="nodes", target="problem"
     )
-    assert "Measure the Z→bb cross-section." in result
+    assert jfc_plan.problem.splitlines()[0][:38] in result
     assert "STRATEGY.md" not in result
 
 

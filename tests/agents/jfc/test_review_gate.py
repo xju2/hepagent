@@ -2,27 +2,25 @@
 
 import pytest
 
+from hepagent.plan.store import save_plan
+
+COMMITMENTS_HEADER = (
+    "# Analysis Commitments\n\n"
+    "| ID | Commitment | Status | Evidence | Phase Resolved |\n"
+    "|----|-----------|--------|----------|---------------|\n"
+)
+
 
 @pytest.fixture
-def analysis_root(tmp_path):
+def analysis_root(tmp_path, jfc_plan):
     root = tmp_path / "test_analysis"
-    for phase in [
-        "phase1_strategy",
-        "phase2_exploration",
-        "phase3_selection",
-        "phase4a_inference_expected",
-        "phase4b_inference_partial",
-        "phase4c_inference_observed",
-        "phase5_documentation",
-    ]:
-        (root / phase / "outputs").mkdir(parents=True)
-        (root / phase / "review").mkdir(parents=True)
-    (root / "prompt.md").write_text("Test prompt")
-    (root / "COMMITMENTS.md").write_text(
-        "# Phase 1 Commitments\n\n"
-        "| ID | Commitment | Status | Evidence | Phase Resolved |\n"
-        "|----|-----------|--------|----------|---------------|\n"
-    )
+    root.mkdir()
+    for plan_node in jfc_plan.nodes:
+        (root / plan_node.directory / "outputs").mkdir(parents=True)
+        (root / plan_node.directory / "review").mkdir(parents=True)
+    (root / "prompt.md").write_text(jfc_plan.problem)
+    (root / "COMMITMENTS.md").write_text(COMMITMENTS_HEADER)
+    save_plan(root, jfc_plan)
     return root
 
 
@@ -38,54 +36,37 @@ def test_phase_escalation_error():
     from hepagent.agents.jfc.review_gate import PhaseEscalationError, ReviewGateResult
 
     result = ReviewGateResult(verdict="ESCALATE", category_a_findings=["bad thing"])
-    err = PhaseEscalationError(1, result)
-    assert err.phase == 1
+    err = PhaseEscalationError("strategy", result)
+    assert err.phase == "strategy"
     assert err.result is result
 
 
-def test_phase1_reviewer_composition():
-    from hepagent.agents.jfc.review_gate import _PHASE_REVIEWERS
-
-    phase1_reviewers = _PHASE_REVIEWERS[1]
-    assert "physics" in phase1_reviewers
-    assert "critical" in phase1_reviewers
-    assert "constructive" in phase1_reviewers
-
-
-def test_phase2_reviewer_composition():
-    from hepagent.agents.jfc.review_gate import _PHASE_REVIEWERS
-
-    phase2_reviewers = _PHASE_REVIEWERS[2]
-    assert "plot" in phase2_reviewers
-    assert "physics" not in phase2_reviewers
+def test_the_reviewer_panel_comes_from_the_node(jfc_plan):
+    """Which reviewers run is a plan field, not a table in the review gate."""
+    assert set(jfc_plan.require_node("strategy").reviewers) >= {
+        "physics",
+        "critical",
+        "constructive",
+    }
+    assert "plot" in jfc_plan.require_node("exploration").reviewers
+    assert "physics" not in jfc_plan.require_node("exploration").reviewers
 
 
-def test_phase4a_reviewer_composition():
-    from hepagent.agents.jfc.review_gate import _PHASE_REVIEWERS
+def test_every_reviewer_a_node_names_has_a_factory(jfc_plan):
+    from hepagent.agents.jfc.reviewers import REVIEWER_FACTORIES
 
-    phase4a_reviewers = _PHASE_REVIEWERS["4a"]
-    assert "physics" in phase4a_reviewers
-    assert "bibtex" in phase4a_reviewers
-    assert "plot" in phase4a_reviewers
+    for plan_node in jfc_plan.nodes:
+        assert set(plan_node.reviewers) <= set(REVIEWER_FACTORIES), plan_node.id
 
 
-def test_phase5_reviewer_composition():
-    from hepagent.agents.jfc.review_gate import _PHASE_REVIEWERS
+def test_a_node_without_reviewers_still_gets_one(analysis_root, jfc_plan):
+    """The gate must never wave a node through unreviewed."""
+    import dataclasses
 
-    phase5_reviewers = _PHASE_REVIEWERS[5]
-    assert "rendering" in phase5_reviewers
-    assert "bibtex" in phase5_reviewers
-    assert len(phase5_reviewers) == 6
+    from hepagent.agents.jfc.review_gate import reviewers_for
 
-
-def test_arbiter_phases():
-    from hepagent.agents.jfc.review_gate import _ARBITER_PHASES
-
-    assert 1 in _ARBITER_PHASES
-    assert "4a" in _ARBITER_PHASES
-    assert "4b" in _ARBITER_PHASES
-    assert 5 in _ARBITER_PHASES
-    assert 3 not in _ARBITER_PHASES
+    bare = dataclasses.replace(jfc_plan.require_node("exploration"), reviewers=())
+    assert reviewers_for(bare) == ["critical"]
 
 
 def test_parse_verdict_pass(tmp_path):
@@ -108,33 +89,48 @@ def test_parse_verdict_iterate(tmp_path):
     assert origin is None
 
 
-def test_parse_verdict_regress_int(tmp_path):
+def test_parse_verdict_regress_names_a_node(tmp_path):
     from hepagent.agents.jfc.review_gate import parse_verdict_from_adjudication
 
     adj = tmp_path / "ADJUDICATION.md"
-    adj.write_text("# Adjudication\n\nRoot cause in Phase 3.\n\nREGRESS(3)")
+    adj.write_text("# Adjudication\n\nRoot cause in the selection.\n\nREGRESS(selection)")
     verdict, cat_a, cat_b, origin = parse_verdict_from_adjudication(adj)
     assert verdict == "REGRESS"
-    assert origin == 3
+    assert origin == "selection"
 
 
-def test_parse_verdict_regress_subphase(tmp_path):
+def test_parse_verdict_regress_lowercases_a_shouted_node_id(tmp_path):
+    """Arbiters shout their verdict line; node ids are lowercase slugs."""
     from hepagent.agents.jfc.review_gate import parse_verdict_from_adjudication
 
     adj = tmp_path / "ADJUDICATION.md"
-    adj.write_text("# Adjudication\n\nRoot cause in Phase 4a.\n\nREGRESS(4a)")
-    verdict, cat_a, cat_b, origin = parse_verdict_from_adjudication(adj)
+    adj.write_text("# Adjudication\n\nRoot cause upstream.\n\nREGRESS(INFERENCE_EXPECTED)")
+    verdict, _cat_a, _cat_b, origin = parse_verdict_from_adjudication(adj)
     assert verdict == "REGRESS"
-    assert origin == "4a"
+    assert origin == "inference_expected"
+
+
+def test_regress_mentioned_in_prose_is_not_a_verdict(tmp_path):
+    from hepagent.agents.jfc.review_gate import parse_verdict_from_adjudication
+
+    adj = tmp_path / "ADJUDICATION.md"
+    adj.write_text(
+        "# Adjudication\n\nNo trigger issue would require REGRESS(strategy) here.\n\n"
+        + "Everything checks out. " * 20
+        + "\n\nPASS"
+    )
+    verdict, _cat_a, _cat_b, origin = parse_verdict_from_adjudication(adj)
+    assert verdict == "PASS"
+    assert origin is None
 
 
 def test_phase_regression_error():
     from hepagent.agents.jfc.review_gate import PhaseRegressionError, ReviewGateResult
 
-    result = ReviewGateResult(verdict="REGRESS", regression_origin_phase=3)
-    err = PhaseRegressionError("4a", 3, "bad selection cut", result)
-    assert err.detected_phase == "4a"
-    assert err.origin_phase == 3
+    result = ReviewGateResult(verdict="REGRESS", regression_origin_phase="selection")
+    err = PhaseRegressionError("inference_expected", "selection", "bad selection cut", result)
+    assert err.detected_phase == "inference_expected"
+    assert err.origin_phase == "selection"
     assert err.symptom == "bad selection cut"
     assert err.result is result
 
@@ -143,31 +139,24 @@ def test_phase_regression_error():
 
 
 @pytest.fixture
-def graph_root(tmp_path):
-    """An analysis root with a graph and a Phase 1 artifact already ingested."""
-    from hepagent.agents.jfc.graph_builder import bootstrap_graph, ingest_phase
+def graph_root(analysis_root, jfc_plan):
+    """An analysis root with a graph and the entry node's artifact ingested."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph, ingest_node
 
-    root = tmp_path / "zbb"
-    (root / "phase1_strategy" / "outputs").mkdir(parents=True)
-    (root / "phase1_strategy" / "review").mkdir(parents=True)
-    (root / "prompt.md").write_text("Measure the Z to bb cross-section.")
-    (root / "phase1_strategy" / "outputs" / "STRATEGY.md").write_text("strategy")
-    (root / "COMMITMENTS.md").write_text("# Phase 1 Commitments\n")
-    bootstrap_graph(root, "zbb", "measurement", "Measure the Z to bb cross-section.")
-    ingest_phase(root, 1)
-    return root
+    strategy = jfc_plan.require_node("strategy")
+    (analysis_root / strategy.artifact_path).write_text("strategy")
+    bootstrap_graph(analysis_root, jfc_plan)
+    ingest_node(analysis_root, "strategy")
+    return analysis_root
 
 
 def _open_commitment(root):
-    (root / "COMMITMENTS.md").write_text(
-        "# Phase 1 Commitments\n\n"
-        "| ID | Commitment | Status | Evidence | Phase Resolved |\n"
-        "|----|-----------|--------|----------|---------------|\n"
-        "| D2 | Generator comparison | pending | | |\n"
-    )
-    from hepagent.agents.jfc.graph_builder import ingest_phase
+    from hepagent.agents.jfc.graph_builder import ingest_node
 
-    ingest_phase(root, 1)
+    (root / "COMMITMENTS.md").write_text(
+        COMMITMENTS_HEADER + "| D2 | Generator comparison | pending | | |\n"
+    )
+    ingest_node(root, "strategy")
 
 
 def test_write_graph_validation_persists_the_report(graph_root):
@@ -199,7 +188,7 @@ def test_write_graph_validation_reports_an_open_commitment(graph_root):
 
 
 @pytest.mark.asyncio
-async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root):
+async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root, jfc_plan):
     """An unclosed commitment is a fact: the phase cannot pass on it."""
     from unittest.mock import AsyncMock, patch
 
@@ -207,11 +196,11 @@ async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root):
 
     _open_commitment(graph_root)
     # Phase 2 has no arbiter, so the verdict comes from reviewer files.
-    (graph_root / "phase2_exploration" / "review").mkdir(parents=True)
+    (graph_root / "phase2_exploration" / "review").mkdir(parents=True, exist_ok=True)
     (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
 
     with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
-        result = await run_review_gate(2, graph_root)
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
 
     assert result.verdict == "ITERATE"
     assert any("[graph]" in f for f in result.category_a_findings)
@@ -219,23 +208,23 @@ async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root):
 
 
 @pytest.mark.asyncio
-async def test_a_consistent_graph_leaves_the_reviewer_verdict_alone(graph_root):
+async def test_a_consistent_graph_leaves_the_reviewer_verdict_alone(graph_root, jfc_plan):
     from unittest.mock import AsyncMock, patch
 
     from hepagent.agents.jfc.review_gate import run_review_gate
 
-    (graph_root / "phase2_exploration" / "review").mkdir(parents=True)
+    (graph_root / "phase2_exploration" / "review").mkdir(parents=True, exist_ok=True)
     (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
 
     with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
-        result = await run_review_gate(2, graph_root)
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
 
     assert result.verdict == "PASS"
     assert result.graph_blocking == []
 
 
 @pytest.mark.asyncio
-async def test_advisory_findings_do_not_downgrade_a_pass(graph_root):
+async def test_advisory_findings_do_not_downgrade_a_pass(graph_root, jfc_plan):
     """Warnings are the arbiter's call, not a code-enforced block."""
     from unittest.mock import AsyncMock, patch
 
@@ -251,48 +240,72 @@ async def test_advisory_findings_do_not_downgrade_a_pass(graph_root):
     (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
 
     with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
-        result = await run_review_gate(2, graph_root)
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
 
     assert result.verdict == "PASS"
     assert result.graph_blocking == []
     assert any("looks fine" in f for f in result.graph_findings)
 
 
-def test_reviewer_prompts_carry_the_graph_section(graph_root):
+def test_reviewer_prompts_carry_the_graph_section(graph_root, jfc_plan):
     from hepagent.agents.jfc.reviewers import create_arbiter, create_critical_reviewer
 
-    critical = create_critical_reviewer(1, graph_root).instructions
+    critical = create_critical_reviewer(jfc_plan.require_node("strategy"), graph_root).instructions
     assert "ANALYSIS GRAPH" in critical
     assert "Checks the graph lets you make" in critical
 
-    arbiter = create_arbiter(1, graph_root).instructions
+    arbiter = create_arbiter(jfc_plan.require_node("strategy"), graph_root).instructions
     assert "ANALYSIS GRAPH" in arbiter
     assert "enforced in code" in arbiter
 
 
-def test_reviewer_prompt_omits_the_graph_section_when_there_is_none(tmp_path):
+def test_reviewer_prompt_omits_the_graph_section_when_there_is_none(tmp_path, jfc_plan):
     from hepagent.agents.jfc.reviewers import create_critical_reviewer
 
     bare = tmp_path / "bare"
     bare.mkdir()
-    assert "ANALYSIS GRAPH" not in create_critical_reviewer(1, bare).instructions
+    save_plan(bare, jfc_plan)
+    strategy = jfc_plan.require_node("strategy")
+    assert "ANALYSIS GRAPH" not in create_critical_reviewer(strategy, bare).instructions
 
 
 @pytest.mark.asyncio
-async def test_a_note_citing_a_nonexistent_figure_blocks_the_phase(graph_root):
-    """M6's loop closing: the note writer gets a figure manifest, R6 enforces it."""
+async def test_a_note_citing_a_nonexistent_figure_blocks_the_node(graph_root, jfc_plan):
+    """The note writer gets a figure manifest, R6 enforces it.
+
+    R6 finds notes through the plan's `produces_note` nodes, so the check follows
+    a renamed note artifact rather than a fixed filename glob.
+    """
     from unittest.mock import AsyncMock, patch
 
     from hepagent.agents.jfc.review_gate import run_review_gate
 
-    note = graph_root / "phase2_exploration" / "outputs" / "ANALYSIS_NOTE_4a_v1.md"
+    inference = jfc_plan.require_node("inference_expected")
+    note = graph_root / inference.note_path
     note.parent.mkdir(parents=True, exist_ok=True)
     note.write_text("![A plot that was never made.](figures/ghost.png)")
-    (graph_root / "phase2_exploration" / "review").mkdir(parents=True, exist_ok=True)
-    (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
+    (graph_root / inference.directory / "review" / "plot_validation.md").write_text("fine\n\nPASS")
 
     with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
-        result = await run_review_gate(2, graph_root)
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
 
     assert result.verdict == "ITERATE"
     assert any("ghost.png" in f for f in result.graph_blocking)
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_is_no_nodes_note_is_not_checked_as_one(graph_root, jfc_plan):
+    """A stray markdown file in an outputs directory is not an analysis note."""
+    from unittest.mock import AsyncMock, patch
+
+    from hepagent.agents.jfc.review_gate import run_review_gate
+
+    stray = graph_root / "phase2_exploration" / "outputs" / "SCRATCH_NOTES.md"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("![A plot that was never made.](figures/ghost.png)")
+    (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
+
+    with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
+
+    assert result.verdict == "PASS"

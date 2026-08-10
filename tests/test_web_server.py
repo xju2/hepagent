@@ -99,3 +99,68 @@ def test_web_command_is_registered_and_forwards_options(monkeypatch):
     assert captured["port"] == 9001
     assert captured["mode"] == "yolo"
     assert captured["headless"] is True
+
+
+# ------------------------------------------------------------- plan editor
+
+
+def test_the_analyses_directory_is_handed_to_the_web_process(tmp_path):
+    from hepagent.plan.service import BASE_DIR_ENV
+    from hepagent.web.server import build_environment
+
+    env = build_environment(
+        agent_name="scientist",
+        model=None,
+        max_turns=40,
+        mode="confirm",
+        chat=None,
+        host="127.0.0.1",
+        port=8000,
+        base_dir=str(tmp_path / "elsewhere"),
+    )
+    assert env[BASE_DIR_ENV] == str((tmp_path / "elsewhere").resolve())
+    # The `/plan` command builds links from these, so the URL resolves.
+    assert env["HEPAGENT_WEB_HOST"] == "127.0.0.1"
+    assert env["HEPAGENT_WEB_PORT"] == "8000"
+
+
+def test_plan_editor_url_follows_the_running_server(monkeypatch):
+    from hepagent.web.server import plan_editor_url
+
+    monkeypatch.setenv("HEPAGENT_WEB_HOST", "0.0.0.0")
+    monkeypatch.setenv("HEPAGENT_WEB_PORT", "9123")
+    assert plan_editor_url("zbb") == "http://0.0.0.0:9123/plan/zbb"
+
+
+def test_plan_editor_url_quotes_the_name(monkeypatch):
+    from hepagent.web.server import plan_editor_url
+
+    monkeypatch.delenv("HEPAGENT_WEB_HOST", raising=False)
+    monkeypatch.delenv("HEPAGENT_WEB_PORT", raising=False)
+    assert plan_editor_url("z bb/x") == "http://127.0.0.1:8000/plan/z%20bb/x"
+
+
+def test_only_plan_api_imports_fastapi():
+    """The mirror of invariant 1: CI installs neither web extra.
+
+    `session.py` and `server.py` are imported by paths that run without the
+    extra, so a top-level `fastapi` import in either would break the suite.
+    """
+    import ast
+    from pathlib import Path
+
+    web = Path("src/hepagent/web")
+    offenders = []
+    for source in sorted(web.glob("*.py")):
+        if source.name in {"plan_api.py", "app.py"}:
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in tree.body:  # module scope only; function-local is fine
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            if any(n.split(".")[0] in {"fastapi", "chainlit", "uvicorn"} for n in names):
+                offenders.append(f"{source.name}: {names}")
+    assert offenders == []

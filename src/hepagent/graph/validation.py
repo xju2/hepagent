@@ -45,9 +45,16 @@ class GraphFinding:
 
 @dataclass
 class GraphValidationReport:
-    """Aggregate result of running the rule set."""
+    """Aggregate result of running the rule set.
+
+    Args:
+        findings: Every problem the rules reported.
+        title: Heading `to_markdown` renders under. The plan rules in
+            `hepagent.plan.validate` reuse this report type and override it.
+    """
 
     findings: list[GraphFinding] = field(default_factory=list)
+    title: str = "Graph validation"
 
     @property
     def errors(self) -> list[GraphFinding]:
@@ -75,11 +82,9 @@ class GraphValidationReport:
     def to_markdown(self) -> str:
         """Render the report for a reviewer agent or a CLI reader."""
         if not self.findings:
-            return (
-                "## Graph validation\n\nNo findings. The analysis graph is internally consistent.\n"
-            )
+            return f"## {self.title}\n\nNo findings. Everything checked is internally consistent.\n"
 
-        lines = ["## Graph validation", ""]
+        lines = [f"## {self.title}", ""]
         lines.append(f"{len(self.errors)} error(s), {len(self.warnings)} warning(s).")
         lines.append("")
         lines.append("| Severity | Rule | Node | Finding |")
@@ -161,8 +166,10 @@ def rule_provenance(graph: AnalysisGraph) -> list[GraphFinding]:
         # describing what it will need, and gains `derives_from` once produced.
         if node.status == "pending":
             continue
-        # The Phase 1 artifact legitimately has no upstream artifact.
-        if node.type == "artifact" and node.phase == "1":
+        # An entry artifact legitimately has no upstream artifact to derive from.
+        # Which artifacts those are is authored in the plan and reaches the graph
+        # as `requires` edges, so the graph alone can answer it.
+        if node.type == "artifact" and _is_entry_artifact(graph, node):
             continue
         findings.append(
             GraphFinding(
@@ -173,6 +180,21 @@ def rule_provenance(graph: AnalysisGraph) -> list[GraphFinding]:
             )
         )
     return findings
+
+
+def _is_entry_artifact(graph: AnalysisGraph, node) -> bool:
+    """True when nothing upstream of this artifact produced another artifact.
+
+    The first node of a plan starts from the physics prompt, not from a previous
+    result, so demanding `derives_from` lineage of it would be noise. A branching
+    plan can have several such nodes; this asks the graph rather than assuming
+    there is exactly one.
+    """
+    for edge in graph.out_edges(node.id, type="requires"):
+        target = graph.get_node(edge.dst)
+        if target is not None and target.type == "artifact":
+            return False
+    return True
 
 
 def rule_content_exists(graph: AnalysisGraph) -> list[GraphFinding]:
@@ -295,10 +317,23 @@ _IMAGE_SUFFIXES = (".png", ".pdf", ".jpg", ".jpeg", ".svg", ".eps")
 
 
 def _analysis_notes(root: Path) -> list[Path]:
-    """Return every analysis-note markdown file in the analysis directory."""
+    """Return every analysis-note markdown file in the analysis directory.
+
+    Which files those are is authored: the notes belong to the plan nodes marked
+    `produces_note`. An analysis with no readable plan falls back to the shipped
+    naming convention so a partially-scaffolded directory still validates.
+    """
     if not root.is_dir():
         return []
-    return sorted(root.glob("*/outputs/ANALYSIS_NOTE_*.md"))
+    try:
+        from hepagent.plan.store import load_plan
+
+        plan = load_plan(root)
+    except Exception:  # noqa: BLE001 - validation must not fail on a missing plan
+        return sorted(root.glob("*/outputs/ANALYSIS_NOTE_*.md"))
+
+    notes = [root / node.note_path for node in plan.nodes if node.produces_note]
+    return sorted({note for note in notes if note.is_file()})
 
 
 def _figure_references(content: str) -> list[str]:
@@ -364,7 +399,7 @@ def validate(graph: AnalysisGraph, rules=ALL_RULES) -> GraphValidationReport:
 
 
 def validate_commitments(graph: AnalysisGraph) -> GraphValidationReport:
-    """Run only the commitment rule — used by the Phase 4a gate."""
+    """Run only the commitment rule — used by the `commitments` gate."""
     return validate(graph, rules=(rule_commitments_closed,))
 
 

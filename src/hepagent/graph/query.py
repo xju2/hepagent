@@ -112,8 +112,9 @@ def is_realized(graph: AnalysisGraph, node: Node) -> bool:
 def frontier(graph: AnalysisGraph) -> list[Node]:
     """Return unrealized nodes whose `requires` prerequisites are all realized.
 
-    This is the set the orchestrator could expand next. It is computed but not
-    yet wired into phase selection — `PHASE_ORDER` still drives execution.
+    This is the set the orchestrator could expand next, at the graph-node level.
+    Node selection goes through `agents.jfc.planner`, which asks the same
+    question of artifact nodes and answers it in plan-node terms.
     """
     ready: list[Node] = []
     for node in graph.nodes():
@@ -152,15 +153,20 @@ def to_mermaid(graph: AnalysisGraph, node_type: str | None = None, max_nodes: in
 
 
 def to_table(graph: AnalysisGraph, node_type: str | None = None) -> str:
-    """Render nodes as a fixed-width text table for terminal output."""
+    """Render nodes as a text table for terminal output.
+
+    The `phase` column holds plan node ids, which are author-chosen slugs of no
+    fixed length, so it is sized to its contents.
+    """
     nodes = graph.nodes(type=node_type)
     if not nodes:
         return "(graph is empty)"
-    lines = [f"{'TYPE':<14} {'PHASE':<6} {'STATUS':<11} {'LABEL':<38} CONTENT"]
-    lines.append("-" * 100)
+    phases = max([len(n.phase or "-") for n in nodes] + [len("NODE")]) + 2
+    lines = [f"{'TYPE':<14} {'NODE':<{phases}} {'STATUS':<11} {'LABEL':<38} CONTENT"]
+    lines.append("-" * (75 + phases))
     for node in nodes:
         lines.append(
-            f"{node.type:<14} {(node.phase or '-'):<6} {node.status:<11} "
+            f"{node.type:<14} {(node.phase or '-'):<{phases}} {node.status:<11} "
             f"{node.label[:38]:<38} {node.content_ref or '-'}"
         )
     return "\n".join(lines)
@@ -172,7 +178,7 @@ def describe(graph: AnalysisGraph, node: Node) -> str:
         f"{node.id}",
         f"  type      : {node.type}",
         f"  label     : {node.label}",
-        f"  phase     : {node.phase or '-'}",
+        f"  node      : {node.phase or '-'}",
         f"  status    : {node.status}",
         f"  content   : {node.content_ref or '-'}",
         f"  created_by: {node.created_by} at {node.created_at}",
