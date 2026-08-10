@@ -66,7 +66,7 @@ def build_environment(
     base_dir: str | None = None,
 ) -> dict[str, str]:
     """Build the environment overrides handed to the Chainlit process."""
-    from hepagent.web.plan_api import BASE_DIR_ENV
+    from hepagent.plan.service import BASE_DIR_ENV
 
     env = {
         "CHAINLIT_APP_ROOT": str(ensure_web_root()),

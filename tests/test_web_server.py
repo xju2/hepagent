@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hepagent.web import server
 
 
@@ -145,6 +147,9 @@ def test_only_plan_api_imports_fastapi():
 
     `session.py` and `server.py` are imported by paths that run without the
     extra, so a top-level `fastapi` import in either would break the suite.
+
+    This catches the direct form only. The transitive form — importing a module
+    that itself imports FastAPI — is caught by `without_web_extras` below.
     """
     import ast
     from pathlib import Path
@@ -164,3 +169,33 @@ def test_only_plan_api_imports_fastapi():
             if any(n.split(".")[0] in {"fastapi", "chainlit", "uvicorn"} for n in names):
                 offenders.append(f"{source.name}: {names}")
     assert offenders == []
+
+
+def test_the_extras_blocker_actually_blocks(without_web_extras):
+    """If this stopped working, the tests that rely on it would pass vacuously."""
+    with without_web_extras():
+        with pytest.raises(ModuleNotFoundError):
+            import fastapi  # noqa: F401
+
+
+def test_build_environment_works_without_the_web_extra(monkeypatch, tmp_path, without_web_extras):
+    """`hepagent web` builds this env before the child process exists.
+
+    It ran through `plan_api` for one constant, so `make coverage` failed on a
+    machine with no FastAPI even though nothing here needs a web server.
+    """
+    _pin_home(monkeypatch, tmp_path)
+
+    with without_web_extras():
+        env = server.build_environment(
+            agent_name="scientist",
+            model=None,
+            max_turns=40,
+            mode="confirm",
+            chat=None,
+            host="127.0.0.1",
+            port=8000,
+            base_dir=str(tmp_path / "analyses"),
+        )
+
+    assert env["HEPAGENT_ANALYSES_DIR"] == str(tmp_path / "analyses")

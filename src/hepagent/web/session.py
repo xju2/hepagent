@@ -254,7 +254,7 @@ class WebSessionState:
         """
         from hepagent.plan import store
         from hepagent.plan.report import to_mermaid
-        from hepagent.web.plan_api import analyses_dir
+        from hepagent.plan.service import analyses_dir
         from hepagent.web.server import plan_editor_url
 
         base = analyses_dir()

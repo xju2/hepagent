@@ -88,6 +88,10 @@ helpers in [`main.py`](../src/hepagent/main.py) that `run` and `repl` use.
 `hepagent jfc plan edit --name X` serves the same router on a bare uvicorn app —
 no Chainlit, which is much the heavier half of the `web` extra.
 
+What the editor edits — the plan schema, the validation rules it enforces, and
+the approval handshake it drives — is documented in [PLAN.md](PLAN.md). This
+section covers only how it is served.
+
 Every decision lives in [`plan/service.py`](../src/hepagent/plan/service.py),
 which is stdlib-only and fully tested in CI. `plan_api.py` only translates to
 HTTP. The page is a single self-contained file: inline CSS and JS, SVG
@@ -105,8 +109,20 @@ works because both share one process and one event loop, which is what
    may import FastAPI.** CI runs `uv sync --group dev` without extras; a stray
    top-level import breaks the whole test suite. `session.py` and `server.py` are
    on paths that run without the extra, so they import `uvicorn`, `fastapi` and
-   `chainlit` inside functions only. Enforced by
-   `tests/test_web_server.py::test_only_plan_api_imports_fastapi`.
+   `chainlit` inside functions only.
+
+   **The boundary is transitive, and that is the part that actually broke.**
+   Importing a *module that imports FastAPI* is the same mistake as importing
+   FastAPI — `session.py` reached `analyses_dir` through `plan_api`, which reads
+   as harmless and failed CI just the same. Import shared helpers from
+   `plan/service.py`, which is stdlib-only, and never re-export a stdlib helper
+   from `plan_api` (a re-export makes the module look like a safe import, which
+   is how this happened).
+
+   Reading import statements cannot tell a safe function-local import from an
+   unsafe one, so the real enforcement is the `without_web_extras` fixture in
+   `tests/conftest.py`: it makes the extras unimportable and runs the code.
+   `test_only_plan_api_imports_fastapi` still catches the direct form cheaply.
 
 2. **Approval must fail closed.** `WebToolWrapper.approve` catches exceptions
    from the bridge and returns "not approved". If the websocket drops mid-prompt

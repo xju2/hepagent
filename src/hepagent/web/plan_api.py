@@ -32,9 +32,10 @@ from hepagent.plan import service, store
 STATIC_DIR = Path(__file__).with_name("static")
 EDITOR_PAGE = STATIC_DIR / "plan.html"
 
-#: Re-exported so callers can reach them without importing FastAPI themselves.
-BASE_DIR_ENV = service.BASE_DIR_ENV
-analyses_dir = service.analyses_dir
+# Deliberately no re-exports of `service.BASE_DIR_ENV` / `service.analyses_dir`:
+# they made this module look like a safe import for code that must run without
+# the `web` extra, and `session.py` duly imported them from here — which pulled
+# FastAPI into a CI path that has none. Import them from `plan.service`.
 
 
 def _resolve_root(name: str, base_dir: str | Path | None) -> Path:
@@ -85,7 +86,7 @@ def create_router(
     @router.get("/api/plan")
     async def list_plans() -> JSONResponse:
         """List analyses that have a plan, for the editor's picker."""
-        base = analyses_dir(base_dir)
+        base = service.analyses_dir(base_dir)
         names = await asyncio.to_thread(service.list_planned, base_dir)
         return JSONResponse({"base_dir": str(base), "analyses": [{"name": n} for n in names]})
 

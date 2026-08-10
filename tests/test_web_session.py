@@ -280,3 +280,27 @@ async def test_plan_reports_an_unreadable_analysis_without_raising(monkeypatch, 
 async def test_plan_is_listed_in_help():
     outcome = await _make_state().handle_command("/help")
     assert "/plan" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_plan_works_without_the_web_extra(
+    monkeypatch, tmp_path, jfc_plan, without_web_extras
+):
+    """`/plan` is chat-side, so it must not need the editor's dependencies.
+
+    It reached `analyses_dir` through `web.plan_api`, which imports FastAPI —
+    so on a machine without the extra the command raised ModuleNotFoundError
+    instead of printing a plan.
+    """
+    from hepagent.plan.service import BASE_DIR_ENV
+    from hepagent.plan.store import save_plan
+
+    base = tmp_path / "analyses"
+    (base / "zbb").mkdir(parents=True)
+    save_plan(base / "zbb", jfc_plan)
+    monkeypatch.setenv(BASE_DIR_ENV, str(base))
+
+    with without_web_extras():
+        outcome = await _make_state().handle_command("/plan zbb")
+
+    assert "```mermaid" in outcome.message
