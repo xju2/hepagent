@@ -578,3 +578,70 @@ def test_phase_sequence_runs_both_branches_of_a_fan_out(state_dir, jfc_plan):
     emitted = _drain(state_dir, make_state(state_dir), plan)
     assert emitted[:4] == ["strategy", "exploration", "selection_ee", "selection_mumu"]
     assert emitted[4] == "inference_expected"
+
+
+# ------------------------------------------------- a plan must be runnable first
+
+
+def test_a_plan_that_escapes_the_analysis_root_is_refused(jfc_plan):
+    """`--plan` bypasses the editor, which is what normally refuses this.
+
+    The plan's `directory` becomes a real mkdir and a real `CLAUDE.md` write, so
+    an unchecked authored plan could scaffold itself over a sibling project.
+    """
+    import dataclasses
+
+    from hepagent.agents.jfc.orchestrator import PlanNotRunnableError, require_runnable_plan
+
+    evil = dataclasses.replace(jfc_plan.nodes[0], directory="../elsewhere")
+    plan = dataclasses.replace(jfc_plan, nodes=(evil,) + jfc_plan.nodes[1:])
+
+    with pytest.raises(PlanNotRunnableError, match="escapes the analysis root"):
+        require_runnable_plan(plan)
+
+
+def test_a_cyclic_plan_is_refused(jfc_plan):
+    import dataclasses
+
+    from hepagent.agents.jfc.orchestrator import PlanNotRunnableError, require_runnable_plan
+    from hepagent.plan.schema import PlanEdge
+
+    plan = dataclasses.replace(
+        jfc_plan,
+        edges=jfc_plan.edges + (PlanEdge(upstream="documentation", downstream="strategy"),),
+    )
+    with pytest.raises(PlanNotRunnableError, match="P4-acyclic"):
+        require_runnable_plan(plan)
+
+
+def test_the_shipped_templates_are_runnable(jfc_plan):
+    """The guard must not reject what `jfc run` produces by default."""
+    from hepagent.agents.jfc.orchestrator import require_runnable_plan
+
+    assert require_runnable_plan(jfc_plan) is jfc_plan
+
+
+@pytest.mark.asyncio
+async def test_an_escaping_plan_never_reaches_the_scaffolder(tmp_path, jfc_plan):
+    """The check runs before anything touches the filesystem."""
+    import dataclasses
+    from unittest.mock import AsyncMock, patch
+
+    from hepagent.agents.jfc.orchestrator import PlanNotRunnableError, run_jfc_analysis
+
+    evil = dataclasses.replace(jfc_plan.nodes[0], directory="../elsewhere")
+    plan = dataclasses.replace(jfc_plan, nodes=(evil,) + jfc_plan.nodes[1:])
+
+    with patch(
+        "hepagent.agents.jfc.orchestrator.scaffold_jfc_analysis", new_callable=AsyncMock
+    ) as scaffold:
+        with pytest.raises(PlanNotRunnableError):
+            await run_jfc_analysis(
+                analysis_name="zbb",
+                physics_prompt="Measure it.",
+                analysis_type="measurement",
+                base_dir=str(tmp_path),
+                plan=plan,
+            )
+    scaffold.assert_not_awaited()
+    assert not (tmp_path / "elsewhere").exists()

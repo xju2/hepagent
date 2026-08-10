@@ -179,23 +179,56 @@ def test_write_graph_validation_survives_a_missing_graph(tmp_path):
     assert report.findings == []
 
 
-def test_write_graph_validation_reports_an_open_commitment(graph_root):
+def _unjustified_downscope(root):
+    """A commitment narrowed with no evidence — wrong whenever it is written."""
+    from hepagent.graph.schema import Edge, Node
+    from hepagent.graph.store import AnalysisGraph
+
+    graph = AnalysisGraph.load(root)
+    graph.add_node(Node(id="commitment:D3", type="commitment", label="D3"))
+    graph.add_node(Node(id="evidence:none", type="evidence", label="unavailable"))
+    graph.add_edge(Edge(src="commitment:D3", dst="evidence:none", type="downscopes"))
+
+
+def test_an_open_commitment_does_not_block_the_node_that_declared_it(graph_root):
+    """Commitments are declared early and closed by later work.
+
+    Blocking a node's own review on them made the strategy node unpassable: it
+    kept re-reporting the commitments it had just written until the iteration
+    limit ran out, with nothing able to close them in between.
+    """
     from hepagent.agents.jfc.review_gate import write_graph_validation
 
     _open_commitment(graph_root)
     report = write_graph_validation(graph_root, graph_root / "phase1_strategy" / "review")
-    assert [f.node_id for f in report.blocking] == ["commitment:D2"]
+    assert report.blocking == []
+
+
+def test_the_commitments_gate_still_catches_an_open_commitment(graph_root):
+    """The check is not dropped, only moved to where closure is actually due."""
+    from hepagent.agents.jfc.orchestrator import _graph_commitment_findings
+
+    _open_commitment(graph_root)
+    assert any("D2" in message for message in _graph_commitment_findings(graph_root))
+
+
+def test_write_graph_validation_reports_an_unjustified_downscope(graph_root):
+    from hepagent.agents.jfc.review_gate import write_graph_validation
+
+    _unjustified_downscope(graph_root)
+    report = write_graph_validation(graph_root, graph_root / "phase1_strategy" / "review")
+    assert [f.node_id for f in report.blocking] == ["commitment:D3"]
 
 
 @pytest.mark.asyncio
 async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root, jfc_plan):
-    """An unclosed commitment is a fact: the phase cannot pass on it."""
+    """A downscope with no cited evidence is a fact: the node cannot pass on it."""
     from unittest.mock import AsyncMock, patch
 
     from hepagent.agents.jfc.review_gate import run_review_gate
 
-    _open_commitment(graph_root)
-    # Phase 2 has no arbiter, so the verdict comes from reviewer files.
+    _unjustified_downscope(graph_root)
+    # Exploration has no arbiter, so the verdict comes from reviewer files.
     (graph_root / "phase2_exploration" / "review").mkdir(parents=True, exist_ok=True)
     (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
 
@@ -205,6 +238,24 @@ async def test_graph_errors_downgrade_a_reviewer_pass_to_iterate(graph_root, jfc
     assert result.verdict == "ITERATE"
     assert any("[graph]" in f for f in result.category_a_findings)
     assert result.graph_blocking
+
+
+@pytest.mark.asyncio
+async def test_an_open_commitment_alone_leaves_a_reviewer_pass_intact(graph_root, jfc_plan):
+    """The end-to-end form of the bug: PASS must survive an open commitment."""
+    from unittest.mock import AsyncMock, patch
+
+    from hepagent.agents.jfc.review_gate import run_review_gate
+
+    _open_commitment(graph_root)
+    (graph_root / "phase2_exploration" / "review").mkdir(parents=True, exist_ok=True)
+    (graph_root / "phase2_exploration" / "review" / "plot_validation.md").write_text("fine\n\nPASS")
+
+    with patch("hepagent.agents.jfc.review_gate._run_single_reviewer", new_callable=AsyncMock):
+        result = await run_review_gate(jfc_plan.require_node("exploration"), graph_root)
+
+    assert result.verdict == "PASS"
+    assert result.graph_blocking == []
 
 
 @pytest.mark.asyncio

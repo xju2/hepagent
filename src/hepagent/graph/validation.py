@@ -132,24 +132,45 @@ def rule_schema_integrity(graph: AnalysisGraph) -> list[GraphFinding]:
 
 
 def rule_commitments_closed(graph: AnalysisGraph) -> list[GraphFinding]:
-    """R2 — every commitment is resolved or downscoped, and downscopes cite evidence."""
-    findings: list[GraphFinding] = []
-    for node in query.unresolved_commitments(graph):
-        findings.append(
-            GraphFinding(
-                "R2-commitments",
-                "error",
-                f"Commitment '{node.label}' has no resolves/downscopes edge to closing evidence",
-                node.id,
-            )
+    """R2 — every commitment is resolved or downscoped.
+
+    **Timing-dependent, and deliberately absent from `REVIEW_RULES`.** A
+    commitment is declared by the strategy node and closed by evidence that
+    later nodes produce, so "not yet closed" is the *expected* state for most of
+    an analysis. Running this at every node review made the strategy review
+    impossible to pass: its own commitments were open by construction, the
+    finding was an error, and the gate downgraded PASS to ITERATE until the
+    iteration limit ran out — before any node that could close them had run.
+
+    The `commitments` gate is where closure is genuinely due, and it runs this
+    rule through `validate_commitments`.
+    """
+    return [
+        GraphFinding(
+            "R2-commitments",
+            "error",
+            f"Commitment '{node.label}' has no resolves/downscopes edge to closing evidence",
+            node.id,
         )
+        for node in query.unresolved_commitments(graph)
+    ]
+
+
+def rule_downscopes_justified(graph: AnalysisGraph) -> list[GraphFinding]:
+    """R2b — a narrowed commitment records why it was narrowed.
+
+    Unlike R2 this is timing-independent: a downscope with no cited evidence is
+    wrong the moment it is written, whatever else has yet to run. It therefore
+    stays in the review rule set.
+    """
+    findings: list[GraphFinding] = []
     for edge in graph.edges(type="downscopes"):
         if not edge.evidence_ref:
             node = graph.get_node(edge.src)
             label = node.label if node else edge.src
             findings.append(
                 GraphFinding(
-                    "R2-commitments",
+                    "R2b-downscope",
                     "error",
                     f"Commitment '{label}' was downscoped without a documented reason",
                     edge.src,
@@ -378,11 +399,22 @@ def _resolve_reference(root: Path, note: Path, reference: str) -> Path | None:
 ALL_RULES = (
     rule_schema_integrity,
     rule_commitments_closed,
+    rule_downscopes_justified,
     rule_provenance,
     rule_content_exists,
     rule_no_silent_deletion,
     rule_figure_references,
 )
+
+#: Rules a node's own review may be blocked by.
+#:
+#: `rule_commitments_closed` is the one omission, and the omission is the point:
+#: an open commitment says something about work that has not happened yet, not
+#: about the node under review. Blocking on it made every review before the
+#: `commitments` gate unpassable. This changes *which rules apply at which
+#: checkpoint*, not what a severity means — invariant 7 of `docs/GRAPH.md` still
+#: holds, and any error among these rules still blocks.
+REVIEW_RULES = tuple(rule for rule in ALL_RULES if rule is not rule_commitments_closed)
 
 
 def validate(graph: AnalysisGraph, rules=ALL_RULES) -> GraphValidationReport:

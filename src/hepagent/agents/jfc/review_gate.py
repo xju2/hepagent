@@ -16,7 +16,7 @@ from agents import Runner
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc.reviewers import REVIEWER_FACTORIES
 from hepagent.graph.store import AnalysisGraph
-from hepagent.graph.validation import GraphValidationReport, validate
+from hepagent.graph.validation import REVIEW_RULES, GraphValidationReport, validate
 from hepagent.helpers import read_md
 from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.store import resolve_plan
@@ -73,9 +73,12 @@ def write_graph_validation(analysis_root: Path, review_dir: Path) -> GraphValida
     Reviewers have `read_file` and are told where this lives, so the graph's
     view of the analysis becomes evidence they can cite. Returns an empty report
     if the graph cannot be read — a missing graph must not block a review.
+
+    Runs `REVIEW_RULES` rather than every rule: an unclosed commitment is due at
+    the `commitments` gate, not at the review of the node that declared it.
     """
     try:
-        report = validate(AnalysisGraph.load(analysis_root))
+        report = validate(AnalysisGraph.load(analysis_root), rules=REVIEW_RULES)
     except Exception:  # noqa: BLE001 - graph problems must not break the gate
         return GraphValidationReport()
 

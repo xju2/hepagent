@@ -195,7 +195,8 @@ returns just the blocking subset.
 | Rule | Checks |
 |------|--------|
 | R1-schema | Every edge has existing endpoints and a legal type domain |
-| R2-commitments | Every commitment has a `resolves`/`downscopes` edge; downscopes cite evidence |
+| R2-commitments | Every commitment has a `resolves`/`downscopes` edge |
+| R2b-downscope | A downscoped commitment cites the evidence that justified it |
 | R3-provenance | Artifacts and figures record `derives_from` lineage |
 | R4-content | File-backed nodes point at files that exist |
 | R5-no-deletion | No commitment present in the log history vanished from the current graph |
@@ -210,6 +211,26 @@ R6 finds the notes to check from the plan: the `note_path` of every
 analysis note and is not checked.
 
 R3 and R4 both exempt `pending` nodes — a pending node is a plan, not a claim.
+
+### Which rules apply where
+
+`validate()` runs `ALL_RULES` — that is what `jfc graph validate` reports.
+`write_graph_validation`, which feeds the per-node review gate, runs
+`REVIEW_RULES`: everything except **R2**.
+
+That omission is the point. A commitment is declared by the strategy node and
+closed by evidence later nodes produce, so "not yet closed" is the expected state
+for most of an analysis. Blocking a node's own review on it made the strategy
+node unpassable — it re-reported the commitments it had just written, round after
+round, until the iteration limit ran out with nothing able to close them in
+between. R2 is due at the `commitments` gate, which runs it via
+`validate_commitments`.
+
+R2b stays in the review set: unlike an open commitment, a downscope with no cited
+evidence is wrong the moment it is written, whatever else has yet to run.
+
+This selects *which rules apply at which checkpoint*; it does not override what a
+severity means, so invariant 7 still holds.
 
 ### Severity is the gate
 
@@ -304,6 +325,15 @@ Preserve these when changing graph code:
 8. **The graph never becomes a second plan.** It records what happened; it does
    not store intent. Anything a user should be able to edit belongs in
    `plan.json` — see `docs/PLAN.md`.
+9. **A rule that blocks a node review must be true independently of what has not
+   run yet.** R2 was not, and made the first node of every analysis unpassable.
+   Before adding an error-severity rule, ask what it says at the *earliest* node,
+   and put it in `REVIEW_RULES` only if the answer is still meaningful there.
+10. **Both rounds of a review write the same file, so they share a decision id.**
+    A later PASS supersedes the node but cannot delete the `invalidates` edge the
+    earlier ITERATE wrote — the log is append-only and the edge keys differ.
+    `query.rejections` therefore skips decisions whose current verdict is PASS.
+    Anything else reading `invalidates` edges directly needs the same care.
 
 ---
 

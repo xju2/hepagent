@@ -16,7 +16,7 @@ from typing import Literal
 
 from agents import function_tool
 from hepagent.agents.jfc._data import get_jfc_data_dir
-from hepagent.plan.schema import AnalysisPlan
+from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.store import save_plan
 from hepagent.plan.templates import DEFAULT_TEMPLATE, instantiate
 from hepagent.plan.templates.registry import CONVENTIONS_FOR_TYPE, substitute
@@ -74,13 +74,32 @@ def _write_root_files(
     )
 
 
+def _node_dir(analysis_root: Path, node: PlanNode) -> Path:
+    """Resolve a node's working directory, refusing anything outside the root.
+
+    P2 rejects an escaping `directory` at validation time, but this function is
+    where the string becomes a real `mkdir` and a real file write, so it does not
+    rely on having been validated. An absolute or `../` directory reaching here
+    means a plan skipped the check, and the write must not happen anyway.
+    """
+    root = analysis_root.resolve()
+    target = (root / node.directory).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError(
+            f"Node '{node.id}' directory '{node.directory}' resolves outside the "
+            f"analysis root ({target}). Refusing to write there."
+        )
+    return target
+
+
 def _write_node_tree(analysis_root: Path, plan: AnalysisPlan) -> None:
     """Create each node's working directory and seed it with the node's prompt."""
     for node in plan.nodes:
+        node_dir = _node_dir(analysis_root, node)
         for sub in NODE_SUBDIRS:
-            (analysis_root / node.directory / sub).mkdir(parents=True, exist_ok=True)
+            (node_dir / sub).mkdir(parents=True, exist_ok=True)
         if node.prompt:
-            (analysis_root / node.directory / "CLAUDE.md").write_text(node.prompt, encoding="utf-8")
+            (node_dir / "CLAUDE.md").write_text(node.prompt, encoding="utf-8")
 
     # Citations are collected once, in the last node that writes an analysis
     # note — the one whose bibliography the final PDF is built from.

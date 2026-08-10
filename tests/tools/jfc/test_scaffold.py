@@ -123,6 +123,32 @@ async def test_scaffold_honours_an_explicit_plan(tmp_base):
     assert not (root / "phase3_selection").exists()
 
 
+@pytest.mark.parametrize("escape", ["../OTHER_PROJECT", "/tmp/absolute_escape", "a/../../sideways"])
+@pytest.mark.asyncio
+async def test_scaffold_refuses_a_node_directory_outside_the_root(tmp_base, escape):
+    """A plan is executable data: `directory` becomes a real mkdir and file write.
+
+    P2 rejects this at validation time, but the scaffolder must not depend on
+    having been validated — reaching it means something skipped the check.
+    """
+    import dataclasses
+
+    from hepagent.plan.templates import instantiate
+    from hepagent.tools.jfc.scaffold import _write_node_tree
+
+    plan = instantiate("jfc-measurement", analysis_name="x", analysis_type="measurement")
+    evil = dataclasses.replace(plan.nodes[0], directory=escape, prompt="should never be written")
+    plan = dataclasses.replace(plan, nodes=(evil,) + plan.nodes[1:])
+
+    root = Path(tmp_base) / "x"
+    root.mkdir(parents=True)
+    with pytest.raises(ValueError, match="outside the analysis root"):
+        _write_node_tree(root, plan)
+
+    assert not (root.parent / "OTHER_PROJECT").exists()
+    assert not Path("/tmp/absolute_escape").exists()
+
+
 @pytest.mark.asyncio
 async def test_scaffold_reports_an_unknown_template(tmp_base):
     from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis

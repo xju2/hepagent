@@ -40,12 +40,14 @@ from hepagent.agents.jfc.review_gate import (
     ReviewGateResult,
     run_review_gate,
 )
+from hepagent.agents.jfc.reviewers import REVIEWER_NAMES
 from hepagent.graph.store import AnalysisGraph
 from hepagent.graph.validation import validate_commitments
 from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.service import APPROVAL_GATE, PlanApprovalGate
 from hepagent.plan.store import has_plan, load_plan, save_plan
 from hepagent.plan.templates import DEFAULT_TEMPLATE, instantiate
+from hepagent.plan.validate import validate_plan
 from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
 
 
@@ -624,6 +626,32 @@ async def run_phase_with_review(
     raise MaxIterationsExceeded(phase_key, limit)
 
 
+class PlanNotRunnableError(ValueError):
+    """Raised when a plan has findings that make it unsafe or impossible to run."""
+
+
+def require_runnable_plan(plan: AnalysisPlan) -> AnalysisPlan:
+    """Return `plan`, or raise if a blocking finding means it must not run.
+
+    Called *before* anything touches the filesystem. A plan is executable data —
+    `node.directory` becomes a real `mkdir` and a real `CLAUDE.md` write — so an
+    authored plan that has never been through the editor, which refuses to
+    approve a blocking plan, has to be checked here instead. Without this a
+    `--plan` file declaring `directory: "../somewhere-else"` scaffolded itself
+    outside the analysis root: P2 catches it, but nothing was asking P2.
+    """
+    report = validate_plan(plan, known_reviewers=REVIEWER_NAMES)
+    if report.blocking:
+        detail = "\n".join(f"  - [{f.rule}] {f.message}" for f in report.blocking)
+        raise PlanNotRunnableError(
+            f"Plan '{plan.name}' cannot be run — {len(report.blocking)} blocking "
+            f"finding(s):\n{detail}\n\n"
+            f"Fix the plan and try again, or open it with "
+            f"`hepagent jfc plan edit --name {plan.name}`."
+        )
+    return plan
+
+
 def _prepare_plan(
     analysis_root: Path,
     analysis_name: str,
@@ -637,12 +665,17 @@ def _prepare_plan(
     An explicit plan wins; otherwise the analysis's own `plan.json` is used; a
     directory that predates the plan layer gets one instantiated from `template`
     and written, so a legacy analysis becomes plan-driven on first resume.
+
+    Whatever the source, the result is checked before it is returned — a
+    hand-edited `plan.json` on disk is as unchecked as one passed on the command
+    line.
     """
     if plan is not None:
+        require_runnable_plan(plan)
         save_plan(analysis_root, plan)
         return plan
     if has_plan(analysis_root):
-        return load_plan(analysis_root)
+        return require_runnable_plan(load_plan(analysis_root))
     built = instantiate(
         template,
         analysis_name=analysis_name,
@@ -715,6 +748,11 @@ async def run_jfc_analysis(
     """
     analysis_root = Path(base_dir).resolve() / analysis_name
     fresh = start_from_phase is None
+
+    # Before the scaffolder turns node directories into real ones. `_prepare_plan`
+    # checks again for the plans that do not come in this way.
+    if plan is not None:
+        require_runnable_plan(plan)
 
     if fresh and not analysis_root.exists():
         if progress_callback:

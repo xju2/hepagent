@@ -93,6 +93,44 @@ def test_rejections_reads_invalidates_edges(analysis):
     assert [n.id for n in query.rejections(analysis, "artifact:selection")] == ["review:critical"]
 
 
+def test_a_decision_that_now_passes_no_longer_rejects(analysis):
+    """Both review rounds write the same ADJUDICATION.md, so both get the same id.
+
+    The PASS revision supersedes the decision node, but the `invalidates` edge
+    written while it said ITERATE has a different key and stays in the log. Left
+    unfiltered it kept the artifact rejected forever, which made
+    `is_consistent_checkpoint` false and rewound resume past passing work.
+    """
+    art = "artifact:selection"
+    decision = "decision:phase3_selection/review/ADJUDICATION.md"
+
+    analysis.add_node(
+        Node(
+            id=decision,
+            type="decision",
+            label="ADJUDICATION.md — ITERATE",
+            metadata={"verdict": "ITERATE"},
+        )
+    )
+    analysis.add_edge(Edge(src=decision, dst=art, type="invalidates", evidence_ref="r"))
+    assert decision in [n.id for n in query.rejections(analysis, art)]
+
+    # Second round on the same file: same id, verdict now PASS.
+    analysis.add_node(
+        Node(
+            id=decision,
+            type="decision",
+            label="ADJUDICATION.md — PASS",
+            metadata={"verdict": "PASS"},
+        )
+    )
+    analysis.add_edge(Edge(src=art, dst=decision, type="approved_by", evidence_ref="r"))
+
+    assert decision not in [n.id for n in query.rejections(analysis, art)]
+    # An unrelated reviewer's rejection is untouched.
+    assert "review:critical" in [n.id for n in query.rejections(analysis, art)]
+
+
 def test_unresolved_commitments_excludes_closed_ones(analysis):
     assert [n.id for n in query.unresolved_commitments(analysis)] == ["commitment:D2"]
 

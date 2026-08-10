@@ -36,8 +36,29 @@ def evidence_for(graph: AnalysisGraph, node_id: str) -> list[Node]:
 
 
 def rejections(graph: AnalysisGraph, node_id: str) -> list[Node]:
-    """Return reviews or decisions that `invalidates` the given node."""
-    return _resolve(graph, (e.src for e in graph.in_edges(node_id, type="invalidates")))
+    """Return reviews or decisions that *currently* reject the given node.
+
+    A decision that has since been superseded to PASS is skipped. Both review
+    rounds write the same `ADJUDICATION.md`, so both produce the same
+    content-addressed decision id: the PASS revision supersedes the node, but
+    the `invalidates` edge it wrote while it said ITERATE has a different key
+    and stays in the log forever. Reading the edges alone therefore left an
+    artifact permanently rejected once any round had failed, which made
+    `is_consistent_checkpoint` false and rewound resume past work that had
+    actually passed.
+
+    The decision node is the single record of that adjudication, so its current
+    verdict is the authority on whether it still rejects anything.
+    """
+    rejecting = []
+    for edge in graph.in_edges(node_id, type="invalidates"):
+        source = graph.get_node(edge.src)
+        if source is None:
+            continue
+        if source.type == "decision" and str(source.metadata.get("verdict", "")).upper() == "PASS":
+            continue
+        rejecting.append(source)
+    return rejecting
 
 
 def reviews_of(graph: AnalysisGraph, node_id: str) -> list[Node]:

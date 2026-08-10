@@ -137,6 +137,20 @@ orchestrator refuses to start. A `warning` is advisory. A plan with two entry
 nodes (P5) or an unreachable node (P9) is unusual but not wrong; a plan with a
 cycle (P4) cannot execute at all.
 
+### A plan is executable data
+
+`node.directory` becomes a real `mkdir` and a real `CLAUDE.md` write. A plan is
+therefore checked by `orchestrator.require_runnable_plan` **before anything
+touches the filesystem**, and that check covers every source — `--plan`, the
+editor, and a `plan.json` already on disk. A hand-edited `plan.json` is exactly
+as unchecked as one passed on the command line.
+
+`--plan` in particular bypasses the editor, which is what normally refuses a
+blocking plan. Without the check, a plan declaring `directory: "../other-project"`
+scaffolded itself over a sibling directory: P2 catches it, but nothing was asking
+P2. `scaffold._node_dir` re-checks containment at the point of writing, so a
+caller that skips validation still cannot escape the root.
+
 ---
 
 ## How the plan drives the runtime
@@ -301,7 +315,9 @@ Preserve these when changing plan code:
 3. **Node ids are author-stable.** Never derive an id from a label or a path,
    and never rewrite one on edit — edges reference ids.
 4. **Validation runs before any agent work and on every save.** A blocking
-   finding must stop the run, not warn.
+   finding must stop the run, not warn. "Before any agent work" means before the
+   scaffolder, not before the first executor — the scaffolder writes directories
+   from `node.directory`, and by then it is too late.
 5. **Severity, not rule identity, decides what blocks** — as in the graph. A new
    rule reporting `error` starts refusing plans. Choose deliberately.
 6. **Saving withdraws approval.** Approval refers to a specific revision.

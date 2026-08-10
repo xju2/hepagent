@@ -69,12 +69,37 @@ def test_r2_accepts_a_resolved_commitment(graph):
     assert V.rule_commitments_closed(graph) == []
 
 
-def test_r2_requires_evidence_on_a_downscope(graph):
+def test_r2b_requires_evidence_on_a_downscope(graph):
     graph.add_node(Node(id="commitment:D2", type="commitment", label="D2 generator comparison"))
     graph.add_node(Node(id="evidence:none", type="evidence", label="generator unavailable"))
     graph.add_edge(Edge(src="commitment:D2", dst="evidence:none", type="downscopes"))
-    findings = V.rule_commitments_closed(graph)
+    findings = V.rule_downscopes_justified(graph)
     assert any("downscoped without a documented reason" in f.message for f in findings)
+
+
+def test_an_open_commitment_does_not_block_an_ordinary_node_review(graph):
+    """The strategy node declares commitments that later nodes close.
+
+    Blocking its own review on them made it unpassable: every iteration
+    re-reported the commitments it had just written, until the limit ran out.
+    """
+    graph.add_node(Node(id="commitment:D1", type="commitment", label="D1 unfold with IBU"))
+
+    review = V.validate(graph, rules=V.REVIEW_RULES)
+    assert review.blocking == []
+
+    # The commitments gate is where closure is actually due, and still blocks.
+    assert V.validate_commitments(graph).blocking
+
+
+def test_an_unjustified_downscope_blocks_a_node_review(graph):
+    """Unlike an open commitment, this is wrong the moment it is written."""
+    graph.add_node(Node(id="commitment:D2", type="commitment", label="D2"))
+    graph.add_node(Node(id="evidence:none", type="evidence", label="unavailable"))
+    graph.add_edge(Edge(src="commitment:D2", dst="evidence:none", type="downscopes"))
+
+    blocking = V.validate(graph, rules=V.REVIEW_RULES).blocking
+    assert [f.rule for f in blocking] == ["R2b-downscope"]
 
 
 def test_r3_flags_a_figure_with_no_lineage(graph, tmp_path):
