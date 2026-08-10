@@ -1,5 +1,6 @@
 import sys
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,47 @@ SRC_ROOT = REPO_ROOT / "src"
 
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+@pytest.fixture
+def without_web_extras():
+    """Run a block with the `web` extra's dependencies unimportable, as in CI.
+
+    A function-local `import fastapi` is fine; a function-local import of a
+    *module that imports FastAPI* is not, and reading the import statements in
+    `web/` cannot tell the two apart. So reproduce CI instead: block the extras
+    and run the code. See invariant 1 of `docs/WEB.md`.
+
+    `plan_api` is dropped from `sys.modules` too — otherwise a cached copy left
+    behind by the tests that do have FastAPI would satisfy the import and hide
+    the bug, making this pass or fail depending on test ordering.
+    """
+    blocked = {"fastapi", "chainlit", "uvicorn", "starlette"}
+
+    class Blocker:
+        def find_spec(self, name, path=None, target=None):
+            if name.split(".")[0] in blocked:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return None
+
+    @contextmanager
+    def blocking():
+        stashed = {n: m for n, m in sys.modules.items() if n.split(".")[0] in blocked}
+        stashed["hepagent.web.plan_api"] = sys.modules.get("hepagent.web.plan_api")
+        for name in stashed:
+            sys.modules.pop(name, None)
+
+        blocker = Blocker()
+        sys.meta_path.insert(0, blocker)
+        try:
+            yield
+        finally:
+            sys.meta_path.remove(blocker)
+            for name, module in stashed.items():
+                if module is not None:
+                    sys.modules[name] = module
+
+    return blocking
 
 
 @pytest.fixture(scope="session")
@@ -87,3 +129,36 @@ def fake_api_keys(monkeypatch):
     monkeypatch.setenv("CBORG_API_KEY", "test-cborg-api-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-api-key")
     monkeypatch.setenv("AMSC_API_KEY", "test-amsc-api-key")
+
+
+JFC_PROMPT = "Measure the Z->bb cross section in 140/fb of ATLAS Run 2 data."
+
+
+@pytest.fixture
+def jfc_plan():
+    """The shipped seven-node measurement plan, instantiated for a test analysis.
+
+    Tests that exercise the JFC runtime use this rather than a hand-built plan:
+    it is the structure users actually get, so a template change that would break
+    the runtime shows up here.
+    """
+    from hepagent.plan.templates import instantiate
+
+    return instantiate(
+        "jfc-measurement",
+        analysis_name="demo",
+        analysis_type="measurement",
+        physics_prompt=JFC_PROMPT,
+    )
+
+
+@pytest.fixture
+def jfc_analysis(tmp_path, jfc_plan):
+    """An analysis root carrying `plan.json` and `prompt.md`, but no artifacts yet."""
+    from hepagent.plan.store import save_plan
+
+    root = tmp_path / "demo"
+    root.mkdir()
+    (root / "prompt.md").write_text(f"# Physics Prompt\n\n{JFC_PROMPT}\n", encoding="utf-8")
+    save_plan(root, jfc_plan)
+    return root

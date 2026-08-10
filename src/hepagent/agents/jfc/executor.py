@@ -1,9 +1,16 @@
-"""Phase executor agent factories for JFC analyses."""
+"""Executor, note-writer and typesetter agent factories.
+
+Every factory here is driven by a `PlanNode`: the working directory, the primary
+artifact, the prompt the executor runs and the graph write-back contract all come
+from the plan rather than from a table in this module. What used to be
+`PHASE_SPECS` and `UPSTREAM_ARTIFACTS` is now authored in `plan.json` and read
+back through `plan.upstream_edges`, which is also what the graph's dependency
+edges are compiled from — so the two still cannot drift.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from agents import Agent
 from hepagent.agent_helpers import update_logbook
@@ -12,50 +19,15 @@ from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
+from hepagent.plan.schema import AnalysisPlan, PlanNode
+from hepagent.plan.store import resolve_plan
 from hepagent.tools.common import ask_user_for_info, read_resource, web_search
 from hepagent.tools.jfc import get_jfc_tools
 
 _JFC_SRC = get_jfc_data_dir()
 
-_PHASE_NAME_MAP = {
-    1: ("phase1_strategy", "phase1_claude.md", "STRATEGY.md"),
-    2: ("phase2_exploration", "phase2_claude.md", "EXPLORATION.md"),
-    3: ("phase3_selection", "phase3_claude.md", "SELECTION.md"),
-    "4a": ("phase4a_inference_expected", "phase4_claude.md", "INFERENCE_EXPECTED.md"),
-    "4b": ("phase4b_inference_partial", "phase4_claude.md", "INFERENCE_PARTIAL.md"),
-    "4c": ("phase4c_inference_observed", "phase4_claude.md", "INFERENCE_OBSERVED.md"),
-    5: ("phase5_documentation", "phase5_claude.md", "ANALYSIS_NOTE_5_v1.md"),
-}
-
-_UPSTREAM_ARTIFACTS: dict[int | str, list[str]] = {
-    1: [],
-    2: ["phase1_strategy/outputs/STRATEGY.md"],
-    3: ["phase1_strategy/outputs/STRATEGY.md", "phase2_exploration/outputs/EXPLORATION.md"],
-    "4a": [
-        "phase1_strategy/outputs/STRATEGY.md",
-        "phase2_exploration/outputs/EXPLORATION.md",
-        "phase3_selection/outputs/SELECTION.md",
-        "COMMITMENTS.md",
-    ],
-    "4b": [
-        "phase1_strategy/outputs/STRATEGY.md",
-        "phase3_selection/outputs/SELECTION.md",
-        "phase4a_inference_expected/outputs/INFERENCE_EXPECTED.md",
-        "COMMITMENTS.md",
-    ],
-    "4c": [
-        "phase3_selection/outputs/SELECTION.md",
-        "phase4a_inference_expected/outputs/INFERENCE_EXPECTED.md",
-        "phase4b_inference_partial/outputs/INFERENCE_PARTIAL.md",
-        "COMMITMENTS.md",
-    ],
-    5: [
-        "phase1_strategy/outputs/STRATEGY.md",
-        "phase3_selection/outputs/SELECTION.md",
-        "phase4c_inference_observed/outputs/INFERENCE_OBSERVED.md",
-        "COMMITMENTS.md",
-    ],
-}
+#: How much of an upstream artifact an `inject="summary"` edge contributes.
+SUMMARY_CHARS = 1500
 
 
 def _read_jfc_file(relative: str) -> str:
@@ -63,25 +35,114 @@ def _read_jfc_file(relative: str) -> str:
     return read_md(path)
 
 
-def _read_upstream_artifacts(phase: int | str, analysis_root: Path) -> str:
-    paths = _UPSTREAM_ARTIFACTS.get(phase, [])
-    blocks = []
-    for rel in paths:
-        full = analysis_root / rel
-        content = read_md(full)
+def _read_upstream_artifacts(plan: AnalysisPlan, node: PlanNode, analysis_root: Path) -> str:
+    """Render the upstream context for a node's prompt.
+
+    Two kinds of input arrive here. Upstream *artifacts* come from the plan's
+    edges and honour each edge's `inject` mode, so a plan can hand a node a full
+    document, a summary, or nothing but the dependency. Ambient *context paths*
+    are read whole: they belong to the node, not to one of its dependencies, and
+    are optional by construction — a file that is not there yet is simply absent.
+    """
+    blocks: list[str] = []
+    seen: set[str] = set()
+
+    for edge in plan.upstream_edges(node.id):
+        if edge.inject == "none":
+            continue
+        upstream = plan.node(edge.upstream)
+        if upstream is None or upstream.artifact_path in seen:
+            continue
+        content = read_md(analysis_root / upstream.artifact_path)
+        if not content:
+            continue
+        seen.add(upstream.artifact_path)
+        if edge.inject == "summary" and len(content) > SUMMARY_CHARS:
+            content = (
+                content[:SUMMARY_CHARS]
+                + f"\n\n[summary: first {SUMMARY_CHARS} characters of "
+                + f"{len(content)}; read the file for the rest]"
+            )
+        blocks.append(f"### {upstream.artifact_path}\n\n{content}")
+
+    for rel in node.context_paths:
+        if rel in seen:
+            continue
+        content = read_md(analysis_root / rel)
         if content:
+            seen.add(rel)
             blocks.append(f"### {rel}\n\n{content}")
+
     if not blocks:
         return ""
     return "## PRIOR PHASE ARTIFACTS\n\n" + "\n\n---\n\n".join(blocks)
 
 
+def _note_graph_section(analysis_root: Path) -> str:
+    """Render the graph slice the note writer must write from.
+
+    Every figure the note references has to be on the manifest, and every number
+    it quotes has to appear in the evidence digest. That is what makes the
+    finished PDF reproducible from the graph rather than from prompt history.
+    """
+    from hepagent.graph.report import note_brief
+    from hepagent.graph.store import AnalysisGraph
+
+    try:
+        graph = AnalysisGraph.load(analysis_root)
+        if len(graph) == 0:
+            return ""
+        brief = note_brief(graph)
+    except Exception:  # noqa: BLE001 - a broken graph must not block note writing
+        return ""
+
+    return (
+        "# WRITE FROM THE ANALYSIS GRAPH\n\n"
+        "The graph below is the source of record for this note. It is derived from\n"
+        "the files on disk, so it is authoritative over any number or filename that\n"
+        "appears in the phase artifacts.\n\n"
+        "Binding rules:\n"
+        "- Reference **only** figures listed in the manifest, by the exact path given.\n"
+        "  A reference to anything else is a broken image and an untraceable claim.\n"
+        "- Quote numbers **exactly** as they appear in the results digest. Where the\n"
+        "  artifacts and the digest disagree, the digest wins — the JSON is what the\n"
+        "  code actually produced.\n"
+        "- Account for every commitment: state where each was met, or why it was\n"
+        "  downscoped. A commitment marked still open must be named as an open issue.\n"
+        "- Anchor each claim in something the graph records. If you cannot point to a\n"
+        "  figure, a results value or an artifact, say so rather than asserting it.\n\n" + brief
+    )
+
+
+def _graph_contract_section(node: PlanNode, analysis_root: Path) -> str:
+    """Render the node's graph write-back contract for the executor prompt."""
+    from hepagent.tools.jfc.graph import contract_summary
+
+    return (
+        f"# GRAPH WRITE-BACK CONTRACT\n\n"
+        f"This analysis keeps a durable provenance graph at "
+        f"`{analysis_root}/graph/`. Artifacts, figures, result JSON files and "
+        f"commitment-table rows are ingested from disk automatically — you do "
+        f"not need to record those.\n\n"
+        f"What you *must* record with `graph_add_node` / `graph_add_edge` is the "
+        f"meaning the filesystem cannot show:\n"
+        f"- the datasets you actually used, with their AMI tag and campaign;\n"
+        f"- the selection or statistical method behind a result;\n"
+        f"- the specific evidence that resolves each commitment you close, and "
+        f"the documented reason for any commitment you downscope.\n\n"
+        f"Your node id is `{node.id}` — pass it as the `node_id` argument.\n\n"
+        f"{contract_summary(node)}\n\n"
+        f"Calls outside this contract are refused. Use `graph_query` to inspect "
+        f"existing nodes before linking to them — edges need real node ids on "
+        f"both ends. Every major claim in your artifact should be reachable from "
+        f"a `supports` or `derives_from` edge."
+    )
+
+
 def _assemble_executor_prompt(
-    phase: int | str,
+    node: PlanNode,
+    plan: AnalysisPlan,
     analysis_root: Path,
-    phase_dir: str,
-    artifact_name: str,
-    template_name: str,
     codesign_feedback: str | None = None,
 ) -> str:
     parts = []
@@ -91,10 +152,9 @@ def _assemble_executor_prompt(
     if executor_role:
         parts.append(f"# EXECUTOR ROLE DEFINITION\n\n{executor_role}")
 
-    # 2. Phase template
-    phase_template = _read_jfc_file(f"templates/{template_name}")
-    if phase_template:
-        parts.append(f"# PHASE SPECIFICATION\n\n{phase_template}")
+    # 2. The node's own specification, straight from the plan
+    if node.prompt:
+        parts.append(f"# PHASE SPECIFICATION\n\n{node.prompt}")
 
     # 3. Physics prompt
     prompt_path = analysis_root / "prompt.md"
@@ -103,24 +163,27 @@ def _assemble_executor_prompt(
         parts.append(f"# PHYSICS PROMPT\n\n{physics_prompt}")
 
     # 4. Upstream artifacts
-    upstream = _read_upstream_artifacts(phase, analysis_root)
+    upstream = _read_upstream_artifacts(plan, node, analysis_root)
     if upstream:
         parts.append(upstream)
 
     # 5. Working directory instruction
-    outputs_dir = analysis_root / phase_dir / "outputs"
-    src_dir = analysis_root / phase_dir / "src"
+    outputs_dir = analysis_root / node.outputs_dir
+    src_dir = analysis_root / node.directory / "src"
     parts.append(
         f"# WORKING DIRECTORY\n\n"
         f"Write all outputs to: `{outputs_dir}/`\n"
-        f"Primary artifact: `{outputs_dir}/{artifact_name}`\n"
+        f"Primary artifact: `{analysis_root / node.artifact_path}`\n"
         f"Write analysis code to: `{src_dir}/`\n"
         f"Write figures to: `{outputs_dir}/figures/`\n"
         f"Append to experiment log: `{analysis_root}/experiment_log.md`\n"
         f"Analysis root: `{analysis_root}/`"
     )
 
-    # 6. Codesign human feedback (only present on revision runs)
+    # 6. Graph write-back contract
+    parts.append(_graph_contract_section(node, analysis_root))
+
+    # 7. Codesign human feedback (only present on revision runs)
     if codesign_feedback:
         parts.append(
             "# HUMAN FEEDBACK FROM CODESIGN REVIEW\n\n"
@@ -144,43 +207,41 @@ def _assemble_executor_prompt(
 
 
 def create_phase_executor(
-    phase: int | str,
+    node: PlanNode,
     analysis_root: Path,
+    plan: AnalysisPlan | None = None,
     model_provider: str = "cborg",
     model_name: str | None = None,
     codesign_feedback: str | None = None,
 ) -> Agent[AgentContext]:
     """
-    Return a role agent configured to execute a specific JFC phase.
+    Return a role agent configured to execute one node of the analysis plan.
 
-    Assembles the system prompt from executor.md, the phase template,
-    the physics prompt, and upstream artifacts.
+    Assembles the system prompt from executor.md, the node's own prompt, the
+    physics prompt, and the upstream artifacts the plan's edges declare.
 
     Args:
-        phase: Phase number (1, 2, 3, 5) or sub-phase string ("4a", "4b", "4c").
+        node: The plan node to execute.
         analysis_root: Path to the analysis root directory.
+        plan: The analysis plan. Read from `plan.json` when omitted.
         model_provider: Model provider name (default "cborg").
         model_name: Specific model name (default: provider's default).
-        codesign_feedback: Human feedback from the codesign gate (Phase 1 revisions only).
-            When provided, appended as a mandatory revision directive to the executor prompt.
+        codesign_feedback: Human feedback from the codesign gate. When provided,
+            appended as a mandatory revision directive to the executor prompt.
     """
-    if phase not in _PHASE_NAME_MAP:
-        raise ValueError(f"Unknown phase: {phase}. Valid: {list(_PHASE_NAME_MAP)}")
-
-    phase_dir, template_name, artifact_name = _PHASE_NAME_MAP[phase]
+    plan = resolve_plan(analysis_root, plan)
     instructions = _assemble_executor_prompt(
-        phase,
+        node,
+        plan,
         analysis_root,
-        phase_dir,
-        artifact_name,
-        template_name,
         codesign_feedback=codesign_feedback,
     )
+    provider, name = _model_for(node, model_provider, model_name)
 
     return Agent[AgentContext](
-        name=f"JFC Phase {phase} Executor",
+        name=f"JFC Executor ({node.label})",
         instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
+        model=get_model_provider(model_provider=provider, model_name=name),
         tools=[
             execute_bash_command_with_confirmation,
             read_resource,
@@ -192,49 +253,55 @@ def create_phase_executor(
     )
 
 
+def _model_for(
+    node: PlanNode,
+    model_provider: str,
+    model_name: str | None,
+) -> tuple[str, str | None]:
+    """Apply a node's `"provider:model"` override, falling back to the run's model."""
+    if not node.model:
+        return model_provider, model_name
+    provider, _, name = node.model.partition(":")
+    if not name:
+        return model_provider, node.model
+    return provider, name
+
+
 def create_note_writer(
-    phase: Literal["4a", "4b", "4c", "5"],
+    node: PlanNode,
     analysis_root: Path,
+    plan: AnalysisPlan | None = None,
     model_provider: str = "cborg",
     model_name: str | None = None,
 ) -> Agent[AgentContext]:
     """
-    Return a role agent that writes the analysis note for a given phase.
+    Return a role agent that writes the analysis note for one plan node.
 
-    The note writer reads all phase artifacts and produces the markdown AN.
-    No bash execution tools — pure prose generation.
+    The note writer reads every artifact the analysis has produced so far and
+    emits the markdown AN. No bash execution tools — pure prose generation.
 
     Args:
-        phase: Phase for which to write the AN ("4a", "4b", "4c", or "5").
+        node: The plan node whose note is being written. Its `note_path` is the
+            output, which is the node's own artifact unless it names a separate
+            `note_artifact`.
         analysis_root: Path to the analysis root directory.
+        plan: The analysis plan. Read from `plan.json` when omitted.
         model_provider: Model provider name.
         model_name: Specific model name.
     """
+    plan = resolve_plan(analysis_root, plan)
     role_def = _read_jfc_file("agents/note_writer.md")
+    an_target = node.note_path
 
-    # Phase-specific AN file target
-    an_targets = {
-        "4a": "phase4a_inference_expected/outputs/ANALYSIS_NOTE_4a_v1.md",
-        "4b": "phase4b_inference_partial/outputs/ANALYSIS_NOTE_4b_v1.md",
-        "4c": "phase4c_inference_observed/outputs/ANALYSIS_NOTE_4c_v1.md",
-        "5": "phase5_documentation/outputs/ANALYSIS_NOTE_5_v1.md",
-    }
-    an_target = an_targets.get(phase, f"ANALYSIS_NOTE_{phase}_v1.md")
+    # Every artifact the analysis has produced, in plan order, plus the ambient
+    # context files this node reads. The note that is about to be written is
+    # excluded — it is the output, not an input.
+    artifact_paths = [n.artifact_path for n in plan.nodes if n.artifact_path != an_target]
+    artifact_paths += [p for p in node.context_paths if p not in artifact_paths]
 
-    # Load all available phase artifacts
-    artifact_paths = [
-        "phase1_strategy/outputs/STRATEGY.md",
-        "phase2_exploration/outputs/EXPLORATION.md",
-        "phase3_selection/outputs/SELECTION.md",
-        "phase4a_inference_expected/outputs/INFERENCE_EXPECTED.md",
-        "phase4b_inference_partial/outputs/INFERENCE_PARTIAL.md",
-        "phase4c_inference_observed/outputs/INFERENCE_OBSERVED.md",
-        "COMMITMENTS.md",
-    ]
     artifact_blocks = []
     for rel in artifact_paths:
-        full = analysis_root / rel
-        content = read_md(full)
+        content = read_md(analysis_root / rel)
         if content:
             artifact_blocks.append(f"### {rel}\n\n{content[:4000]}")
 
@@ -247,7 +314,7 @@ def create_note_writer(
         parts.append(f"# PHYSICS PROMPT\n\n{physics_prompt}")
     parts.append(
         f"# YOUR TASK\n\n"
-        f"Write the complete analysis note for Phase {phase}.\n"
+        f"Write the complete analysis note for {node.label}.\n"
         f"Output: `{analysis_root / an_target}`\n\n"
         f"Requirements:\n"
         f"- Minimum 4 equations (observable definition, correction, systematic"
@@ -259,16 +326,27 @@ def create_note_writer(
         f" for related figure groups\n"
         f"- Figure references must match existing files in the figures/ directories"
     )
+
+    # The graph is the note's source of record: it lists the figures that exist,
+    # the numbers that are authoritative, and the commitments that must be
+    # accounted for. Written after the task so its rules read as constraints.
+    parts.append(_note_graph_section(analysis_root))
+
     if artifact_blocks:
         parts.append("# PHASE ARTIFACTS\n\n" + "\n\n---\n\n".join(artifact_blocks))
 
     instructions = "\n\n".join(parts)
+    provider, name = _model_for(node, model_provider, model_name)
+
+    from hepagent.tools.jfc.graph import graph_query
 
     return Agent[AgentContext](
-        name=f"JFC Note Writer (Phase {phase})",
+        name=f"JFC Note Writer ({node.label})",
         instructions=instructions,
-        model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource],  # read-only: no bash execution
+        model=get_model_provider(model_provider=provider, model_name=name),
+        # Read-only: no bash execution. graph_query lets it check provenance for
+        # a claim without being able to write anything.
+        tools=[read_resource, graph_query],
     )
 
 

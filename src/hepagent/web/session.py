@@ -155,6 +155,8 @@ class WebSessionState:
             return self._switch_mode(args)
         if name in {"max-turn", "max-turns"}:
             return self._set_max_turns(args)
+        if name == "plan":
+            return await self._show_plan(args)
         return CommandOutcome(handled=True, message=f"Unknown command `/{name}`. Try `/help`.")
 
     def _switch_agent(self, args: tuple[str, ...]) -> CommandOutcome:
@@ -244,6 +246,65 @@ class WebSessionState:
             handled=True, message=f"Max turns raised to {value}.", settings_changed=True
         )
 
+    async def _show_plan(self, args: tuple[str, ...]) -> CommandOutcome:
+        """Link to the plan editor and render the plan read-only.
+
+        The editor is where a plan is changed; this is the chat-side entry to it,
+        so it stays a link plus a picture rather than a second editing surface.
+        """
+        from hepagent.plan import store
+        from hepagent.plan.report import to_mermaid
+        from hepagent.plan.service import analyses_dir
+        from hepagent.web.server import plan_editor_url
+
+        base = analyses_dir()
+        if not args:
+
+            def scan() -> list[str]:
+                if not base.is_dir():
+                    return []
+                return [c.name for c in sorted(base.iterdir()) if store.has_plan(c)]
+
+            names = await asyncio.to_thread(scan)
+            if not names:
+                return CommandOutcome(
+                    handled=True, message=f"No analyses with a plan under `{base}`."
+                )
+            rows = "\n".join(f"- `{n}` — [open editor]({plan_editor_url(n)})" for n in names)
+            return CommandOutcome(
+                handled=True,
+                message=f"**Analyses in `{base}`**\n{rows}\n\nUsage: `/plan <name>`",
+            )
+
+        name = args[0]
+        try:
+            plan = await asyncio.to_thread(store.load_plan, base / name)
+        except Exception as exc:  # noqa: BLE001 - user-facing, not a crash
+            return CommandOutcome(handled=True, message=f"Could not read the plan: {exc}")
+
+        url = plan_editor_url(name)
+        blocking = await asyncio.to_thread(_blocking_count, plan)
+        status = (
+            f"⚠️ {blocking} blocking finding(s) — the plan cannot run until they are resolved."
+            if blocking
+            else "✅ No blocking findings."
+        )
+        return CommandOutcome(
+            handled=True,
+            message=(
+                f"**Plan for `{name}`** — {len(plan.nodes)} nodes, revision {plan.revision}\n\n"
+                f"{status}\n\n[Open the editor]({url}) to change nodes, prompts and edges.\n\n"
+                f"```mermaid\n{to_mermaid(plan)}\n```"
+            ),
+        )
+
+
+def _blocking_count(plan) -> int:
+    """Blocking findings for a plan, for the `/plan` summary line."""
+    from hepagent.plan.validate import validate_plan
+
+    return len(validate_plan(plan).blocking)
+
 
 def _help_text() -> str:
     """Markdown help shown by ``/help``."""
@@ -259,6 +320,7 @@ def _help_text() -> str:
         ("/model <name>", "Switch the active model"),
         ("/mode <confirm|yolo|human>", "Change command approval mode"),
         ("/max-turn <turns>", "Raise the max-turns limit"),
+        ("/plan [name]", "Show an analysis plan and link to its editor"),
     )
     lines = ["**Slash commands**", "", "| Command | Description |", "| --- | --- |"]
     lines += [f"| `{cmd}` | {desc} |" for cmd, desc in commands]

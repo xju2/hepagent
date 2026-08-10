@@ -7,23 +7,27 @@ def test_parse_regression_ticket_full(tmp_path):
     ticket = tmp_path / "REGRESSION_TICKET.md"
     ticket.write_text(
         "# Regression Ticket\n\n"
-        "## Origin Phase\n3\n\n"
-        "## Affected Downstream Phases\n3, 4a, 4b\n\n"
+        "## Origin Phase\nselection\n\n"
+        "## Affected Downstream Phases\nselection, inference_expected, inference_partial\n\n"
         "## Root Cause\nBad selection cut.\n"
     )
     origin, affected = _parse_regression_ticket(ticket)
-    assert origin == 3
-    assert affected == [3, "4a", "4b"]
+    assert origin == "selection"
+    assert affected == ["selection", "inference_expected", "inference_partial"]
 
 
-def test_parse_regression_ticket_subphase_origin(tmp_path):
+def test_parse_regression_ticket_lowercases_node_ids(tmp_path):
+    """Node ids are lowercase slugs; the investigator's prose often is not."""
     from hepagent.agents.jfc.investigator import _parse_regression_ticket
 
     ticket = tmp_path / "REGRESSION_TICKET.md"
-    ticket.write_text("## Origin Phase\n4a\n\n## Affected Downstream Phases\n4a, 4b, 4c\n")
+    ticket.write_text(
+        "## Origin Phase\nInference_Expected\n\n"
+        "## Affected Downstream Phases\nInference_Expected, INFERENCE_PARTIAL\n"
+    )
     origin, affected = _parse_regression_ticket(ticket)
-    assert origin == "4a"
-    assert affected == ["4a", "4b", "4c"]
+    assert origin == "inference_expected"
+    assert affected == ["inference_expected", "inference_partial"]
 
 
 def test_parse_regression_ticket_missing_sections(tmp_path):

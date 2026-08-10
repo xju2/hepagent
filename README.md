@@ -13,7 +13,7 @@
 - **Bash and execution modes**: interactive shell-capable agents with configurable YOLO (auto-approve), CONFIRM, and HUMAN execution modes, output character limits, and turn budgets—safe for running on HPC clusters.
 - **HPC / Slurm integration**: built-in tooling for submitting and monitoring Slurm jobs, Globus data transfers, and IRI compute resources.
 - **Extensible tool system**: common and domain-specific tools are registered under `src/hepagent/tools/`, making it straightforward to add new capabilities without touching agent logic.
-- **Autonomous analysis pipeline** *(in development)*: a 5-phase multi-agent orchestration system (`hepagent jfc`) that drives a HEP physics analysis from a natural-language prompt to an analysis note. Each phase (Strategy → Exploration → Processing → Inference → Documentation) is executed by a dedicated executor agent, then evaluated by a panel of parallel reviewer agents (physics reviewer, critical reviewer, constructive reviewer) whose findings are adjudicated by an arbiter before the pipeline advances. Optional physicist co-design gates allow human-in-the-loop review at phase boundaries. Artifacts (STRATEGY.md, EXPLORATION.md, analysis note PDF, etc.) are written to a structured directory and reproduced via `pixi run all`.
+- **Autonomous analysis pipeline** *(in development)*: a multi-agent orchestration system (`hepagent jfc`) that drives a HEP physics analysis from a natural-language prompt to an analysis note. The analysis structure is an authored document — an architect agent proposes it, you edit it in a browser and approve it before any agent starts work — with the Strategy → Exploration → Processing → Inference → Documentation layout as the built-in default. Each node is executed by a dedicated executor agent, then evaluated by a panel of parallel reviewer agents (physics, critical, constructive) whose findings are adjudicated by an arbiter before the pipeline advances. Optional physicist co-design gates allow human-in-the-loop review. Every analysis keeps an append-only provenance graph recording what produced what. Artifacts (STRATEGY.md, EXPLORATION.md, analysis note PDF, etc.) are written to a structured directory and reproduced via `pixi run all`.
 
 ## Installation
 
@@ -170,17 +170,21 @@ For more detail, see [docs/WEB.md](docs/WEB.md).
 
 ### Autonomous HEP analysis pipeline (`hepagent jfc`)
 
-`hepagent jfc` drives a full HEP physics analysis from a natural-language prompt to a compiled analysis-note PDF. The pipeline runs seven phases sequentially; each phase is executed by a dedicated executor agent and then evaluated by a panel of parallel reviewer agents whose findings are adjudicated by an arbiter before the pipeline advances.
+`hepagent jfc` drives a full HEP physics analysis from a natural-language prompt to a compiled analysis-note PDF. Each node of the analysis is executed by a dedicated executor agent and then evaluated by a panel of parallel reviewer agents whose findings are adjudicated by an arbiter before the pipeline advances.
 
-| Phase | Name | Description |
-|-------|------|-------------|
-| 1 | Strategy | Define the analysis strategy and commit to key decisions |
-| 2 | Exploration | Explore datasets, signal/background properties |
-| 3 | Processing | Run selection, reconstruction, and histogram production |
-| 4a | Expected Results | Inference on expected (Asimov) data |
-| 4b | 10% Validation | Inference on 10% of observed data (human gate) |
-| 4c | Full Data | Inference on the full observed dataset |
-| 5 | Documentation | Write and typeset the final analysis note PDF |
+**The structure is yours to author.** An analysis is described by a `plan.json` — a set of work nodes and the dependencies between them — that you can inspect, edit in a browser, and approve before any agent starts work. The seven-node layout below is the built-in default template, not a fixed pipeline: fan the selection out per channel, insert a calibration sub-analysis, or drop the partial-unblinding node when there is nothing to partially unblind.
+
+| Node | Name | Description |
+|------|------|-------------|
+| `strategy` | Strategy | Define the analysis strategy and commit to key decisions |
+| `exploration` | Exploration | Explore datasets, signal/background properties |
+| `selection` | Processing | Run selection, reconstruction, and histogram production |
+| `inference_expected` | Expected Results | Inference on expected (Asimov) data |
+| `inference_partial` | 10% Validation | Inference on 10% of observed data (human gate) |
+| `inference_observed` | Full Data | Inference on the full observed dataset |
+| `documentation` | Documentation | Write and typeset the final analysis note PDF |
+
+`hepagent jfc templates` lists the built-in templates. See [docs/PLAN.md](docs/PLAN.md) for the plan schema and [docs/GRAPH.md](docs/GRAPH.md) for the provenance graph each analysis keeps alongside it.
 
 #### Start a new analysis
 
@@ -201,11 +205,15 @@ Options:
 --prompt-file / -p   Path to a markdown file with the physics question
 --model              Model as "provider:model" (e.g. "cborg:claude-sonnet-4-5")
 --base-dir           Parent directory for analyses (default: analyses/)
---max-iterations     Max review iterations per phase before halting (default: 3)
+--max-iterations     Max review iterations per node before halting (default: 3)
 --max-turns          Max agent turns per call (defaults: executor=50, note_writer/fixer=30, reviewers=20)
 --yolo               Auto-approve all bash commands
---codesign           Enable human co-design review after Phase 1: generates a strategy summary,
-                     facilitates interactive Q&A, then re-adjudicates before Phase 2
+--codesign           Enable every co-design gate the plan declares: generates a strategy summary,
+                     facilitates interactive Q&A, then re-adjudicates before continuing
+--template           Plan template to start from (default: jfc-measurement)
+--plan               Path to an authored plan.json to run instead of a template
+--review-plan        Open the plan editor and wait for approval before any agent work begins
+--plan-port          Port for the plan editor (default: 8001)
 ```
 
 Example with a specific model and co-design enabled:
@@ -219,14 +227,28 @@ hepagent jfc run \
   --codesign
 ```
 
-#### Resume an interrupted analysis
-
-State is saved automatically after every phase. Resume from any phase:
+#### Author and review the plan
 
 ```bash
-hepagent jfc resume --name my_analysis --from-phase 3
-hepagent jfc resume --name my_analysis --from-phase 4a
+hepagent jfc plan propose  --name my_analysis --prompt-file prompt.md   # architect drafts it
+hepagent jfc plan show     --name my_analysis --format mermaid
+hepagent jfc plan validate --name my_analysis                           # exits 1 if it cannot run
+hepagent jfc plan edit     --name my_analysis                           # browser editor
+hepagent jfc plan migrate  --name my_analysis                           # pre-plan analysis -> plan.json
 ```
+
+The editor draws the plan, lets you drag nodes, rewrite any node's prompt, retype edges and add or delete either, and refuses to approve a plan that cannot execute. Approving releases a run that is waiting on it.
+
+#### Resume an interrupted analysis
+
+State is saved automatically after every node. Resume from any node:
+
+```bash
+hepagent jfc resume --name my_analysis --from-node selection
+hepagent jfc resume --name my_analysis --from-node inference_expected
+```
+
+With no `--from-node`, it restarts from the most recent *consistent* checkpoint — a node whose artifact exists and which nothing later invalidated.
 
 #### Check analysis status
 
@@ -234,7 +256,7 @@ hepagent jfc resume --name my_analysis --from-phase 4a
 hepagent jfc status --name my_analysis
 ```
 
-Output lists each phase with its status (`✓ PASS`, `→ IN PROGRESS`, or `○ pending`) and the number of review iterations used.
+Output lists each node with its status (`✓ PASS`, `→ IN PROGRESS`, or `○ pending`) and the number of review iterations used.
 
 #### List all analyses
 

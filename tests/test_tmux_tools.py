@@ -118,8 +118,12 @@ def test_capture_pane_missing_returns_empty():
 
 def test_wait_for_pattern_matches():
     _create_session()
-    # Shell prompt is visible after session creation; match common prompt chars ($, #, >, ❯)
-    result = _wait_for_pattern(SESSION, WINDOW, r"[$#>❯]", timeout=10, poll_interval=1)
+    # Emit a marker we control rather than matching the developer's shell
+    # prompt: prompt characters vary by theme (starship uses ➜, not ❯), and a
+    # git-aware prompt renders different glyphs depending on the working tree,
+    # which made this assertion pass or fail for reasons unrelated to tmux.
+    _send_keys(SESSION, WINDOW, "echo hepagent_wait_$((6*7))")
+    result = _wait_for_pattern(SESSION, WINDOW, r"hepagent_wait_42", timeout=10, poll_interval=1)
     assert result.startswith("matched")
 
 

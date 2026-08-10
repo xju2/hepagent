@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "description": "The seven-node JFC pipeline for a measurement: strategy, exploration, selection, three staged inference nodes, documentation.",
+  "name": "jfc-measurement",
+  "analysis_type": "measurement",
+  "metadata": {
+    "blinding": "staged",
+    "note": "Node ids are stable slugs. Directory and artifact names match the paths cited by data/methodology/ and data/conventions/."
+  },
+  "nodes": [
+    {
+      "id": "strategy",
+      "label": "Strategy",
+      "directory": "phase1_strategy",
+      "artifact": "STRATEGY.md",
+      "prompt_ref": "templates/phase1_claude.md",
+      "reviewers": [
+        "physics",
+        "critical",
+        "constructive"
+      ],
+      "arbiter": true,
+      "gates": [
+        {
+          "name": "codesign",
+          "when": "after",
+          "enabled": false
+        }
+      ],
+      "contract": {
+        "node_types": [
+          "commitment",
+          "method",
+          "dataset"
+        ],
+        "edge_types": [
+          "commits_to",
+          "requires"
+        ]
+      }
+    },
+    {
+      "id": "exploration",
+      "label": "Exploration",
+      "directory": "phase2_exploration",
+      "artifact": "EXPLORATION.md",
+      "prompt_ref": "templates/phase2_claude.md",
+      "reviewers": [
+        "plot"
+      ],
+      "contract": {
+        "node_types": [
+          "dataset",
+          "evidence",
+          "figure"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports"
+        ]
+      }
+    },
+    {
+      "id": "selection",
+      "label": "Selection",
+      "directory": "phase3_selection",
+      "artifact": "SELECTION.md",
+      "prompt_ref": "templates/phase3_claude.md",
+      "reviewers": [
+        "critical",
+        "plot"
+      ],
+      "contract": {
+        "node_types": [
+          "method",
+          "evidence",
+          "figure"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports",
+          "resolves"
+        ]
+      }
+    },
+    {
+      "id": "inference_expected",
+      "label": "Inference — expected",
+      "directory": "phase4a_inference_expected",
+      "artifact": "INFERENCE_EXPECTED.md",
+      "prompt_ref": "templates/phase4_claude.md",
+      "context_paths": [
+        "COMMITMENTS.md"
+      ],
+      "reviewers": [
+        "physics",
+        "critical",
+        "constructive",
+        "plot",
+        "bibtex"
+      ],
+      "arbiter": true,
+      "produces_note": true,
+      "gates": [
+        {
+          "name": "commitments",
+          "when": "before",
+          "enabled": true
+        }
+      ],
+      "contract": {
+        "node_types": [
+          "evidence",
+          "figure",
+          "method"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports",
+          "resolves",
+          "downscopes"
+        ]
+      },
+      "note_artifact": "ANALYSIS_NOTE_4a_v1.md"
+    },
+    {
+      "id": "inference_partial",
+      "label": "Inference — partial unblinding",
+      "directory": "phase4b_inference_partial",
+      "artifact": "INFERENCE_PARTIAL.md",
+      "prompt_ref": "templates/phase4_claude.md",
+      "context_paths": [
+        "COMMITMENTS.md"
+      ],
+      "reviewers": [
+        "physics",
+        "critical",
+        "constructive",
+        "plot",
+        "bibtex"
+      ],
+      "arbiter": true,
+      "produces_note": true,
+      "gates": [
+        {
+          "name": "human",
+          "when": "after",
+          "enabled": true
+        }
+      ],
+      "contract": {
+        "node_types": [
+          "evidence",
+          "figure",
+          "method"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports",
+          "resolves",
+          "downscopes"
+        ]
+      },
+      "note_artifact": "ANALYSIS_NOTE_4b_v1.md"
+    },
+    {
+      "id": "inference_observed",
+      "label": "Inference — observed",
+      "directory": "phase4c_inference_observed",
+      "artifact": "INFERENCE_OBSERVED.md",
+      "prompt_ref": "templates/phase4_claude.md",
+      "context_paths": [
+        "COMMITMENTS.md"
+      ],
+      "reviewers": [
+        "critical",
+        "plot"
+      ],
+      "produces_note": true,
+      "contract": {
+        "node_types": [
+          "evidence",
+          "figure",
+          "method"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports",
+          "resolves",
+          "downscopes"
+        ]
+      },
+      "note_artifact": "ANALYSIS_NOTE_4c_v1.md"
+    },
+    {
+      "id": "documentation",
+      "label": "Documentation",
+      "directory": "phase5_documentation",
+      "artifact": "ANALYSIS_NOTE_5_v1.md",
+      "prompt_ref": "templates/phase5_claude.md",
+      "context_paths": [
+        "COMMITMENTS.md"
+      ],
+      "reviewers": [
+        "physics",
+        "critical",
+        "constructive",
+        "plot",
+        "bibtex",
+        "rendering"
+      ],
+      "arbiter": true,
+      "produces_note": true,
+      "contract": {
+        "node_types": [
+          "artifact",
+          "evidence",
+          "figure"
+        ],
+        "edge_types": [
+          "derives_from",
+          "supports"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "upstream": "strategy",
+      "downstream": "exploration"
+    },
+    {
+      "upstream": "strategy",
+      "downstream": "selection"
+    },
+    {
+      "upstream": "exploration",
+      "downstream": "selection"
+    },
+    {
+      "upstream": "strategy",
+      "downstream": "inference_expected"
+    },
+    {
+      "upstream": "exploration",
+      "downstream": "inference_expected"
+    },
+    {
+      "upstream": "selection",
+      "downstream": "inference_expected"
+    },
+    {
+      "upstream": "strategy",
+      "downstream": "inference_partial"
+    },
+    {
+      "upstream": "selection",
+      "downstream": "inference_partial"
+    },
+    {
+      "upstream": "inference_expected",
+      "downstream": "inference_partial"
+    },
+    {
+      "upstream": "selection",
+      "downstream": "inference_observed"
+    },
+    {
+      "upstream": "inference_expected",
+      "downstream": "inference_observed"
+    },
+    {
+      "upstream": "inference_partial",
+      "downstream": "inference_observed"
+    },
+    {
+      "upstream": "strategy",
+      "downstream": "documentation"
+    },
+    {
+      "upstream": "selection",
+      "downstream": "documentation"
+    },
+    {
+      "upstream": "inference_observed",
+      "downstream": "documentation"
+    }
+  ]
+}
