@@ -79,3 +79,64 @@ async def test_scaffold_importable():
     from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
 
     assert callable(scaffold_jfc_analysis)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_seeds_the_analysis_graph(tmp_base):
+    from hepagent.graph.store import AnalysisGraph
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis(
+        "graph_seed", "Measure the Z→bb cross-section", "measurement", tmp_base
+    )
+    root = Path(result)
+
+    assert (root / "graph" / "nodes.jsonl").exists()
+    assert (root / "graph" / "README.md").exists()
+
+    graph = AnalysisGraph.load(root)
+    problem = graph.nodes(type="problem")
+    assert len(problem) == 1
+    assert problem[0].metadata["analysis_type"] == "measurement"
+    assert graph.nodes(type="analysis_root")
+
+    # One pending artifact node per phase, chained by `requires`.
+    artifacts = graph.nodes(type="artifact")
+    assert len(artifacts) == 7
+    assert all(a.status == "pending" for a in artifacts)
+
+    selection = graph.get_node("artifact:phase3_selection/outputs/SELECTION.md")
+    prerequisites = {e.dst for e in graph.out_edges(selection.id, type="requires")}
+    assert "artifact:phase1_strategy/outputs/STRATEGY.md" in prerequisites
+    assert "artifact:phase2_exploration/outputs/EXPLORATION.md" in prerequisites
+
+
+@pytest.mark.asyncio
+async def test_scaffolded_graph_validates_clean(tmp_base):
+    """A fresh scaffold must not trip any rule — pending nodes are plans."""
+    from hepagent.graph.store import AnalysisGraph
+    from hepagent.graph.validation import validate
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis("graph_clean", "Test", "search", tmp_base)
+    report = validate(AnalysisGraph.load(Path(result)))
+    assert report.ok, report.to_markdown()
+
+
+@pytest.mark.asyncio
+async def test_scaffold_commits_the_graph(tmp_base):
+    """`graph/` must land in the scaffold commit, not as an untracked leftover."""
+    import subprocess
+
+    from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
+
+    result = await scaffold_jfc_analysis("graph_commit", "Test", "measurement", tmp_base)
+    tracked = subprocess.run(
+        ["git", "ls-files", "graph/"],
+        cwd=result,
+        capture_output=True,
+        text=True,
+    )
+    if tracked.returncode != 0:
+        pytest.skip("git is unavailable in this environment")
+    assert "graph/nodes.jsonl" in tracked.stdout

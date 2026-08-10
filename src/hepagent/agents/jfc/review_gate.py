@@ -19,6 +19,8 @@ from hepagent.agents.jfc.reviewers import (
     create_plot_validator,
     create_rendering_reviewer,
 )
+from hepagent.graph.store import AnalysisGraph
+from hepagent.graph.validation import GraphValidationReport, validate
 from hepagent.helpers import read_md
 
 
@@ -58,6 +60,32 @@ class ReviewGateResult:
     adjudication_path: Path | None = None
     regression_origin_phase: int | str | None = None
     regression_symptom: str = ""
+    #: Every graph validation finding, blocking or advisory.
+    graph_findings: list[str] = field(default_factory=list)
+    #: The error-severity subset that forced the verdict.
+    graph_blocking: list[str] = field(default_factory=list)
+
+
+GRAPH_VALIDATION_FILENAME = "GRAPH_VALIDATION.md"
+
+
+def write_graph_validation(analysis_root: Path, review_dir: Path) -> GraphValidationReport:
+    """Validate the analysis graph and persist the report into the review directory.
+
+    Reviewers have `read_file` and are told where this lives, so the graph's
+    view of the analysis becomes evidence they can cite. Returns an empty report
+    if the graph cannot be read — a missing graph must not block a review.
+    """
+    try:
+        report = validate(AnalysisGraph.load(analysis_root))
+    except Exception:  # noqa: BLE001 - graph problems must not break the gate
+        return GraphValidationReport()
+
+    try:
+        (review_dir / GRAPH_VALIDATION_FILENAME).write_text(report.to_markdown(), encoding="utf-8")
+    except OSError:
+        pass
+    return report
 
 
 # Maps each phase to which reviewer factories to call
@@ -117,7 +145,7 @@ def _parse_origin_phase(raw: str) -> int | str:
         return raw.lower()
 
 
-def _parse_verdict_from_adjudication(
+def parse_verdict_from_adjudication(
     adjudication_path: Path,
 ) -> tuple[
     Literal["PASS", "ITERATE", "ESCALATE", "REGRESS"],
@@ -200,6 +228,10 @@ async def run_review_gate(
     review_dir = analysis_root / phase_dir / "review" if phase_dir else analysis_root / "review"
     review_dir.mkdir(parents=True, exist_ok=True)
 
+    # Validate the graph before reviewers run, so its findings are on disk for
+    # them to read and for the arbiter to weigh.
+    graph_report = write_graph_validation(analysis_root, review_dir)
+
     # Run all reviewers concurrently
     tasks = [
         _run_single_reviewer(
@@ -224,7 +256,7 @@ async def run_review_gate(
         )
         # Parse from the written file
         if adjudication_path.exists():
-            verdict, cat_a, cat_b, regression_origin = _parse_verdict_from_adjudication(
+            verdict, cat_a, cat_b, regression_origin = parse_verdict_from_adjudication(
                 adjudication_path
             )
         else:
@@ -261,6 +293,16 @@ async def run_review_gate(
             if "ITERATE" in content_upper or "CATEGORY A" in content_upper:
                 verdict = "ITERATE"
 
+    # A phase cannot pass while the graph is provably broken, whatever the
+    # reviewers concluded: a dangling edge, an unclosed commitment or a note
+    # citing a figure that was never produced is a fact, not a judgement call.
+    # Warnings were given to the arbiter above and are left for it to weigh.
+    blocking = graph_report.blocking
+    if blocking and verdict == "PASS":
+        verdict = "ITERATE"
+    if blocking:
+        cat_a = cat_a + [f"[graph] {f.message}" for f in blocking]
+
     symptom = "; ".join(cat_a[:3]) if cat_a else "regression detected by reviewer"
     result = ReviewGateResult(
         verdict=verdict,
@@ -269,6 +311,8 @@ async def run_review_gate(
         adjudication_path=adjudication_path if adjudication_path.exists() else None,
         regression_origin_phase=regression_origin,
         regression_symptom=symptom,
+        graph_findings=[f.message for f in graph_report.findings],
+        graph_blocking=[f.message for f in blocking],
     )
 
     if verdict == "ESCALATE":

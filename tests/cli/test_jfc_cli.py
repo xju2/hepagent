@@ -143,3 +143,193 @@ def test_jfc_run_invokes_orchestrator(runner, analyses_dir):
         )
     # Either succeeds or fails, but CLI invocation worked
     assert "--help" not in _normalize_cli_output(result.output)
+
+
+@pytest.fixture
+def graph_analysis(analyses_dir):
+    """A small analysis with a rebuilt graph: strategy → exploration → figure."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph, rebuild
+
+    root = analyses_dir / "graphy"
+    for phase in ("phase1_strategy", "phase2_exploration"):
+        (root / phase / "outputs" / "figures").mkdir(parents=True)
+    (root / "prompt.md").write_text("Measure the Z to bb cross-section.")
+    (root / "phase1_strategy" / "outputs" / "STRATEGY.md").write_text("strategy")
+    (root / "phase2_exploration" / "outputs" / "EXPLORATION.md").write_text("exploration")
+    (root / "phase2_exploration" / "outputs" / "figures" / "mjj.png").write_text("png")
+
+    bootstrap_graph(root, "graphy", "measurement", "Measure the Z to bb cross-section.")
+    rebuild(root)
+    return root
+
+
+def test_jfc_graph_help(runner):
+    from hepagent.main import app
+
+    result = runner.invoke(app, ["jfc", "graph", "--help"], env={"NO_COLOR": "1"})
+    output = _normalize_cli_output(result.output)
+    assert result.exit_code == 0
+    for command in ("show", "validate", "trace", "rebuild"):
+        assert command in output
+
+
+def test_jfc_graph_show_table(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app, ["jfc", "graph", "show", "--name", "graphy", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 0
+    assert "STRATEGY.md" in result.output
+    assert "mjj.png" in result.output
+
+
+def test_jfc_graph_show_mermaid(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app,
+        [
+            "jfc",
+            "graph",
+            "show",
+            "--name",
+            "graphy",
+            "--base-dir",
+            str(analyses_dir),
+            "--format",
+            "mermaid",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "graph LR" in result.output
+    assert "derives_from" in result.output
+
+
+def test_jfc_graph_show_filters_by_type(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app,
+        [
+            "jfc",
+            "graph",
+            "show",
+            "--name",
+            "graphy",
+            "--base-dir",
+            str(analyses_dir),
+            "--type",
+            "figure",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "mjj.png" in result.output
+    assert "STRATEGY.md" not in result.output
+
+
+def test_jfc_graph_show_missing_analysis(runner, analyses_dir):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app, ["jfc", "graph", "show", "--name", "nope", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 1
+
+
+def test_jfc_graph_trace_answers_what_produced_this(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app,
+        [
+            "jfc",
+            "graph",
+            "trace",
+            "--name",
+            "graphy",
+            "--base-dir",
+            str(analyses_dir),
+            "--node",
+            "mjj.png",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "derives from:" in result.output
+    assert "EXPLORATION.md" in result.output
+    assert "STRATEGY.md" in result.output
+
+
+def test_jfc_graph_trace_unknown_node(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app,
+        [
+            "jfc",
+            "graph",
+            "trace",
+            "--name",
+            "graphy",
+            "--base-dir",
+            str(analyses_dir),
+            "--node",
+            "ghost.png",
+        ],
+    )
+    assert result.exit_code == 1
+
+
+def test_jfc_graph_validate_clean(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app, ["jfc", "graph", "validate", "--name", "graphy", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 0
+    assert "No findings" in result.output
+
+
+def test_jfc_graph_validate_exits_1_on_an_open_commitment(runner, analyses_dir, graph_analysis):
+    from hepagent.main import app
+
+    (graph_analysis / "COMMITMENTS.md").write_text(
+        "# Phase 1 Commitments\n\n"
+        "| ID | Commitment | Status | Evidence | Phase Resolved |\n"
+        "|----|-----------|--------|----------|---------------|\n"
+        "| D2 | Generator comparison | pending | | |\n"
+    )
+    runner.invoke(
+        app, ["jfc", "graph", "rebuild", "--name", "graphy", "--base-dir", str(analyses_dir)]
+    )
+    result = runner.invoke(
+        app, ["jfc", "graph", "validate", "--name", "graphy", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 1
+    assert "D2" in result.output
+
+
+def test_jfc_graph_rebuild_reconstructs_from_disk(runner, analyses_dir, graph_analysis):
+    from hepagent.graph.store import AnalysisGraph
+    from hepagent.main import app
+
+    (graph_analysis / "graph" / "nodes.jsonl").unlink()
+    (graph_analysis / "graph" / "edges.jsonl").unlink()
+
+    result = runner.invoke(
+        app, ["jfc", "graph", "rebuild", "--name", "graphy", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 0
+    assert "Rebuilt graph" in result.output
+
+    graph = AnalysisGraph.load(graph_analysis)
+    assert graph.get_node("figure:phase2_exploration/outputs/figures/mjj.png") is not None
+
+
+def test_jfc_graph_rebuild_missing_analysis(runner, analyses_dir):
+    from hepagent.main import app
+
+    result = runner.invoke(
+        app, ["jfc", "graph", "rebuild", "--name", "nope", "--base-dir", str(analyses_dir)]
+    )
+    assert result.exit_code == 1

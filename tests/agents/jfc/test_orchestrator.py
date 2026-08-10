@@ -220,6 +220,130 @@ async def test_regression_cycle_reruns_affected_phases(state_dir):
 
 
 @pytest.mark.asyncio
+async def test_phase_run_ingests_into_the_graph(state_dir):
+    """Executor output and the review round both get folded into the graph."""
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        run_phase_with_review,
+        save_state,
+    )
+    from hepagent.agents.jfc.review_gate import ReviewGateResult
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test",
+        analysis_type="measurement",
+    )
+    save_state(state)
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", new_callable=AsyncMock),
+        patch(
+            "hepagent.agents.jfc.orchestrator.run_review_gate",
+            new_callable=AsyncMock,
+            return_value=ReviewGateResult(verdict="PASS"),
+        ),
+        patch("hepagent.agents.jfc.orchestrator.ingest_phase") as mock_phase,
+        patch("hepagent.agents.jfc.orchestrator.ingest_review") as mock_review,
+    ):
+        await run_phase_with_review(state, 1)
+
+    mock_phase.assert_called_once_with(state_dir, 1)
+    mock_review.assert_called_once_with(state_dir, 1)
+
+
+@pytest.mark.asyncio
+async def test_graph_ingestion_failure_does_not_abort_the_run(state_dir):
+    """Graph bookkeeping is not allowed to take down a phase that otherwise passed."""
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        run_phase_with_review,
+        save_state,
+    )
+    from hepagent.agents.jfc.review_gate import ReviewGateResult
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test",
+        analysis_type="measurement",
+    )
+    save_state(state)
+
+    messages: list[str] = []
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", new_callable=AsyncMock),
+        patch(
+            "hepagent.agents.jfc.orchestrator.run_review_gate",
+            new_callable=AsyncMock,
+            return_value=ReviewGateResult(verdict="PASS"),
+        ),
+        patch(
+            "hepagent.agents.jfc.orchestrator.ingest_phase",
+            side_effect=OSError("disk on fire"),
+        ),
+        patch("hepagent.agents.jfc.orchestrator.ingest_review"),
+    ):
+        await run_phase_with_review(state, 1, lambda _p, msg: messages.append(msg))
+
+    assert "1" in state.completed_phases
+    assert any("graph phase ingestion failed" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_review_is_ingested_even_when_the_gate_raises(state_dir):
+    """An escalation is exactly when the provenance record matters most."""
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        run_phase_with_review,
+        save_state,
+    )
+    from hepagent.agents.jfc.review_gate import PhaseEscalationError, ReviewGateResult
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test",
+        analysis_type="measurement",
+    )
+    save_state(state)
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", new_callable=AsyncMock),
+        patch(
+            "hepagent.agents.jfc.orchestrator.run_review_gate",
+            new_callable=AsyncMock,
+            side_effect=PhaseEscalationError(1, ReviewGateResult(verdict="ESCALATE")),
+        ),
+        patch("hepagent.agents.jfc.orchestrator.ingest_phase"),
+        patch("hepagent.agents.jfc.orchestrator.ingest_review") as mock_review,
+    ):
+        with pytest.raises(PhaseEscalationError):
+            await run_phase_with_review(state, 1)
+
+    mock_review.assert_called_once_with(state_dir, 1)
+
+
+def test_graph_commitment_findings_flag_a_commitment_with_no_evidence(state_dir):
+    """A commitment recorded in the graph but never closed blocks Phase 4a."""
+    from hepagent.agents.jfc.orchestrator import _graph_commitment_findings
+    from hepagent.graph.schema import Node
+    from hepagent.graph.store import AnalysisGraph
+
+    graph = AnalysisGraph(state_dir)
+    graph.ensure_dir()
+    graph.add_node(Node(id="commitment:D9", type="commitment", label="D9 unclosed"))
+
+    findings = _graph_commitment_findings(state_dir)
+    assert any("D9 unclosed" in f for f in findings)
+
+
+def test_graph_commitment_findings_are_empty_without_a_graph(state_dir):
+    from hepagent.agents.jfc.orchestrator import _graph_commitment_findings
+
+    assert _graph_commitment_findings(state_dir) == []
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_exceeded(state_dir):
     """Test that MaxIterationsExceeded is raised after max iterations."""
     from hepagent.agents.jfc.orchestrator import (
@@ -251,3 +375,135 @@ async def test_max_iterations_exceeded(state_dir):
         with pytest.raises(MaxIterationsExceeded) as exc_info:
             await run_phase_with_review(state, 2)
         assert exc_info.value.phase == 2
+
+
+# ------------------------------------------------ frontier-driven traversal
+
+
+def test_phases_before_declares_earlier_phases_satisfied():
+    from hepagent.agents.jfc.orchestrator import _phases_before
+
+    assert _phases_before("4a") == {"1", "2", "3"}
+    assert _phases_before(1) == set()
+    assert _phases_before("nonsense") == set()
+
+
+def test_phase_sequence_follows_the_graph_frontier(state_dir):
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        _phase_sequence,
+    )
+
+    (state_dir / "prompt.md").write_text("Test physics prompt")
+    bootstrap_graph(state_dir, "test", "measurement", "Test physics prompt")
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test",
+        analysis_type="measurement",
+    )
+
+    # Simulate each phase completing as it is yielded.
+    emitted = []
+    for phase in _phase_sequence(state_dir, state, set()):
+        emitted.append(str(phase))
+        state.completed_phases.append(str(phase))
+
+    assert emitted == ["1", "2", "3", "4a", "4b", "4c", "5"]
+
+
+def test_phase_sequence_yields_the_native_phase_type(state_dir):
+    """Downstream code keys off int 1 and str '4a'; the planner returns strings."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.agents.jfc.orchestrator import JFCOrchestrationState, _phase_sequence
+
+    (state_dir / "prompt.md").write_text("Test physics prompt")
+    bootstrap_graph(state_dir, "test", "measurement", "Test physics prompt")
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir), analysis_name="test", analysis_type="measurement"
+    )
+
+    emitted = []
+    for phase in _phase_sequence(state_dir, state, set()):
+        emitted.append(phase)
+        state.completed_phases.append(str(phase))
+
+    assert emitted[0] == 1  # int, matches PHASE_SPECS keys
+    assert "4a" in emitted  # str sub-phase preserved
+    assert emitted[-1] == 5
+
+
+def test_phase_sequence_skips_completed_phases(state_dir):
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.agents.jfc.orchestrator import JFCOrchestrationState, _phase_sequence
+
+    (state_dir / "prompt.md").write_text("Test physics prompt")
+    bootstrap_graph(state_dir, "test", "measurement", "Test physics prompt")
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir),
+        analysis_name="test",
+        analysis_type="measurement",
+        completed_phases=["1", "2"],
+    )
+
+    emitted = []
+    for phase in _phase_sequence(state_dir, state, set()):
+        emitted.append(str(phase))
+        state.completed_phases.append(str(phase))
+
+    assert emitted == ["3", "4a", "4b", "4c", "5"]
+
+
+def test_phase_sequence_honours_an_explicit_resume_point(state_dir):
+    """Starting at 4a must not stall on phases 1-3 never having run."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.agents.jfc.orchestrator import (
+        JFCOrchestrationState,
+        _phase_sequence,
+        _phases_before,
+    )
+
+    (state_dir / "prompt.md").write_text("Test physics prompt")
+    bootstrap_graph(state_dir, "test", "measurement", "Test physics prompt")
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir), analysis_name="test", analysis_type="measurement"
+    )
+
+    emitted = []
+    for phase in _phase_sequence(state_dir, state, _phases_before("4a")):
+        emitted.append(str(phase))
+        state.completed_phases.append(str(phase))
+
+    assert emitted == ["4a", "4b", "4c", "5"]
+
+
+def test_phase_sequence_terminates_when_a_phase_never_completes(state_dir):
+    """A phase that runs without passing must not be offered forever."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.agents.jfc.orchestrator import JFCOrchestrationState, _phase_sequence
+
+    (state_dir / "prompt.md").write_text("Test physics prompt")
+    bootstrap_graph(state_dir, "test", "measurement", "Test physics prompt")
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir), analysis_name="test", analysis_type="measurement"
+    )
+
+    # Never mark anything complete: the loop must still end.
+    emitted = [str(p) for p in _phase_sequence(state_dir, state, set())]
+    assert emitted == ["1"]
+
+
+def test_phase_sequence_falls_back_to_phase_order_without_a_graph(state_dir):
+    from hepagent.agents.jfc.orchestrator import JFCOrchestrationState, _phase_sequence
+
+    state = JFCOrchestrationState(
+        analysis_root=str(state_dir), analysis_name="test", analysis_type="measurement"
+    )
+
+    emitted = []
+    for phase in _phase_sequence(state_dir, state, set()):
+        emitted.append(str(phase))
+        state.completed_phases.append(str(phase))
+
+    assert emitted == ["1", "2", "3", "4a", "4b", "4c", "5"]

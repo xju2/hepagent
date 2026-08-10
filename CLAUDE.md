@@ -51,6 +51,12 @@ Skills are stored in `.agents/skills/<skill_name>/` with a `SKILL.md` (YAML fron
 
 `src/hepagent/model_providers.py` provides a unified OpenAI-compatible interface to multiple providers (`cborg`, `openai`, `amsc`, `gemini`). Provider configuration lives in `src/hepagent/config/providers.toml` and is copied to `$HOME/.hepagent/config/` on first run. Model specs follow the `provider:model` format; the default provider is `cborg`.
 
+### Analysis graph (`src/hepagent/graph/`)
+
+Every JFC analysis keeps a provenance graph at `<analysis_root>/graph/*.jsonl` (append-only, git-diffable). `graph/` holds the domain-agnostic core (schema, store, query, validation, prompt renderings in `report.py`); `agents/jfc/graph_builder.py` derives nodes/edges deterministically from artifacts on disk; `tools/jfc/graph.py` gives agents bounded write-back under a per-phase contract.
+
+The graph drives the pipeline, not just records it: `agents/jfc/planner.py` derives phase order from `requires` edges (`PHASE_ORDER` is only a tiebreak and fallback) and picks resume points from the most recent *consistent* checkpoint; the review gate downgrades PASS→ITERATE on any error-severity validation finding; the note writer writes from a graph brief of figures, authoritative numbers and commitments. Graph failures never abort a run. Inspect with `hepagent jfc graph show|validate|trace|rebuild`. See `docs/GRAPH.md` for invariants — read it before changing graph behavior.
+
 ### Context and session
 
 `AgentContext` (dataclass) carries `agent_name` and `active_skill` through the agent run. Persistent conversation history uses `SQLiteSession` from the `openai-agents` SDK, stored in `$HOME/.hepagent/sessions/conversation.db`.
@@ -67,6 +73,7 @@ Common domain-agnostic tools: `src/hepagent/tools/common.py`. Nyx-specific tools
 
 - If a domain skill is relevant, call `load_skill_details(<skill>)` before proceeding.
 - Before changing web UI behavior, read `docs/WEB.md` and preserve its invariants.
+- Before changing analysis-graph behavior, read `docs/GRAPH.md` and preserve its invariants (ingestion must stay idempotent; graph work must never raise into the orchestrator).
 - When a task fails or the user corrects the agent, record it with `update_logbook`.
 - For long HPC runs, use `wait_for_slurm_job_completion(job_id)` instead of polling manually.
 - If a task is described in a markdown file (e.g. `tasks/*.md`), follow the instructions there exactly and update the `## Progress report` section with progress and next steps.

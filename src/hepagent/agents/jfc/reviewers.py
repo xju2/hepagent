@@ -7,6 +7,9 @@ from pathlib import Path
 from agents import Agent
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
+from hepagent.graph.report import phase_brief
+from hepagent.graph.store import AnalysisGraph
+from hepagent.graph.validation import validate
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
 from hepagent.tools.common import read_file, write_review
@@ -104,6 +107,55 @@ def _physics_prompt(analysis_root: Path) -> str:
     return read_md(analysis_root / "prompt.md")
 
 
+def _graph_section(analysis_root: Path, phase: int | str, for_arbiter: bool = False) -> str:
+    """Render the graph's view of this phase for a reviewer or arbiter prompt.
+
+    Gives the reviewer the four things the graph can settle that prose cannot:
+    what has provenance, which figures actually exist, which commitments are
+    still open, and the machine-readable numbers the note must match.
+    """
+    try:
+        graph = AnalysisGraph.load(analysis_root)
+        if len(graph) == 0:
+            return ""
+        report = validate(graph)
+        brief = phase_brief(graph, str(phase))
+    except Exception:  # noqa: BLE001 - a broken graph must not break review
+        return ""
+
+    parts = [
+        "# ANALYSIS GRAPH",
+        "",
+        "The analysis keeps a provenance graph recording what produced what. Use it",
+        "as evidence: it is derived from the files on disk, not from prose.",
+        "",
+        brief,
+        report.to_markdown(),
+    ]
+
+    if for_arbiter:
+        parts.append(
+            "## How to use the graph findings\n\n"
+            "Findings marked **error** are enforced in code — the phase cannot pass while\n"
+            "they stand, whatever you conclude, so do not spend your verdict on them.\n"
+            "Findings marked **warning** are yours to weigh: judge whether each reflects a\n"
+            "real defect for this phase or is an expected consequence of work not done yet.\n"
+            "If an error traces back to an earlier phase rather than this one, that is what\n"
+            "REGRESS(M) is for."
+        )
+    else:
+        parts.append(
+            "## Checks the graph lets you make\n\n"
+            "- Does every important claim in the artifact trace to a node with lineage?\n"
+            "- Does every plot referenced correspond to a figure listed above?\n"
+            "- Is every commitment either resolved or downscoped, with evidence?\n"
+            "- Does every number in the artifact match the machine-readable values above?\n\n"
+            "Cite the specific node, path or value when you raise a finding."
+        )
+
+    return "\n\n".join(parts)
+
+
 def create_physics_reviewer(
     phase: int | str,
     analysis_root: Path,
@@ -166,6 +218,7 @@ def create_critical_reviewer(
             f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:4000]}" if review_sec else "",
             f"# PHASE SPECIFICATION (§3)\n\n{phase_sec[:3000]}" if phase_sec else "",
             f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
+            _graph_section(analysis_root, phase),
             f"# ARTIFACT UNDER REVIEW\n\n{artifact}" if artifact else "",
             f"# OUTPUT\n\nWrite your review to: `{review_dir}/critical_review.md`",
             _EVIDENCE_MANDATE,
@@ -237,8 +290,11 @@ def create_plot_validator(
                 if lint_script.exists()
                 else ""
             ),
+            _graph_section(analysis_root, phase),
             f"# OUTPUT\n\nWrite your validation to: `{review_dir}/plot_validation.md`\n"
-            f"List each figure with its status. 'Figures look fine' is not acceptable.",
+            f"List each figure with its status. 'Figures look fine' is not acceptable.\n"
+            f"Every figure the graph lists must be accounted for, and every figure an\n"
+            f"analysis note references must appear in that list.",
             _EVIDENCE_MANDATE,
         ],
         model_provider=model_provider,
@@ -342,6 +398,7 @@ def create_arbiter(
             f"# ARBITER ROLE\n\n{role_def}" if role_def else "",
             f"# REVIEW METHODOLOGY (§6)\n\n{review_sec[:5000]}" if review_sec else "",
             f"# COMMITMENTS.md\n\n{commitments}" if commitments else "",
+            _graph_section(analysis_root, phase, for_arbiter=True),
             "# REVIEWER OUTPUTS\n\n" + "\n\n---\n\n".join(review_files) if review_files else "",
             f"# OUTPUT\n\nWrite your adjudication to: `{review_dir}/ADJUDICATION.md`\n\n"
             f"Produce a structured adjudication table then end with one of:\n"
@@ -352,6 +409,12 @@ def create_arbiter(
             f"   is required before this phase can pass. M must be the exact phase identifier\n"
             f"    (e.g. REGRESS(3) or REGRESS(4a)). Use this only when the fix cannot be made\n"
             f"    within the current phase.\n\n"
+            f"Render PASS only if the phase's subgraph is internally consistent: every\n"
+            f"    claim traceable to a node with lineage, every referenced figure present,\n"
+            f"    every commitment resolved or downscoped with evidence, and every number\n"
+            f"    matching the machine-readable results. Use ITERATE when the graph is\n"
+            f"    incomplete but repairable within this phase, and REGRESS(M) when a gap\n"
+            f"    traces back to an earlier phase.\n\n"
             f"At Phase 4a, additionally: before rendering verdict, verify all commitments "
             f"in COMMITMENTS.md are either resolved or formally downscoped. "
             f"Any pending commitment is automatically Category A.",

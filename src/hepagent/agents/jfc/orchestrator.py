@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -22,13 +22,17 @@ from hepagent.agents.jfc.executor import (
     create_typesetter,
 )
 from hepagent.agents.jfc.fixer import run_fixer
+from hepagent.agents.jfc.graph_builder import bootstrap_graph, ingest_phase, ingest_review
 from hepagent.agents.jfc.investigator import RegressionTicket, run_investigator
+from hepagent.agents.jfc.planner import PHASE_ORDER as PLANNER_PHASE_ORDER, next_phase
 from hepagent.agents.jfc.review_gate import (
     PhaseEscalationError,
     PhaseRegressionError,
     ReviewGateResult,
     run_review_gate,
 )
+from hepagent.graph.store import AnalysisGraph
+from hepagent.graph.validation import validate_commitments
 from hepagent.tools.jfc.scaffold import _scaffold_impl as scaffold_jfc_analysis
 
 
@@ -70,8 +74,10 @@ class JFCOrchestrationState:
         return Path(self.analysis_root)
 
 
-# Ordered phase sequence
-PHASE_ORDER: list[int | str] = [1, 2, 3, "4a", "4b", "4c", 5]
+# Canonical phase sequence. Execution order is derived from the graph's
+# `requires` edges (see `planner`); this remains the tiebreak between equally
+# ready phases and the fallback when the graph cannot be read.
+PHASE_ORDER = PLANNER_PHASE_ORDER
 
 # Phases that produce an analysis note requiring note_writer + typesetter
 AN_PHASES: set[str] = {"4a", "4b", "4c", "5"}
@@ -99,6 +105,136 @@ def save_state(state: JFCOrchestrationState) -> None:
 def load_state(analysis_root: Path) -> JFCOrchestrationState:
     path = analysis_root / ".orchestration_state.json"
     return JFCOrchestrationState.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def update_graph(
+    analysis_root: Path,
+    phase: int | str,
+    stage: Literal["phase", "review"],
+    progress_callback: Callable[[str, str], None] | None = None,
+) -> None:
+    """Fold a phase's outputs (or its review round) into the analysis graph.
+
+    Graph ingestion is bookkeeping, not analysis: a failure here must never take
+    down a run that is otherwise progressing, so this swallows exceptions the
+    same way `git_commit_phase` does and reports them through the callback.
+    """
+    try:
+        report = (
+            ingest_phase(analysis_root, phase)
+            if stage == "phase"
+            else ingest_review(analysis_root, phase)
+        )
+    except Exception as exc:  # noqa: BLE001 - bookkeeping must not abort a run
+        if progress_callback:
+            progress_callback(str(phase), f"graph {stage} ingestion failed: {exc}")
+        return
+    if progress_callback:
+        progress_callback(str(phase), f"graph updated ({stage}): {report.summary()}")
+
+
+def _phases_before(start_from_phase: int | str) -> set[str]:
+    """Phase keys strictly before an explicit resume point.
+
+    Resuming at 4a is an assertion that 1-3 are done; the planner needs that
+    stated or it will report 4a as blocked on unsatisfied prerequisites.
+    """
+    key = str(start_from_phase)
+    if key not in {str(p) for p in PHASE_ORDER}:
+        return set()
+    index = [str(p) for p in PHASE_ORDER].index(key)
+    return {str(p) for p in PHASE_ORDER[:index]}
+
+
+def _phase_sequence(
+    analysis_root: Path,
+    state: JFCOrchestrationState,
+    assumed: set[str],
+    progress_callback: Callable[[str, str], None] | None = None,
+) -> Iterator[int | str]:
+    """Yield phases to run, re-reading the graph frontier after each one.
+
+    The order is derived from `requires` edges rather than declared, so a phase
+    becomes runnable exactly when its prerequisites are complete — including
+    after a regression cycle has un-completed part of the analysis.
+    """
+    attempted: set[str] = set()
+
+    while True:
+        try:
+            graph = AnalysisGraph.load(analysis_root)
+            satisfied = set(state.completed_phases) | assumed
+            phase_key = next_phase(graph, satisfied, skip=attempted)
+        except Exception as exc:  # noqa: BLE001 - fall back rather than abort
+            if progress_callback:
+                progress_callback("planner", f"graph planning failed ({exc}); using phase order")
+            phase_key = _fallback_next(state, assumed, attempted)
+
+        if phase_key is None:
+            return
+
+        attempted.add(phase_key)
+        yield _canonical_phase(phase_key)
+
+
+def _fallback_next(
+    state: JFCOrchestrationState,
+    assumed: set[str],
+    attempted: set[str],
+) -> str | None:
+    """Next phase by canonical order, used when the graph cannot be planned from."""
+    done = set(state.completed_phases) | assumed
+    for phase in PHASE_ORDER:
+        key = str(phase)
+        if key not in done and key not in attempted:
+            return key
+    return None
+
+
+def _canonical_phase(phase_key: str) -> int | str:
+    """Return the phase in the form the rest of the pipeline keys off ("4a" or 3)."""
+    for phase in PHASE_ORDER:
+        if str(phase) == phase_key:
+            return phase
+    return phase_key
+
+
+def _ensure_graph(
+    analysis_root: Path,
+    analysis_name: str,
+    analysis_type: str,
+    physics_prompt: str,
+    progress_callback: Callable[[str, str], None] | None = None,
+) -> None:
+    """Seed the analysis graph if this directory does not have one yet."""
+    if (analysis_root / "graph" / "nodes.jsonl").exists():
+        return
+    try:
+        bootstrap_graph(analysis_root, analysis_name, analysis_type, physics_prompt)
+    except Exception as exc:  # noqa: BLE001 - bookkeeping must not abort a run
+        if progress_callback:
+            progress_callback("graph", f"bootstrap failed: {exc}")
+        return
+    if progress_callback:
+        progress_callback("graph", "seeded analysis graph")
+
+
+def _graph_commitment_findings(analysis_root: Path) -> list[str]:
+    """Return graph-level commitment problems blocking Phase 4a.
+
+    This is a second, independent check alongside `check_phase1_commitments`:
+    the markdown table says what a commitment's status *is*, the graph says
+    which evidence actually closed it. A commitment marked resolved with no
+    `resolves` edge is caught here and nowhere else.
+
+    Returns an empty list when the graph is unreadable — the markdown check
+    remains the blocking authority.
+    """
+    try:
+        report = validate_commitments(AnalysisGraph.load(analysis_root))
+    except Exception:  # noqa: BLE001 - never let bookkeeping block on its own failure
+        return []
+    return [f.message for f in report.errors]
 
 
 def git_commit_phase(analysis_root: Path, phase: str | int, message: str) -> None:
@@ -328,6 +464,9 @@ async def run_phase_with_review(
                 state, str(phase), progress_callback, max_turns=writer_turns
             )
 
+        # Record what the executor produced before anyone reviews it.
+        update_graph(state.root, phase, "phase", progress_callback)
+
         if progress_callback:
             progress_callback(str(phase), f"review gate (iteration {iteration + 1})")
 
@@ -342,8 +481,13 @@ async def run_phase_with_review(
                 max_turns=reviewer_turns,
             )
         except (PhaseEscalationError, PhaseRegressionError):
+            # Capture the findings that stopped the run — that is exactly when
+            # the provenance record matters most.
+            update_graph(state.root, phase, "review", progress_callback)
             save_state(state)
             raise
+
+        update_graph(state.root, phase, "review", progress_callback)
 
         if result.verdict == "PASS":
             if progress_callback:
@@ -430,17 +574,15 @@ async def run_jfc_analysis(
         )
         save_state(state)
 
-    # Determine which phases to run
-    start_idx = PHASE_ORDER.index(start_from_phase) if start_from_phase in PHASE_ORDER else 0
-    phases_to_run = PHASE_ORDER[start_idx:]
+    # Analyses scaffolded before the graph existed, or resumed from a directory
+    # that lost it, get one seeded here. bootstrap_graph is idempotent.
+    _ensure_graph(analysis_root, analysis_name, analysis_type, physics_prompt, progress_callback)
 
-    for phase in phases_to_run:
-        phase_key = str(phase)
-        if phase_key in state.completed_phases:
-            if progress_callback:
-                progress_callback(str(phase), "already complete, skipping")
-            continue
+    # Phases whose prerequisites an explicit resume point declares satisfied.
+    # Without this, starting at 4a would look blocked on phases 1-3.
+    assumed = _phases_before(start_from_phase)
 
+    for phase in _phase_sequence(analysis_root, state, assumed, progress_callback):
         state.current_phase = phase if isinstance(phase, int) else 0
         state.current_subphase = str(phase)
         save_state(state)
@@ -451,7 +593,21 @@ async def run_jfc_analysis(
         # Commitment gate before Phase 4a
         if phase == "4a":
             commitment_result = check_phase1_commitments(analysis_root)
-            if not commitment_result.all_resolved:
+            graph_findings = _graph_commitment_findings(analysis_root)
+            if not commitment_result.all_resolved or graph_findings:
+                if graph_findings:
+                    commitment_result.blocking_message = "\n".join(
+                        filter(
+                            None,
+                            [
+                                commitment_result.blocking_message
+                                or "Phase 4a blocked by the analysis graph:",
+                                "",
+                                "Graph commitment findings:",
+                                *(f"  - {f}" for f in graph_findings),
+                            ],
+                        )
+                    )
                 raise CommitmentsNotResolved(commitment_result)
 
         try:

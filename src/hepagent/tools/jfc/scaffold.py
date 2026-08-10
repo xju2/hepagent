@@ -163,6 +163,12 @@ async def _scaffold_impl(
         content = pixi_template.read_text(encoding="utf-8").replace("{name}", analysis_name)
         (analysis_root / "pixi.toml").write_text(content, encoding="utf-8")
 
+    # Seed the analysis graph: problem node, root node, and the pending artifact
+    # chain for all seven phases. Imported here to keep the import graph acyclic.
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+
+    bootstrap_graph(analysis_root, analysis_name, analysis_type, physics_prompt)
+
     # Git initialization
     try:
         subprocess.run(["git", "init"], cwd=analysis_root, check=True, capture_output=True)

@@ -711,8 +711,13 @@ def jfc_run(
 @jfc_app.command("resume")
 def jfc_resume(
     name: str = typer.Option(..., "--name", "-n", help="Analysis name to resume."),
-    from_phase: str = typer.Option(
-        ..., "--from-phase", help="Phase to start from, e.g. '3' or '4a'"
+    from_phase: str | None = typer.Option(
+        None,
+        "--from-phase",
+        help=(
+            "Phase to start from, e.g. '3' or '4a'. Omit to let the analysis graph "
+            "pick up from the most recent consistent checkpoint."
+        ),
     ),
     base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
     model: str | None = typer.Option(None, "--model", help="Model override."),
@@ -748,12 +753,23 @@ def jfc_resume(
     prompt_file = analysis_root / "prompt.md"
     prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
     analysis_type = "measurement"
+    completed: list[str] = []
     if state_path.exists():
         s = load_state(analysis_root)
         analysis_type = s.analysis_type
+        completed = s.completed_phases
         if not model_provider or model_provider == "cborg":
             model_provider = s.model_provider
             model_name = model_name or s.model_name
+
+    if from_phase is None:
+        # Ask the graph where the analysis actually still holds up. This is not
+        # "the phase after the last one that finished" — a phase a later review
+        # invalidated is not a checkpoint worth resuming past.
+        from hepagent.agents.jfc.planner import resume_point
+
+        from_phase = resume_point(analysis_root, completed)
+        typer.echo(f"[jfc] resuming from phase {from_phase} (graph checkpoint)")
 
     # Parse phase
     try:
@@ -839,6 +855,120 @@ def jfc_status(
             status = "○ pending"
         typer.echo(f"{key:<6} {pname:<22} {status}")
     typer.echo()
+
+
+graph_app = typer.Typer(name="graph", help="Inspect and rebuild the analysis provenance graph.")
+jfc_app.add_typer(graph_app)
+
+
+def _load_analysis_graph(name: str, base_dir: str):
+    """Resolve an analysis name to its root and loaded graph, or exit."""
+    from pathlib import Path
+
+    from hepagent.graph.store import AnalysisGraph
+
+    analysis_root = Path(base_dir).resolve() / name
+    if not analysis_root.exists():
+        typer.echo(f"Error: analysis not found: {analysis_root}", err=True)
+        raise typer.Exit(code=1)
+    return analysis_root, AnalysisGraph.load(analysis_root)
+
+
+@graph_app.command("show")
+def jfc_graph_show(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table or mermaid."
+    ),
+    node_type: str | None = typer.Option(
+        None, "--type", "-t", help="Restrict to one node type (artifact, figure, commitment, ...)."
+    ),
+) -> None:
+    """Print the analysis graph as a table or a Mermaid diagram."""
+    from hepagent.graph.query import to_mermaid, to_table
+
+    _root, graph = _load_analysis_graph(name, base_dir)
+    if len(graph) == 0:
+        typer.echo(f"No graph found for '{name}'. Run: hepagent jfc graph rebuild --name {name}")
+        raise typer.Exit(code=1)
+
+    if output_format == "mermaid":
+        typer.echo(to_mermaid(graph, node_type=node_type))
+    else:
+        typer.echo(to_table(graph, node_type=node_type))
+
+
+@graph_app.command("validate")
+def jfc_graph_validate(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """Check the analysis graph for consistency. Exits 1 when findings are blocking."""
+    from hepagent.graph.validation import validate
+
+    _root, graph = _load_analysis_graph(name, base_dir)
+    report = validate(graph)
+    typer.echo(report.to_markdown())
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+@graph_app.command("trace")
+def jfc_graph_trace(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    node: str = typer.Option(
+        ..., "--node", help="Node id or file path, e.g. 'mjj.png' or 'figure:...'."
+    ),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """Answer "what produced this?" for a node or file in the analysis."""
+    from hepagent.graph.query import describe
+
+    _root, graph = _load_analysis_graph(name, base_dir)
+    target = graph.get_node(node)
+    if target is None:
+        matches = graph.find_by_content_ref(node)
+        target = matches[0] if matches else None
+    if target is None:
+        typer.echo(f"No node found for '{node}' in analysis '{name}'.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(describe(graph, target))
+
+
+@graph_app.command("rebuild")
+def jfc_graph_rebuild(
+    name: str = typer.Option(..., "--name", "-n", help="Analysis name."),
+    base_dir: str = typer.Option("analyses", "--base-dir", help="Parent directory for analyses."),
+) -> None:
+    """Re-derive the graph from the artifacts on disk. Safe to run repeatedly."""
+    from pathlib import Path
+
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph, rebuild
+
+    analysis_root = Path(base_dir).resolve() / name
+    if not analysis_root.exists():
+        typer.echo(f"Error: analysis not found: {analysis_root}", err=True)
+        raise typer.Exit(code=1)
+
+    analysis_type = "measurement"
+    state_path = analysis_root / ".orchestration_state.json"
+    if state_path.exists():
+        from hepagent.agents.jfc.orchestrator import load_state
+
+        analysis_type = load_state(analysis_root).analysis_type
+
+    prompt_file = analysis_root / "prompt.md"
+    prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
+
+    # Seed the graph only when it is missing; bootstrap declares *pending*
+    # placeholders and must not run over a graph that already has real nodes.
+    if not (analysis_root / "graph" / "nodes.jsonl").exists():
+        bootstrap_graph(analysis_root, name, analysis_type, prompt)
+    report = rebuild(analysis_root)
+    typer.echo(f"Rebuilt graph for '{name}': {report.summary()}")
+    for note in report.skipped:
+        typer.echo(f"  skipped: {note}")
 
 
 @jfc_app.command("list")

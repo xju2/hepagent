@@ -17,7 +17,10 @@ from hepagent.tools.jfc import get_jfc_tools
 
 _JFC_SRC = get_jfc_data_dir()
 
-_PHASE_NAME_MAP = {
+# Canonical phase layout: phase -> (directory, prompt template, primary artifact).
+# The graph builder reads this so the graph's dependency edges cannot drift from
+# what executors actually read.
+PHASE_SPECS: dict[int | str, tuple[str, str, str]] = {
     1: ("phase1_strategy", "phase1_claude.md", "STRATEGY.md"),
     2: ("phase2_exploration", "phase2_claude.md", "EXPLORATION.md"),
     3: ("phase3_selection", "phase3_claude.md", "SELECTION.md"),
@@ -27,7 +30,7 @@ _PHASE_NAME_MAP = {
     5: ("phase5_documentation", "phase5_claude.md", "ANALYSIS_NOTE_5_v1.md"),
 }
 
-_UPSTREAM_ARTIFACTS: dict[int | str, list[str]] = {
+UPSTREAM_ARTIFACTS: dict[int | str, list[str]] = {
     1: [],
     2: ["phase1_strategy/outputs/STRATEGY.md"],
     3: ["phase1_strategy/outputs/STRATEGY.md", "phase2_exploration/outputs/EXPLORATION.md"],
@@ -64,7 +67,7 @@ def _read_jfc_file(relative: str) -> str:
 
 
 def _read_upstream_artifacts(phase: int | str, analysis_root: Path) -> str:
-    paths = _UPSTREAM_ARTIFACTS.get(phase, [])
+    paths = UPSTREAM_ARTIFACTS.get(phase, [])
     blocks = []
     for rel in paths:
         full = analysis_root / rel
@@ -74,6 +77,66 @@ def _read_upstream_artifacts(phase: int | str, analysis_root: Path) -> str:
     if not blocks:
         return ""
     return "## PRIOR PHASE ARTIFACTS\n\n" + "\n\n---\n\n".join(blocks)
+
+
+def _note_graph_section(analysis_root: Path) -> str:
+    """Render the graph slice the note writer must write from.
+
+    Every figure the note references has to be on the manifest, and every number
+    it quotes has to appear in the evidence digest. That is what makes the
+    finished PDF reproducible from the graph rather than from prompt history.
+    """
+    from hepagent.graph.report import note_brief
+    from hepagent.graph.store import AnalysisGraph
+
+    try:
+        graph = AnalysisGraph.load(analysis_root)
+        if len(graph) == 0:
+            return ""
+        brief = note_brief(graph)
+    except Exception:  # noqa: BLE001 - a broken graph must not block note writing
+        return ""
+
+    return (
+        "# WRITE FROM THE ANALYSIS GRAPH\n\n"
+        "The graph below is the source of record for this note. It is derived from\n"
+        "the files on disk, so it is authoritative over any number or filename that\n"
+        "appears in the phase artifacts.\n\n"
+        "Binding rules:\n"
+        "- Reference **only** figures listed in the manifest, by the exact path given.\n"
+        "  A reference to anything else is a broken image and an untraceable claim.\n"
+        "- Quote numbers **exactly** as they appear in the results digest. Where the\n"
+        "  artifacts and the digest disagree, the digest wins — the JSON is what the\n"
+        "  code actually produced.\n"
+        "- Account for every commitment: state where each was met, or why it was\n"
+        "  downscoped. A commitment marked still open must be named as an open issue.\n"
+        "- Anchor each claim in something the graph records. If you cannot point to a\n"
+        "  figure, a results value or an artifact, say so rather than asserting it.\n\n" + brief
+    )
+
+
+def _graph_contract_section(phase: int | str, analysis_root: Path) -> str:
+    """Render the phase's graph write-back contract for the executor prompt."""
+    from hepagent.tools.jfc.graph import contract_summary
+
+    return (
+        f"# GRAPH WRITE-BACK CONTRACT\n\n"
+        f"This analysis keeps a durable provenance graph at "
+        f"`{analysis_root}/graph/`. Artifacts, figures, result JSON files and "
+        f"commitment-table rows are ingested from disk automatically — you do "
+        f"not need to record those.\n\n"
+        f"What you *must* record with `graph_add_node` / `graph_add_edge` is the "
+        f"meaning the filesystem cannot show:\n"
+        f"- the datasets you actually used, with their AMI tag and campaign;\n"
+        f"- the selection or statistical method behind a result;\n"
+        f"- the specific evidence that resolves each commitment you close, and "
+        f"the documented reason for any commitment you downscope.\n\n"
+        f"{contract_summary(str(phase))}\n\n"
+        f"Calls outside this contract are refused. Use `graph_query` to inspect "
+        f"existing nodes before linking to them — edges need real node ids on "
+        f"both ends. Every major claim in your artifact should be reachable from "
+        f"a `supports` or `derives_from` edge."
+    )
 
 
 def _assemble_executor_prompt(
@@ -120,7 +183,10 @@ def _assemble_executor_prompt(
         f"Analysis root: `{analysis_root}/`"
     )
 
-    # 6. Codesign human feedback (only present on revision runs)
+    # 6. Graph write-back contract
+    parts.append(_graph_contract_section(phase, analysis_root))
+
+    # 7. Codesign human feedback (only present on revision runs)
     if codesign_feedback:
         parts.append(
             "# HUMAN FEEDBACK FROM CODESIGN REVIEW\n\n"
@@ -164,10 +230,10 @@ def create_phase_executor(
         codesign_feedback: Human feedback from the codesign gate (Phase 1 revisions only).
             When provided, appended as a mandatory revision directive to the executor prompt.
     """
-    if phase not in _PHASE_NAME_MAP:
-        raise ValueError(f"Unknown phase: {phase}. Valid: {list(_PHASE_NAME_MAP)}")
+    if phase not in PHASE_SPECS:
+        raise ValueError(f"Unknown phase: {phase}. Valid: {list(PHASE_SPECS)}")
 
-    phase_dir, template_name, artifact_name = _PHASE_NAME_MAP[phase]
+    phase_dir, template_name, artifact_name = PHASE_SPECS[phase]
     instructions = _assemble_executor_prompt(
         phase,
         analysis_root,
@@ -259,16 +325,26 @@ def create_note_writer(
         f" for related figure groups\n"
         f"- Figure references must match existing files in the figures/ directories"
     )
+
+    # The graph is the note's source of record: it lists the figures that exist,
+    # the numbers that are authoritative, and the commitments that must be
+    # accounted for. Written after the task so its rules read as constraints.
+    parts.append(_note_graph_section(analysis_root))
+
     if artifact_blocks:
         parts.append("# PHASE ARTIFACTS\n\n" + "\n\n---\n\n".join(artifact_blocks))
 
     instructions = "\n\n".join(parts)
 
+    from hepagent.tools.jfc.graph import graph_query
+
     return Agent[AgentContext](
         name=f"JFC Note Writer (Phase {phase})",
         instructions=instructions,
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
-        tools=[read_resource],  # read-only: no bash execution
+        # Read-only: no bash execution. graph_query lets it check provenance for
+        # a claim without being able to write anything.
+        tools=[read_resource, graph_query],
     )
 
 
