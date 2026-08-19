@@ -315,3 +315,28 @@ def test_branch_edges_lists_only_what_leaves_a_condition():
     plan = make_loop_plan()
     assert {e.kind for e in plan.branch_edges("converged")} == {"on_true", "on_false"}
     assert plan.branch_edges("propose") == []
+
+
+def test_a_node_turn_cap_round_trips_and_defaults_to_the_run():
+    """`max_turns` is a tri-state: a number, or null meaning "the run decides"."""
+    node = PlanNode(id="a", label="A", directory="a", artifact="A.md", max_turns=120)
+
+    assert PlanNode.from_dict(node.to_dict()).max_turns == 120
+    # A plan written before the field existed loads as "says nothing".
+    assert (
+        PlanNode.from_dict(
+            {
+                "id": "a",
+                "label": "A",
+                "directory": "a",
+                "artifact": "A.md",
+            }
+        ).max_turns
+        is None
+    )
+
+
+def test_a_turn_cap_below_one_is_refused():
+    """Zero turns is not a cheap node, it is a node that cannot run at all."""
+    with pytest.raises(PlanSchemaError):
+        PlanNode(id="a", label="A", directory="a", artifact="A.md", max_turns=0)

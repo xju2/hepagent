@@ -80,22 +80,33 @@ def _analysis_state(root: Path) -> dict[str, Any]:
 
 
 def _platform_models(platform: str) -> dict[str, Any]:
-    """The models one platform serves, plus the model it defaults to.
+    """The models one platform serves, the model it defaults to, and what they cost.
 
     Late-imported like `_vocabulary`, and separate from the vocabulary for a
     different reason: listing models is a network call against the provider, so
     it happens when a user opens the dropdown rather than on every plan view.
 
+    `costs` is ``{model: {"input": $/M, "output": $/M}}`` and is **empty for a
+    platform that does not publish prices** — the dropdown shows a price where
+    one exists and a bare model id where it does not.
+
     Raises:
         ValueError: the platform is not configured, or its API key is missing.
     """
-    from hepagent.model_providers import get_model_provider_settings, list_available_models
+    from hepagent.model_providers import (
+        get_model_provider_settings,
+        list_available_models,
+        list_model_costs,
+    )
 
     settings = get_model_provider_settings(platform)
+    models = list(list_available_models(platform, settings=settings))
+    costs = list_model_costs(platform, settings=settings)
     return {
         "platform": platform,
         "default": settings.default_model,
-        "models": list(list_available_models(platform, settings=settings)),
+        "models": models,
+        "costs": {model: costs[model] for model in models if model in costs},
     }
 
 
@@ -287,6 +298,7 @@ def create_router(
                 model=body.get("model") or None,
                 unattended=bool(body.get("unattended")),
                 max_iterations=int(body.get("max_iterations") or 3),
+                max_turns=int(body["max_turns"]) if body.get("max_turns") else None,
                 only_node=only_node,
             )
             return handle.snapshot()

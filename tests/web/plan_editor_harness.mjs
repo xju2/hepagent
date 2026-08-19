@@ -73,7 +73,9 @@ const IDS = [
   "show-prompt",
   // The run supervisor: progress log, and the dialog a running analysis asks
   // its questions in.
-  "run", "run-state", "run-detail", "run-unattended", "run-log", "cancel-run",
+  "run", "run-state", "run-detail", "run-log", "cancel-run",
+  // Run settings: what the next launch is configured with.
+  "run-settings", "run-unattended", "run-model", "run-iterations", "run-turns",
   // The bottom dock: the run log is one tab, what the analysis has established
   // is the other.
   "dock", "dock-grip", "tab-progress", "tab-log", "progress",

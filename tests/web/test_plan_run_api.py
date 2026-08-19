@@ -49,9 +49,27 @@ def _client(analyses, gate, runner, launched=None):
     with — which is how the per-node run is checked without a real orchestrator.
     """
 
-    def launcher(analysis_root, *, name, model, unattended, max_iterations, only_node=None):
+    def launcher(
+        analysis_root,
+        *,
+        name,
+        model,
+        unattended,
+        max_iterations,
+        max_turns=None,
+        only_node=None,
+    ):
         if launched is not None:
-            launched.append({"only_node": only_node, "unattended": unattended, "name": name})
+            launched.append(
+                {
+                    "only_node": only_node,
+                    "unattended": unattended,
+                    "name": name,
+                    "model": model,
+                    "max_iterations": max_iterations,
+                    "max_turns": max_turns,
+                }
+            )
         return runs.RUNS.start(name, analysis_root, runner, unattended=unattended)
 
     app = fastapi.FastAPI()
@@ -238,7 +256,16 @@ def test_one_node_can_be_run_without_approving_the_plan(analyses, gate):
     response = client.post("/api/plan/zbb/run", json={"only_node": "strategy"})
 
     assert response.status_code == 200
-    assert launched == [{"only_node": "strategy", "unattended": False, "name": "zbb"}]
+    assert launched == [
+        {
+            "only_node": "strategy",
+            "unattended": False,
+            "name": "zbb",
+            "model": None,
+            "max_iterations": 3,
+            "max_turns": None,
+        }
+    ]
     assert gate.is_approved(analyses / "zbb") is False
 
 
@@ -270,7 +297,16 @@ def test_a_blocking_finding_refuses_a_single_node_run(analyses, gate, jfc_plan):
 
 
 def test_a_node_the_plan_does_not_have_is_a_bad_request(analyses, gate):
-    def launcher(analysis_root, *, name, model, unattended, max_iterations, only_node=None):
+    def launcher(
+        analysis_root,
+        *,
+        name,
+        model,
+        unattended,
+        max_iterations,
+        max_turns=None,
+        only_node=None,
+    ):
         raise ValueError(f"Plan 'zbb' has no node '{only_node}'.")
 
     app = fastapi.FastAPI()
@@ -281,3 +317,38 @@ def test_a_node_the_plan_does_not_have_is_a_bad_request(analyses, gate):
 
     assert response.status_code == 400
     assert "nonesuch" in response.json()["detail"]
+
+
+def test_run_settings_reach_the_launcher(analyses, gate):
+    """The dock header's model, iteration and turn settings are launch arguments.
+
+    They only mean anything at launch, so a run that ignored them would look
+    configured and behave as if it were not.
+    """
+    launched: list[dict] = []
+    client = _client(analyses, gate, lambda h: "done", launched)
+    client.post("/api/plan/zbb/approve")
+
+    response = client.post(
+        "/api/plan/zbb/run",
+        json={"model": "amsc:gpt-5.5", "max_iterations": 5, "max_turns": 120},
+    )
+
+    assert response.status_code == 200
+    assert launched[0]["model"] == "amsc:gpt-5.5"
+    assert launched[0]["max_iterations"] == 5
+    assert launched[0]["max_turns"] == 120
+
+
+def test_a_blank_turn_cap_defers_to_the_role_defaults(analyses, gate):
+    """Blank is not zero. The page sends null, and null must stay null: a 0 here
+    would be a turn cap of zero rather than "let each role decide"."""
+    launched: list[dict] = []
+    client = _client(analyses, gate, lambda h: "done", launched)
+    client.post("/api/plan/zbb/approve")
+
+    response = client.post("/api/plan/zbb/run", json={"max_turns": None, "model": ""})
+
+    assert response.status_code == 200
+    assert launched[0]["max_turns"] is None
+    assert launched[0]["model"] is None

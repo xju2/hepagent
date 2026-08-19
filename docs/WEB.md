@@ -65,6 +65,8 @@ hepagent repl --chat web-1a2b3c4d5e6f
 | `ask_user_for_info` | inline question in the transcript |
 | Agent / platform / model switching | ⚙ settings panel *and* slash commands |
 | Per-node platform and model (JFC) | node panel on the plan page; see `docs/PLAN.md` |
+| Per-node turn cap (JFC) | node panel; blank defers to the run, see `docs/PLAN.md` |
+| Run settings (model, review iterations, turn cap) | dock header on the plan page, applied at launch |
 | Skill loading, logbook, user profile | via the normal tool steps |
 | Cost and active-skill display | `/status` |
 | Recovery behaviours | shared with the REPL (see below) |
@@ -301,7 +303,15 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
     stopped until it is answered, and the page would sit on a stale `blocked` pill
     with no way to release it.
 
-15. **The approve control stays reachable whatever the command's length.** An
+15. **Run settings are visible before there is a run.** They are launch
+    arguments — `model`, `max_iterations`, `max_turns` and `unattended` are read
+    once, when `/run` is posted — so the header keeps them in `#run-settings`,
+    which is always shown, rather than in `#run`, which appears only once a run
+    exists. They disable while one is in flight and re-enable when it ends: the
+    row describes the *next* launch, and a control that could be changed
+    mid-run would claim an effect it does not have.
+
+16. **The approve control stays reachable whatever the command's length.** An
     agent's command can be a hundred lines of heredoc. `#ask .dialog` is a flex
     column capped at `86vh`, `#ask .cmd` scrolls inside it, and `#ask .actions` is
     `flex: 0 0 auto`. A dialog that grows with its content pushes Approve past the
@@ -317,7 +327,9 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
 - `hepagent web --yolo` sets the *initial* mode only; it is per-chat state
   afterwards, changed via `/mode` or the ⚙ panel. It does **not** set
   `HEPAGENT_YOLO`, so a run launched from the plan page still asks there; tick
-  "auto-approve commands" before launching to run unattended.
+  "auto-approve commands" in the dock header before launching to run unattended.
+  The chat's ⚙ "Max turns" slider is likewise per-chat: a plan run takes its cap
+  from the dock header's `turns` box, or from each node's own `max_turns`.
 - A run launched from the *page* is supervised on the page. A run launched by
   `jfc run --review-plan` is driven by the CLI and is not in the registry, so
   that page shows its plan but no progress — watch the terminal instead.

@@ -413,6 +413,22 @@ def _commitment_gate(analysis_root: Path) -> None:
     raise CommitmentsNotResolved(result)
 
 
+def _turns_for(node: PlanNode, run_max_turns: int | None, role_default: int) -> int:
+    """The turn cap for one agent call on `node`.
+
+    Precedence is narrowest-first: the node's own cap, then the cap the run was
+    launched with, then the role's default. A node that needs a long leash — a
+    selection step sweeping cuts, say — says so in the plan without raising the
+    ceiling for every other node, and a run-wide `--max-turns` still overrides
+    the role defaults for every node that declares nothing.
+    """
+    if node.max_turns is not None:
+        return node.max_turns
+    if run_max_turns is not None:
+        return run_max_turns
+    return role_default
+
+
 async def _run_gates(
     state: JFCOrchestrationState,
     node: PlanNode,
@@ -454,7 +470,7 @@ async def _run_gates(
                 state.root,
                 model_provider=state.model_provider,
                 model_name=state.model_name,
-                max_turns=max_turns,
+                max_turns=_turns_for(node, max_turns, 20),
                 progress_callback=progress_callback,
             )
             if verdict == "REVISE":
@@ -496,7 +512,12 @@ async def _run_regression_cycle(
     if progress_callback:
         progress_callback(detected, f"regression → investigating (origin node {origin})")
 
-    investigator_turns = max_turns if max_turns is not None else 20
+    detected_node = plan.node(detected)
+    investigator_turns = (
+        _turns_for(detected_node, max_turns, 20)
+        if detected_node is not None
+        else (max_turns if max_turns is not None else 20)
+    )
     ticket: RegressionTicket = await run_investigator(
         detected_phase=detected,
         origin_phase=origin,
@@ -616,7 +637,7 @@ async def run_condition_node(
         history=history,
         model_provider=state.model_provider,
         model_name=state.model_name,
-        max_turns=max_turns if max_turns is not None else 10,
+        max_turns=_turns_for(node, max_turns, 10),
     )
     state.condition_iterations[node.id] = iteration
     if outcome.metric_value is not None:
@@ -807,7 +828,7 @@ async def run_phase_with_review(
         save_state(state)
 
         # Executor (codesign_feedback only injected on first iteration; fixer handles later ones)
-        executor_turns = max_turns if max_turns is not None else 50
+        executor_turns = _turns_for(node, max_turns, 50)
         feedback = codesign_feedback if iteration == iterations else None
         await _run_executor(
             state,
@@ -818,7 +839,7 @@ async def run_phase_with_review(
             codesign_feedback=feedback,
         )
 
-        writer_turns = max_turns if max_turns is not None else 30
+        writer_turns = _turns_for(node, max_turns, 30)
         if node.produces_note:
             await _run_note_writer_and_typesetter(
                 state, node, plan, progress_callback, max_turns=writer_turns
@@ -831,7 +852,7 @@ async def run_phase_with_review(
             progress_callback(phase_key, f"review gate (iteration {iteration + 1})")
 
         # Review gate
-        reviewer_turns = max_turns if max_turns is not None else 20
+        reviewer_turns = _turns_for(node, max_turns, 20)
         try:
             result: ReviewGateResult = await run_review_gate(
                 node,
@@ -863,7 +884,7 @@ async def run_phase_with_review(
             if progress_callback:
                 progress_callback(phase_key, f"ITERATE (iteration {iteration + 1})")
             all_findings = result.category_a_findings + result.category_b_findings
-            fixer_turns = max_turns if max_turns is not None else 30
+            fixer_turns = _turns_for(node, max_turns, 30)
             await run_fixer(
                 node,
                 state.root,

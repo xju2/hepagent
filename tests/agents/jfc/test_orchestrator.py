@@ -1078,3 +1078,22 @@ async def test_only_node_leaves_the_run_state_alone(jfc_analysis, jfc_plan):
 async def test_only_node_refuses_a_node_the_plan_does_not_have(jfc_analysis, jfc_plan):
     with pytest.raises(ValueError, match="nonesuch"):
         await run_one(jfc_analysis, jfc_plan, "nonesuch")
+
+
+# ------------------------------------------------------------- the turn cap
+
+
+def _node(**kwargs):
+    from hepagent.plan.schema import PlanNode
+
+    return PlanNode(id="n", label="N", directory="n", artifact="N.md", **kwargs)
+
+
+def test_turn_cap_precedence_is_node_then_run_then_role():
+    """Narrowest wins. A node that needs a long leash does not raise the ceiling
+    for the rest of the plan, and a run-wide cap still beats the role default."""
+    from hepagent.agents.jfc.orchestrator import _turns_for
+
+    assert _turns_for(_node(max_turns=120), 40, 50) == 120  # node over run
+    assert _turns_for(_node(), 40, 50) == 40  # run over role
+    assert _turns_for(_node(), None, 50) == 50  # role default

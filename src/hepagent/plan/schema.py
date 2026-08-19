@@ -273,6 +273,10 @@ class PlanNode:
             and refused by P10 — on any other kind of node.
         contract: The node's graph write-back allowance.
         max_iterations: Review iterations allowed before escalating.
+        max_turns: Optional per-agent turn cap for this node. ``None`` defers to
+            the run's cap, which itself defers to the per-role defaults — a node
+            that is known to need a long leash says so here without raising the
+            ceiling for every other node in the plan.
         model: Optional ``"provider:model"`` override for this node.
         tools: Optional function-tool allowlist, by tool name. ``None`` means the
             default set for `role` — which is a different statement from ``()``,
@@ -303,6 +307,7 @@ class PlanNode:
     condition: PlanCondition | None = None
     contract: PlanContract = field(default_factory=PlanContract)
     max_iterations: int = 3
+    max_turns: int | None = None
     model: str | None = None
     tools: tuple[str, ...] | None = None
     skills: tuple[str, ...] = ()
@@ -316,6 +321,11 @@ class PlanNode:
             raise PlanSchemaError(
                 f"Node id '{self.id}' must start with a letter and contain only "
                 f"lowercase letters, digits, '_' and '-'"
+            )
+        if self.max_turns is not None and self.max_turns < 1:
+            raise PlanSchemaError(
+                f"Node '{self.id}' has max_turns={self.max_turns}; a turn cap must be "
+                f"at least 1, or null to defer to the run."
             )
         if self.kind not in NODE_KINDS:
             raise PlanSchemaError(

@@ -204,6 +204,12 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
 /* The run asks its questions here. It is modal on purpose: the analysis is
    stopped until it is answered, and a question that can be scrolled past is a
    run that looks hung. */
+#run-settings { display: flex; align-items: center; gap: 10px; }
+#run-settings label { display: flex; align-items: center; gap: 4px; margin: 0;
+  font-size: 12px; color: var(--muted); }
+#run-settings input[type="text"] { width: 140px; }
+#run-settings input[type="number"] { width: 62px; }
+#run-settings input { margin: 0; padding: 3px 6px; font-size: 12px; }
 #ask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
   align-items: center; justify-content: center; z-index: 10; }
 /* An id selector beats the user agent's `[hidden] { display: none }`, so the
@@ -263,10 +269,23 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
     <span id="run" hidden>
       <span class="pill" id="run-state">idle</span>
       <span class="meta" id="run-detail"></span>
+    </span>
+    <!-- Run settings apply at launch, so they are visible before there is a run
+         to show — which is the only moment they can still be changed. -->
+    <span id="run-settings">
+      <label title="Override the platform and model for every node that does not name its own, as &quot;platform:model&quot;">
+        model <input type="text" id="run-model" placeholder="plan default">
+      </label>
+      <label title="Floor on review iterations per node; a node asking for more still gets more">
+        iterations <input type="number" id="run-iterations" min="1" value="3">
+      </label>
+      <label title="Turn cap per agent call, for every node that does not name its own. Blank uses the per-role defaults: executor 50, note writer 30, reviewer 20">
+        turns <input type="number" id="run-turns" min="1" placeholder="default">
+      </label>
       <label title="Skip the approval dialog for every shell command this run issues">
         <input type="checkbox" id="run-unattended"> auto-approve commands
       </label>
-      <button id="cancel-run" class="danger">Stop</button>
+      <button id="cancel-run" class="danger" disabled>Stop</button>
     </span>
   </div>
   <div id="progress" class="dock-body"></div>
@@ -1017,6 +1036,15 @@ function renderNodePanel(side, node) {
   field(iterations, "Max review iterations", node.max_iterations,
     (v) => { node.max_iterations = parseInt(v, 10) || 1; }, "number");
   renderModel(side, platform, node);
+  // Narrowest cap wins: this node, then the run's, then the role default. Blank
+  // is not zero — it is "say nothing here", which is why the empty string maps
+  // back to null rather than to a number.
+  field(side, "Max turns", node.max_turns,
+    (v) => { node.max_turns = v.trim() === "" ? null : Math.max(1, parseInt(v, 10) || 1); },
+    "number");
+  side.appendChild(hint(
+    "Blank defers to the run's cap, and the run defers to the per-role defaults "
+    + "(executor 50, note writer 30, reviewer 20)."));
 
   field(side, "Executor prompt", node.prompt, (v) => { node.prompt = v; }, "textarea");
 }
@@ -1059,7 +1087,7 @@ async function loadModels(platform) {
   const models = payload && Array.isArray(payload.models) ? payload.models : null;
   platformModels[platform] = error || !models
     ? { error: error || "the server listed no models" }
-    : { models, default: payload.default || "" };
+    : { models, default: payload.default || "", costs: payload.costs || {} };
   renderSide();
 }
 
@@ -1114,11 +1142,22 @@ function renderModel(side, cell, node) {
     ? known.models : [spec.model].concat(known.models);
   const fallback = known.default ? `— default: ${known.default} —` : "— the platform's default —";
   choice(side, "Model", spec.model,
-    [{ value: "", text: fallback }].concat(names),
+    [{ value: "", text: fallback }].concat(names.map(
+      (m) => ({ value: m, text: m + priceSuffix(known.costs, m) }))),
     (v) => { node.model = joinModel(spec.platform, v); });
   if (!known.models.length) {
     side.appendChild(hint(`${spec.platform} reported no models; it will use its default.`));
   }
+}
+
+/* Price per million tokens, in/out, when the platform quotes one. Only a
+   LiteLLM gateway does; everywhere else this is the empty string and the
+   dropdown reads exactly as it did before. */
+function priceSuffix(costs, model) {
+  const price = (costs || {})[model];
+  if (!price) return "";
+  const dollars = (n) => (n >= 1 ? n.toFixed(2) : n.toFixed(3)).replace(/0+$/, "").replace(/\.$/, "");
+  return `  ($${dollars(price.input)}/$${dollars(price.output)} per M)`;
 }
 
 /* What this node's executor is given: which function tools it may call, which
@@ -1387,7 +1426,14 @@ function runClass(nodeId) {
 }
 
 async function startRun(onlyNode) {
-  const body = { unattended: Boolean($("run-unattended").checked) };
+  const body = {
+    unattended: Boolean($("run-unattended").checked),
+    model: $("run-model").value.trim() || null,
+    max_iterations: parseInt($("run-iterations").value, 10) || 3,
+    // Blank means "defer to each role's default", which the server reads as null
+    // — 0 would be a turn cap of zero, so an unparseable value must not become one.
+    max_turns: parseInt($("run-turns").value, 10) || null,
+  };
   if (onlyNode) body.only_node = onlyNode;
   const res = await fetch(`${API}/run`, {
     method: "POST",
@@ -1492,7 +1538,7 @@ function appendRunEvents(events) {
 
 function renderRun() {
   const box = $("run");
-  if (!run || run.status === "idle") { box.hidden = true; return; }
+  if (!run || run.status === "idle") { box.hidden = true; freezeRunSettings(false); return; }
   box.hidden = false;
   const pill = $("run-state");
   pill.textContent = run.status;
@@ -1504,8 +1550,16 @@ function renderRun() {
   $("run-detail").textContent = plan
     ? `${done}/${plan.nodes.length} nodes complete` + (run.unattended ? " · unattended" : "")
     : "";
-  $("cancel-run").disabled = !runActive();
-  $("run-unattended").disabled = runActive();
+  freezeRunSettings(runActive());
+}
+
+/* The settings describe the *next* launch, so they are editable until there is
+   a run and again once it ends. Stop belongs to the run itself. */
+function freezeRunSettings(active) {
+  $("cancel-run").disabled = !active;
+  for (const id of ["run-unattended", "run-model", "run-iterations", "run-turns"]) {
+    $(id).disabled = active;
+  }
 }
 
 /* The one place a running analysis talks back to its human: bash approvals,

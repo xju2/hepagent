@@ -71,6 +71,7 @@ analysis.
 | `condition` | The test a `condition` node evaluates. Refused by P10 on any other kind |
 | `contract` | What this node may write back into the provenance graph |
 | `max_iterations` | Review iterations before escalating |
+| `max_turns` | Optional per-agent turn cap; `null` defers to the run, see [The turn cap](#the-turn-cap) |
 | `model` | Optional model override, see [Platform and model](#platform-and-model) |
 | `tools` | Optional function-tool allowlist by name; `None` means the default set for `role` |
 | `metadata` | Free-form. The editor stores layout coordinates here under `x`/`y`. |
@@ -135,6 +136,36 @@ platform, once per page per platform. A provider that cannot be reached answers
 laptop must still be able to edit a plan. For the same reason P6 checks only the
 platform half of a spec: which models exist is not a question a validator can
 answer offline.
+
+That same response carries `costs`, `{model: {"input": $/M, "output": $/M}}`, so
+the dropdown can price what it offers. Pricing is not part of the OpenAI model
+API — `/v1/models` returns ids and nothing else — so `list_model_costs` reads a
+LiteLLM gateway's `/model/info` instead, and answers `{}` for a provider that
+publishes no prices. **A missing price is never an error**: OpenAI and Gemini
+quote nothing through their OpenAI-compatible endpoints, and their models must
+still be listed and selectable.
+
+### The turn cap
+
+How many turns one agent call may take is settled narrowest-first:
+
+| Source | Set where |
+|---|---|
+| `node.max_turns` | The node panel in the editor, or the field in `plan.json` |
+| the run's cap | `--max-turns` on `jfc run`/`jfc resume`, or the plan page's run settings |
+| the role default | executor 50, note writer/fixer 30, reviewer/investigator/typesetter 20, condition 10 |
+
+`_turns_for(node, run_max_turns, role_default)` in `agents/jfc/orchestrator.py`
+is the only place that precedence is applied, so a new call site inherits it by
+using the helper rather than by remembering the rule. A node declaring its own
+cap is the point: a selection step sweeping cuts can be given a long leash
+without raising the ceiling for every other node in the plan, which a run-wide
+flag cannot express.
+
+`null` and a number are different statements — "the run decides" versus "this
+many" — so the field is nullable rather than defaulting to a role's number, and
+a cap below 1 is refused by the schema: a node that may take zero turns cannot
+run at all.
 
 ### The process inventory
 
