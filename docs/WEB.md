@@ -292,6 +292,21 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
     that is not the one pending, so a second tab, a slow click, or a reconnect
     cannot approve a command the run has since moved on to.
 
+14. **A pending question survives a rendering failure.** `plan.html` boots
+    `load()`, `loadState()` and `pollRun()` without awaiting each other, so a run
+    snapshot can arrive before the plan does — `render()` therefore returns early
+    when `plan` is still null, `applyRun` calls `renderAsk` *before* redrawing the
+    canvas, and `pollRun` restarts polling in a `finally`. A throw anywhere in the
+    drawing path must never swallow the question or end the poll loop: the run is
+    stopped until it is answered, and the page would sit on a stale `blocked` pill
+    with no way to release it.
+
+15. **The approve control stays reachable whatever the command's length.** An
+    agent's command can be a hundred lines of heredoc. `#ask .dialog` is a flex
+    column capped at `86vh`, `#ask .cmd` scrolls inside it, and `#ask .actions` is
+    `flex: 0 0 auto`. A dialog that grows with its content pushes Approve past the
+    bottom of a fixed overlay, where nothing can scroll it back.
+
 ## Known limitations
 
 - No chat history browser. Chainlit's thread history needs a data layer; today

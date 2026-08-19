@@ -210,14 +210,19 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
    dialog has to hide itself explicitly — without this it sits over the page
    from the moment it loads, with no question in it. */
 #ask[hidden] { display: none; }
+/* A column with a capped height: an agent's command can be a hundred lines of
+   heredoc, and a dialog that grows with it pushes Approve off the screen. The
+   command scrolls; the buttons never leave. */
 #ask .dialog { background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px; padding: 18px 20px; width: min(680px, 92vw);
-  box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+  box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; max-height: 86vh; }
 #ask h3 { margin: 0 0 6px; font-size: 15px; }
 #ask .cmd { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg);
   border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px;
-  font-family: ui-monospace, monospace; font-size: 12.5px; margin: 8px 0; }
-#ask .actions { display: flex; gap: 8px; margin-top: 12px; }
+  font-family: ui-monospace, monospace; font-size: 12.5px; margin: 8px 0;
+  overflow-y: auto; flex: 1 1 auto; min-height: 4em; }
+#ask .actions { display: flex; gap: 8px; margin-top: 12px; flex: 0 0 auto; }
 #ask .actions button { flex: 0 0 auto; }
 #toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -523,6 +528,10 @@ function nodesWithFindings() {
 /* ----------------------------------------------------------------- render */
 
 function render() {
+  // `load()`, `loadState()` and `pollRun()` all start at boot without waiting
+  // for each other, so the first run snapshot can land before the plan does.
+  // Throwing here used to take `renderAsk` and the poll loop down with it.
+  if (!plan) return;
   const bad = nodesWithFindings();
   const positions = {};
   for (const node of plan.nodes) positions[node.id] = position(node);
@@ -1425,8 +1434,12 @@ async function pollRun() {
   } catch (err) {
     // A dropped connection is not a dead run: keep polling.
   }
-  if (snapshot) applyRun(snapshot);
-  if (runActive()) startPolling();
+  try {
+    if (snapshot) applyRun(snapshot);
+  } finally {
+    // An exception while drawing is a page bug, not a finished run: keep asking.
+    if (runActive()) startPolling();
+  }
 }
 
 function startPolling() {
@@ -1449,6 +1462,9 @@ function applyRun(snapshot) {
   if ((snapshot.events || []).length || JSON.stringify(runNodes) !== before) loadState();
   renderRun();
   renderState();
+  // The question comes first: the run is stopped until it is answered, so a
+  // failure anywhere in the drawing below must not be able to swallow it.
+  renderAsk(snapshot.prompt);
   // Re-drawing on every poll would fight a drag in progress, so the picture is
   // rebuilt only when a node actually changed colour.
   if (JSON.stringify(runNodes) !== before) render();
@@ -1458,7 +1474,6 @@ function applyRun(snapshot) {
       : `Run ${snapshot.status}: ${(snapshot.error || "").split("\n")[0]}`,
       snapshot.status !== "done");
   }
-  renderAsk(snapshot.prompt);
 }
 
 function appendRunEvents(events) {
