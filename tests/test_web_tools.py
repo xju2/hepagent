@@ -28,6 +28,7 @@ class FakeBridge:
         self.results: list[tuple[str, dict[str, Any]]] = []
         self.approval_requests: list[tuple[str, str, str]] = []
         self.questions: list[tuple[str, str]] = []
+        self.opened: list[tuple[str, str]] = []
 
     async def on_command_proposed(self, cmd: str, cwd: str, thought: str) -> None:
         self.proposed.append((cmd, cwd, thought))
@@ -42,6 +43,9 @@ class FakeBridge:
     async def ask_user(self, prompt: str, thought: str) -> str:
         self.questions.append((prompt, thought))
         return self.answer
+
+    async def open_plan(self, name: str, url: str) -> None:
+        self.opened.append((name, url))
 
 
 def _wrapper(mode: str = "confirm", **bridge_kwargs: Any) -> tuple[WebToolWrapper, FakeBridge]:
@@ -153,7 +157,7 @@ def test_wrap_tools_offloads_known_blocking_tools():
 
     assert wait_for_slurm_job_completion.name in LONG_BLOCKING_TOOL_NAMES
     wrapper, _ = _wrapper()
-    (wrapped,) = wrapper.wrap_tools([wait_for_slurm_job_completion])
+    wrapped = wrapper.wrap_tools([wait_for_slurm_job_completion])[0]
 
     assert wrapped is not wait_for_slurm_job_completion
     assert wrapped.name == wait_for_slurm_job_completion.name
@@ -201,3 +205,100 @@ async def test_ask_user_tool_delegates_to_the_bridge():
 
     assert answer == "/pscratch/work"
     assert bridge.questions == [("Where?", "need a path")]
+
+
+# ------------------------------------------------------- creating an analysis
+
+
+class _Proposal:
+    """What `propose_plan` returns, reduced to what the tool reads."""
+
+    def __init__(self, plan, accepted=True, rationale="per-channel fan-out"):
+        self.plan = plan
+        self.accepted = accepted
+        self.rationale = rationale
+
+
+@pytest.fixture
+def analyses_dir(tmp_path, monkeypatch):
+    """Point the tool's analyses directory at a temporary one."""
+    base = tmp_path / "analyses"
+    base.mkdir()
+    monkeypatch.setenv("HEPAGENT_ANALYSES_DIR", str(base))
+    return base
+
+
+@pytest.fixture
+def stub_architect(monkeypatch, jfc_plan):
+    """Replace the architect with something that does not call a model."""
+    calls: list[dict[str, Any]] = []
+
+    async def propose_plan(**kwargs):
+        calls.append(kwargs)
+        return _Proposal(jfc_plan)
+
+    monkeypatch.setattr("hepagent.agents.jfc.architect.propose_plan", propose_plan)
+    return calls
+
+
+async def test_create_analysis_scaffolds_and_hands_over_the_plan(analyses_dir, stub_architect):
+    """The whole point of the chat half: end on a page the user can shape."""
+    wrapper, bridge = _wrapper()
+
+    message = await wrapper.create_analysis(
+        name="zbb", physics_prompt="Measure the Z->bb cross section.", analysis_type="measurement"
+    )
+
+    assert (analyses_dir / "zbb" / "plan.json").is_file()
+    assert (
+        (analyses_dir / "zbb" / "prompt.md")
+        .read_text(encoding="utf-8")
+        .endswith("Measure the Z->bb cross section.\n")
+    )
+    assert bridge.opened and bridge.opened[0][0] == "zbb"
+    assert "/plan/zbb" in bridge.opened[0][1]
+    assert "Approve & run" in message
+
+
+async def test_create_analysis_asks_the_architect_with_the_physics_prompt(
+    analyses_dir, stub_architect
+):
+    wrapper, _ = _wrapper()
+    await wrapper.create_analysis(
+        name="zbb", physics_prompt="Search for X->4l.", analysis_type="search"
+    )
+
+    assert stub_architect[0]["physics_prompt"] == "Search for X->4l."
+    assert stub_architect[0]["analysis_type"] == "search"
+
+
+async def test_create_analysis_refuses_a_name_that_escapes_the_directory(analyses_dir):
+    wrapper, bridge = _wrapper()
+    message = await wrapper.create_analysis(name="../etc", physics_prompt="p")
+
+    assert message.startswith("Error:")
+    assert bridge.opened == []
+
+
+async def test_create_analysis_refuses_to_overwrite_an_existing_analysis(
+    analyses_dir, stub_architect
+):
+    (analyses_dir / "zbb").mkdir()
+    wrapper, _ = _wrapper()
+
+    assert (await wrapper.create_analysis(name="zbb", physics_prompt="p")).startswith("Error:")
+
+
+async def test_create_analysis_refuses_an_unknown_analysis_type(analyses_dir):
+    wrapper, _ = _wrapper()
+    message = await wrapper.create_analysis(name="zbb", physics_prompt="p", analysis_type="vibes")
+
+    assert message.startswith("Error:")
+
+
+def test_the_chat_agent_is_given_the_tool():
+    """It is appended rather than swapped: no terminal tool corresponds to it."""
+    wrapper, _ = _wrapper()
+    names = [getattr(tool, "name", "") for tool in wrapper.wrap_tools([])]
+
+    assert names == ["create_analysis"]

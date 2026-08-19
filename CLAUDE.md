@@ -41,7 +41,7 @@ uv run hepagent web            # browser UI; needs the optional `web` extra
 
 **CLI REPL** (`agents/cli_repl.py`): A prompt_toolkit REPL used by `hepagent repl`. Supports slash commands (`/agent`, `/model`, `/mode`, `/platforms`, etc.) and streaming output.
 
-**Web UI** (`web/`): A Chainlit browser chat used by `hepagent web`, behind the optional `web` extra. Only `web/app.py` imports Chainlit; `web/bridge.py`, `web/tools.py`, `web/turn.py` and `web/session.py` are transport-agnostic and unit-tested without it. `web/turn.py` ports the REPL's streaming loop (reusing its recovery helpers); `web/tools.py` swaps the terminal-bound tools for browser-driven ones and offloads blocking tools to threads. See `docs/WEB.md` for invariants — read it before changing web behavior.
+**Web UI** (`web/`): A Chainlit browser chat used by `hepagent web`, behind the optional `web` extra. Chat and plan editor are one workflow: the chat's `create_analysis` tool (browser-only, appended by `WebToolWrapper`) turns a conversation into a scaffolded analysis and opens `/plan/<name>`, where the user shapes the graph and presses **Approve & run**. The run is supervised on that page — node status, progress log, and a dialog for every question the agents ask. Only `web/app.py` imports Chainlit; `web/bridge.py`, `web/tools.py`, `web/turn.py` and `web/session.py` are transport-agnostic and unit-tested without it. `web/turn.py` ports the REPL's streaming loop (reusing its recovery helpers); `web/tools.py` swaps the terminal-bound tools for browser-driven ones and offloads blocking tools to threads. See `docs/WEB.md` for invariants — read it before changing web behavior.
 
 ### Skill registry (`.agents/`)
 
@@ -49,13 +49,29 @@ Skills are stored in `.agents/skills/<skill_name>/` with a `SKILL.md` (YAML fron
 
 ### Model providers
 
-`src/hepagent/model_providers.py` provides a unified OpenAI-compatible interface to multiple providers (`cborg`, `openai`, `amsc`, `gemini`). Provider configuration lives in `src/hepagent/config/providers.toml` and is copied to `$HOME/.hepagent/config/` on first run. Model specs follow the `provider:model` format; the default provider is `cborg`.
+`src/hepagent/model_providers.py` provides a unified OpenAI-compatible interface to multiple providers (`cborg`, `openai`, `amsc`, `gemini`). Provider configuration lives in `src/hepagent/config/providers.toml` and is copied to `$HOME/.hepagent/config/` on first run, alongside `env_vars.toml` and `mcp.toml`. Model specs follow the `provider:model` format; the default provider is `cborg`. OpenAI Agents SDK tracing is disabled at package import (`hepagent/__init__.py` → `helpers.configure_openai_tracing`); set `HEPAGENT_OPENAI_TRACING=1` to opt in.
 
 ### Analysis plan (`src/hepagent/plan/`)
 
-The structure of a JFC analysis is an authored document, not hardcoded: `<analysis_root>/plan.json` lists work nodes (working directory, primary artifact, executor prompt, reviewer set, gates, graph write-back contract) and the dependency edges between them. The seven-phase JFC layout is the built-in default *template*, not the shape of the runtime — a plan can fan out per channel, insert sub-analyses, or drop nodes entirely.
+The structure of a JFC analysis is an authored document, not hardcoded: `<analysis_root>/plan.json` lists work nodes (working directory, primary artifact, executor prompt, reviewer set, gates, capabilities, graph write-back contract) and the dependency edges between them. The seven-phase JFC layout is the built-in default *template*, not the shape of the runtime — a plan can fan out per channel, insert sub-analyses, or drop nodes entirely.
 
-`plan/` is domain-agnostic (schema, store, validate, compile, layout, templates, edits, plus a stdlib-only `service.py`); `agents/jfc/architect.py` proposes structural edits to a template from the physics prompt; `web/plan_api.py` + `web/static/plan.html` serve the browser editor at `/plan/{name}`, which blocks the run until a human approves.
+A browser-launched run lives in `plan/runs.py` (stdlib-only: a run on a worker thread, as polled events plus the questions it is blocked on) and is started by `agents/jfc/launch.py`. The three call sites that block on a human — the bash confirmation tool, `ask_user_for_info`, the JFC human gate — reach the page through `hepagent/interaction.py`, a backend bound to the run's thread; with none bound, every CLI path behaves exactly as before.
+
+`plan/` is domain-agnostic (schema, store, validate, compile, layout, templates, edits, runs, plus a stdlib-only `service.py`); `agents/jfc/architect.py` proposes structural edits to a template from the physics prompt; `web/plan_api.py` + `web/static/plan.html` serve the browser editor at `/plan/{name}`, which blocks the run until a human approves.
+
+A plan may also **branch and loop**: a `kind: "condition"` node evaluates a metric- or language-based test and routes along an `on_true`/`on_false` edge. A branch pointing at a node that already ran is a *back* branch — it rewinds and re-runs, and it is never compiled into the graph, because a `requires` edge closing a cycle would deadlock the planner rather than loop. Every loop carries a finite `max_iterations`, so P4's rule is now "a cycle must be bounded" rather than "no cycles".
+
+The strategy step also produces a **process inventory** — `processes.json` in
+its outputs directory, recorded by `record_process_inventory`: the signal, every
+background classified as irreducible, reducible or instrumental, and the
+dataset(s) carrying each (from the physics prompt today, from a catalogue MCP
+server later). `agents/jfc/processes.py` defines and validates it, the graph
+builder ingests it into `process`/`dataset` nodes, every downstream executor is
+handed it, and the plan page's bottom dock renders it as the analysis's progress
+panel. Which node owns it is read off the write-back contract, never off a node
+id — see `docs/PLAN.md`.
+
+A node also declares its **capabilities**: `tools` (a function-tool allowlist, `None` = the executor's default set), `skills` (loaded into its prompt up front) and `mcp_servers` (recorded and validated against `config/mcp.toml`, but nothing attaches an MCP server at run time yet). `agents/jfc/capabilities.plan_vocabulary()` is the single place these catalogs — plus the reviewer registry — are assembled; the editor's dropdowns and `validate_plan`'s P6 check read the same lists.
 
 Everything the runtime needs comes from the node — there is deliberately no phase→directory, phase→reviewer or phase→contract table anywhere. **Plan edges are data-flow (`upstream`/`downstream`); graph `requires` edges are dependency-order (`src` is the dependent). `plan/compile.py` is the only place that inversion happens.** Inspect with `hepagent jfc plan show|validate|propose|edit|migrate` and `hepagent jfc templates`. See `docs/PLAN.md` for invariants — read it before changing plan behavior.
 
@@ -82,8 +98,9 @@ Common domain-agnostic tools: `src/hepagent/tools/common.py`. Nyx-specific tools
 - If a domain skill is relevant, call `load_skill_details(<skill>)` before proceeding.
 - Before changing web UI behavior, read `docs/WEB.md` and preserve its invariants.
 - Before changing analysis-graph behavior, read `docs/GRAPH.md` and preserve its invariants (ingestion must stay idempotent; graph work must never raise into the orchestrator).
-- Before changing analysis-plan behavior, read `docs/PLAN.md` and preserve its invariants (never reintroduce a phase→something table; `plan/compile.py` is the only place plan edges invert into graph edges).
+- Before changing analysis-plan behavior, read `docs/PLAN.md` and preserve its invariants (never reintroduce a phase→something table; `plan/compile.py` is the only place plan edges invert into graph edges; a cycle is legal only through a bounded condition node, and back branches never compile).
 - When a task fails or the user corrects the agent, record it with `update_logbook`.
 - For long HPC runs, use `wait_for_slurm_job_completion(job_id)` instead of polling manually.
 - If a task is described in a markdown file (e.g. `tasks/*.md`), follow the instructions there exactly and update the `## Progress report` section with progress and next steps.
 - When finishing a task with critical lessons learned, update relevant files in `docs/`, `README.md`, and `AGENTS.md`.
+- Commit your changes after a task is complete.

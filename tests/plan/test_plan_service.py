@@ -9,6 +9,7 @@ from plan_factory import make_node, make_plan
 
 from hepagent.plan import service, store
 from hepagent.plan.schema import PlanEdge
+from hepagent.plan.validate import PlanVocabulary
 
 
 @pytest.fixture
@@ -64,7 +65,27 @@ def test_reviewer_names_are_checked_when_a_registry_is_supplied(tmp_path, gate):
     plan = make_plan(node_ids=("a",), edges=(), nodes=(make_node("a", reviewers=("nope",)),))
     store.save_plan(tmp_path, plan)
     assert not service.get_plan_view(tmp_path, gate=gate).blocking
-    assert service.get_plan_view(tmp_path, known_reviewers={"critical"}, gate=gate).blocking
+    vocabulary = PlanVocabulary(reviewers={"critical"})
+    assert service.get_plan_view(tmp_path, vocabulary=vocabulary, gate=gate).blocking
+
+
+def test_the_view_carries_the_catalog_the_editor_offers(tmp_path, gate, fan_plan):
+    store.save_plan(tmp_path, fan_plan)
+    vocabulary = PlanVocabulary(
+        reviewers={"critical", "physics"}, skills=["nyx"], tools=[], platforms=["openai", "cborg"]
+    )
+    view = service.get_plan_view(tmp_path, vocabulary=vocabulary, gate=gate)
+    assert view.catalog["reviewers"] == ["critical", "physics"]
+    assert view.catalog["skills"] == ["nyx"]
+    assert view.catalog["platforms"] == ["cborg", "openai"]
+    # An empty catalog and an unknown one are different answers: `tools` is
+    # known to be empty, `mcp_servers` was never supplied.
+    assert view.catalog["tools"] == []
+    assert "mcp_servers" not in view.catalog
+
+
+def test_the_catalog_is_empty_when_no_vocabulary_is_supplied(analysis, gate):
+    assert service.get_plan_view(analysis, gate=gate).catalog == {}
 
 
 # -------------------------------------------------------------------- saving
@@ -93,6 +114,38 @@ def test_saving_a_malformed_payload_raises_rather_than_writing(analysis, gate):
     with pytest.raises(store.PlanFormatError):
         service.put_plan(analysis, {"nodes": []}, gate=gate)
     assert store.load_plan(analysis) == before
+
+
+# -------------------------------------------------------------- auto-layout
+
+
+def test_an_unsaved_plan_can_be_laid_out_without_touching_disk(analysis, gate):
+    """The editor's Auto-layout button acts on what is on screen.
+
+    A node added in the browser is in no saved layout, so laying the document
+    out has to happen before it is saved — and must not save it as a side
+    effect, or the button would silently commit the user's other edits.
+    """
+    payload = store.load_plan(analysis).to_dict()
+    payload["nodes"].append(make_node("extra").to_dict())
+    payload["edges"].append(PlanEdge(upstream="merge", downstream="extra").to_dict())
+
+    grid = service.preview_layout(payload)
+
+    assert grid["extra"] == [3, 0]  # one column past `merge`
+    assert store.load_plan(analysis).node("extra") is None
+    assert store.load_plan(analysis).revision == 1
+
+
+def test_the_layout_preview_matches_the_one_in_the_view(analysis, gate):
+    """Two ways to ask must not drift; both go through `plan/layout.py`."""
+    view = service.get_plan_view(analysis, gate=gate)
+    assert service.preview_layout(view.plan) == view.layout
+
+
+def test_laying_out_a_malformed_payload_raises(analysis):
+    with pytest.raises(store.PlanFormatError):
+        service.preview_layout({"nodes": "not a list"})
 
 
 # ------------------------------------------------------------------ approval

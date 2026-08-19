@@ -65,15 +65,23 @@ def phase_readiness(
     graph: AnalysisGraph,
     completed: Collection[str],
     plan: AnalysisPlan | None = None,
+    skipped: Collection[str] = (),
 ) -> list[PhaseReadiness]:
-    """Report, for every node in the graph, whether it can run now."""
+    """Report, for every node in the graph, whether it can run now.
+
+    A prerequisite counts as satisfied when it is complete **or** skipped. A
+    condition node routes down one branch and skips the other, so a node that
+    re-joins after the fork would otherwise wait forever on work that was
+    deliberately not done.
+    """
     done = {str(p) for p in completed}
+    settled = done | {str(p) for p in skipped}
     dependencies = phase_dependencies(graph)
     rank = _ranker(plan)
 
     readiness: list[PhaseReadiness] = []
     for phase in sorted(dependencies, key=rank):
-        blocked = [p for p in dependencies[phase] if p not in done]
+        blocked = [p for p in dependencies[phase] if p not in settled]
         readiness.append(
             PhaseReadiness(
                 phase=phase,
@@ -89,9 +97,18 @@ def ready_phases(
     graph: AnalysisGraph,
     completed: Collection[str],
     plan: AnalysisPlan | None = None,
+    skipped: Collection[str] = (),
 ) -> list[str]:
-    """Nodes whose prerequisites are all met and which have not passed yet."""
-    return [r.phase for r in phase_readiness(graph, completed, plan) if r.ready and not r.complete]
+    """Nodes whose prerequisites are all met and which have not passed yet.
+
+    A skipped node is never ready: the analysis decided not to run it.
+    """
+    passed_over = {str(p) for p in skipped}
+    return [
+        r.phase
+        for r in phase_readiness(graph, completed, plan, skipped)
+        if r.ready and not r.complete and r.phase not in passed_over
+    ]
 
 
 def next_phase(
@@ -99,6 +116,7 @@ def next_phase(
     completed: Collection[str],
     skip: Iterable[str] = (),
     plan: AnalysisPlan | None = None,
+    skipped: Collection[str] = (),
 ) -> str | None:
     """Return the next node to expand, or None when nothing is runnable.
 
@@ -111,12 +129,15 @@ def next_phase(
         skip: Node ids to exclude — used to avoid re-offering a node that just
             ran without completing.
         plan: The analysis plan, for tiebreaks and the fallback order.
+        skipped: Node ids a condition routed past. Unlike `skip` this is
+            durable: it satisfies downstream prerequisites and survives into the
+            next run, because the branch was decided, not deferred.
     """
     done = {str(p) for p in completed}
-    excluded = {str(p) for p in skip}
+    excluded = {str(p) for p in skip} | {str(p) for p in skipped}
     rank = _ranker(plan)
 
-    candidates = [p for p in ready_phases(graph, done, plan) if p not in excluded]
+    candidates = [p for p in ready_phases(graph, done, plan, skipped) if p not in excluded]
     if not candidates:
         if phase_dependencies(graph):
             return None  # the graph knows about nodes; none are runnable

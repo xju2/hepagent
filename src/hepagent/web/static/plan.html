@@ -9,14 +9,14 @@
   --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2024; --muted: #6b7280;
   --line: #d6dae0; --node: #ffffff; --node-line: #b8bfc8; --accent: #2563eb;
   --ok: #15803d; --warn: #b45309; --err: #b91c1c; --err-bg: #fef2f2;
-  --warn-bg: #fffbeb; --informs: #9ca3af; --sel: #2563eb;
+  --warn-bg: #fffbeb; --informs: #9ca3af; --sel: #2563eb; --branch: #7c3aed;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171a; --panel: #1c2024; --ink: #e6e8ea; --muted: #9aa3ad;
     --line: #333a42; --node: #232830; --node-line: #444c56; --accent: #60a5fa;
     --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --err-bg: #2a1a1a;
-    --warn-bg: #2a2416; --informs: #6b7280; --sel: #60a5fa;
+    --warn-bg: #2a2416; --informs: #6b7280; --sel: #60a5fa; --branch: #a78bfa;
   }
 }
 * { box-sizing: border-box; }
@@ -42,8 +42,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { color: var(--err); }
 button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 main { flex: 1; display: flex; min-height: 0; }
-#canvas-wrap { flex: 1; overflow: auto; position: relative; }
-svg { display: block; }
+#canvas-wrap { flex: 1; overflow: auto; position: relative; touch-action: none; }
+#canvas-wrap.panning { cursor: grabbing; user-select: none; }
+/* The drawing is sized in pixels, but the element fills the pane so there is
+   always empty canvas to grab for panning. No viewBox: nothing is scaled. */
+svg { display: block; min-width: 100%; min-height: 100%; }
 .node rect {
   fill: var(--node); stroke: var(--node-line); stroke-width: 1.5; rx: 8;
 }
@@ -53,16 +56,36 @@ svg { display: block; }
 .node text { fill: var(--ink); font-size: 13px; font-weight: 600; }
 .node text.sub { fill: var(--muted); font-size: 11px; font-weight: 400; }
 .node text.badge { fill: var(--warn); font-size: 11px; font-weight: 600; }
-.node { cursor: grab; }
+.node { cursor: grab; touch-action: none; }
 .node.dragging { cursor: grabbing; }
+.node.dragging rect { stroke: var(--sel); }
+/* A condition routes rather than produces, so it is drawn as a diamond — the
+   shape a reader already associates with a branch. */
+.node.condition polygon {
+  fill: var(--node); stroke: var(--branch); stroke-width: 1.8;
+}
+.node.condition.selected polygon { stroke: var(--sel); stroke-width: 2.8; }
+.node.condition.invalid polygon { stroke: var(--err); }
+.node.condition.dragging polygon { stroke: var(--sel); }
 path.edge { fill: none; stroke: var(--node-line); stroke-width: 1.6; }
 path.edge.informs { stroke: var(--informs); stroke-dasharray: 5 4; }
+path.edge.branch { stroke: var(--branch); }
+/* The loop back-edge is the one thing in the picture that runs against the
+   flow, so it is dashed as well as coloured. */
+path.edge.loop { stroke: var(--branch); stroke-dasharray: 7 4; }
 path.edge.selected { stroke: var(--sel); stroke-width: 3; }
+text.edge-label { fill: var(--branch); font-size: 11px; font-weight: 600; }
 path.edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
 #side {
   width: 380px; flex: 0 0 380px; background: var(--panel); overflow-y: auto;
   border-left: 1px solid var(--line); padding: 14px 16px;
 }
+/* The three things you do to a selected node — run it, delete it, save the
+   edit — sit at the top of the panel rather than at the bottom of a long form,
+   because a node's prompt is a screenful and a button below it is a button
+   nobody finds. */
+.actions-row { display: flex; gap: 6px; margin: 0 0 12px; }
+.actions-row button { flex: 1; padding: 5px 6px; }
 #side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--muted); margin: 0 0 10px; }
 label { display: block; margin: 10px 0 3px; font-size: 12px; color: var(--muted); }
@@ -78,6 +101,16 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
 .checks label { display: flex; align-items: center; gap: 5px; margin: 0;
   color: var(--ink); font-size: 13px; }
 .checks input { width: auto; }
+/* Chosen names sit above the dropdown that adds to them: a list that grows to
+   twenty function tools is unreadable as a checkbox grid. */
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 4px; }
+.tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px;
+  border-radius: 99px; border: 1px solid var(--line); background: var(--bg);
+  font-size: 12px; }
+.tag.empty { color: var(--muted); font-style: italic; padding-right: 8px; }
+.tag button { border: 0; background: none; color: var(--muted); padding: 0 3px;
+  font-size: 14px; line-height: 1; border-radius: 99px; }
+.tag button:hover { color: var(--err); }
 #findings { flex: 0 0 auto; max-height: 26vh; overflow-y: auto;
   border-top: 1px solid var(--line); background: var(--panel); }
 #findings .f { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -86,10 +119,106 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
 #findings .f code { font-family: ui-monospace, monospace; font-size: 12px; }
 #findings .clean { padding: 6px 16px; color: var(--ok); font-size: 13px; }
 .hint { color: var(--muted); font-size: 12px; margin: 8px 0; }
+.prompt {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px;
+  line-height: 1.5; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px; margin-top: 8px;
+}
 .pill { display: inline-block; padding: 1px 7px; border-radius: 99px;
   border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .pill.dirty { color: var(--warn); border-color: var(--warn); }
 .pill.approved { color: var(--ok); border-color: var(--ok); }
+/* A run in progress paints itself onto the plan the user already knows how to
+   read, rather than into a second picture beside it. */
+.node.run-running rect, .node.run-running polygon { stroke: var(--accent); stroke-width: 3; }
+.node.run-done rect, .node.run-done polygon { stroke: var(--ok); stroke-width: 2.5; }
+.node.run-blocked rect, .node.run-blocked polygon { stroke: var(--warn); stroke-width: 3; }
+/* The bottom dock is where the analysis reports on itself: what it has
+   established (Progress) and what it is doing right now (Run log). It is always
+   present, because "nothing established yet" is a state a physicist needs to
+   see, and it survives a reload because both tabs are re-fetched, not kept. */
+#dock { flex: 0 0 auto; background: var(--panel); border-top: 1px solid var(--line);
+  --dock-h: 26vh; }
+/* The grip is the whole top edge of the dock. It is thin, so it gets a generous
+   hit area and a cursor that says what it does before the pointer goes down. */
+#dock-grip { height: 7px; margin-top: -4px; cursor: ns-resize; touch-action: none; }
+#dock-grip:hover, #dock.resizing #dock-grip { background: var(--accent); opacity: .55; }
+#dock.resizing { user-select: none; }
+#dock .head { display: flex; align-items: center; gap: 8px; padding: 6px 16px;
+  border-bottom: 1px solid var(--line); }
+#dock .head .spacer { flex: 1; }
+#dock .head label { display: flex; align-items: center; gap: 5px; margin: 0;
+  color: var(--muted); font-size: 12px; }
+#dock .head input { width: auto; }
+#run { display: flex; align-items: center; gap: 10px; }
+button.tab { border-color: transparent; background: none; color: var(--muted);
+  padding: 3px 10px; }
+button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--line); }
+.dock-body { height: var(--dock-h); overflow-y: auto; padding: 4px 0; }
+#run-log .e { padding: 2px 16px; font-size: 12.5px; display: flex; gap: 8px; }
+#run-log .e code { color: var(--muted); font-family: ui-monospace, monospace;
+  font-size: 11.5px; flex: 0 0 130px; overflow: hidden; text-overflow: ellipsis; }
+#run-log .e.warning { color: var(--warn); }
+#run-log .e.error { color: var(--err); }
+/* Progress: the plan's steps as a strip, then the physics the analysis has
+   settled on. Each later phase adds a block here; the strategy adds the first. */
+#progress { padding: 8px 16px 12px; }
+#progress .steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+#progress .step { display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px;
+  font-size: 12px; color: var(--muted); }
+#progress .step .dot { width: 7px; height: 7px; border-radius: 99px;
+  background: var(--node-line); }
+#progress .step.produced { color: var(--ink); }
+#progress .step.produced .dot { background: var(--ok); }
+#progress .step.running { color: var(--accent); border-color: var(--accent); }
+#progress .step.running .dot { background: var(--accent); }
+#progress .step.blocked { color: var(--warn); border-color: var(--warn); }
+#progress .step.blocked .dot { background: var(--warn); }
+#progress h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); margin: 12px 0 6px; font-weight: 600; }
+#progress h3 .meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.groups { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.group { flex: 1 1 220px; min-width: 210px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); }
+.group > .t { padding: 5px 10px; border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+.group > .t .n { color: var(--muted); font-weight: 400; }
+.group.signal > .t { color: var(--accent); }
+.group.irreducible > .t { color: var(--err); }
+.group.reducible > .t { color: var(--warn); }
+.group.instrumental > .t { color: var(--branch); }
+.group .empty { padding: 6px 10px; color: var(--muted); font-size: 12px;
+  font-style: italic; }
+.proc { padding: 6px 10px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.group .proc:first-of-type { border-top: 0; }
+.proc .n { font-weight: 600; }
+.proc .imp { font-size: 11px; color: var(--muted); }
+.proc .ds { color: var(--muted); font-size: 11.5px; font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere; }
+.proc .est { color: var(--muted); font-size: 11.5px; }
+.proc .ds .src { font-family: inherit; font-style: italic; }
+.pill.run { color: var(--accent); border-color: var(--accent); }
+.pill.blocked { color: var(--warn); border-color: var(--warn); }
+.pill.failed { color: var(--err); border-color: var(--err); }
+/* The run asks its questions here. It is modal on purpose: the analysis is
+   stopped until it is answered, and a question that can be scrolled past is a
+   run that looks hung. */
+#ask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
+  align-items: center; justify-content: center; z-index: 10; }
+/* An id selector beats the user agent's `[hidden] { display: none }`, so the
+   dialog has to hide itself explicitly — without this it sits over the page
+   from the moment it loads, with no question in it. */
+#ask[hidden] { display: none; }
+#ask .dialog { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 18px 20px; width: min(680px, 92vw);
+  box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+#ask h3 { margin: 0 0 6px; font-size: 15px; }
+#ask .cmd { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px;
+  font-family: ui-monospace, monospace; font-size: 12.5px; margin: 8px 0; }
+#ask .actions { display: flex; gap: 8px; margin-top: 12px; }
+#ask .actions button { flex: 0 0 auto; }
 #toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -105,7 +234,9 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
   <span class="meta" id="subtitle"></span>
   <span class="pill" id="state">loading</span>
   <span class="spacer"></span>
+  <button id="show-prompt">Prompt</button>
   <button id="add-node">+ Node</button>
+  <button id="add-condition">+ Condition</button>
   <button id="connect">Connect</button>
   <button id="relayout">Auto-layout</button>
   <button id="save">Save</button>
@@ -113,11 +244,39 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
 </header>
 <main>
   <div id="canvas-wrap"><svg id="canvas"></svg></div>
-  <aside id="side"><h2>Nothing selected</h2>
-    <p class="hint">Click a node or an edge to edit it. Drag a node to move it.</p>
+  <aside id="side"><h2>Analysis prompt</h2>
+    <p class="hint">Loading…</p>
   </aside>
 </main>
 <div id="findings"></div>
+<div id="dock">
+  <div id="dock-grip" title="Drag to resize · double-click to reset"></div>
+  <div class="head">
+    <button id="tab-progress" class="tab on">Progress</button>
+    <button id="tab-log" class="tab">Run log</button>
+    <span class="spacer"></span>
+    <span id="run" hidden>
+      <span class="pill" id="run-state">idle</span>
+      <span class="meta" id="run-detail"></span>
+      <label title="Skip the approval dialog for every shell command this run issues">
+        <input type="checkbox" id="run-unattended"> auto-approve commands
+      </label>
+      <button id="cancel-run" class="danger">Stop</button>
+    </span>
+  </div>
+  <div id="progress" class="dock-body"></div>
+  <div id="run-log" class="dock-body" hidden></div>
+</div>
+<div id="ask" hidden>
+  <div class="dialog">
+    <h3 id="ask-title">The analysis needs you</h3>
+    <div id="ask-text"></div>
+    <div class="cmd" id="ask-cmd" hidden></div>
+    <p class="hint" id="ask-thought"></p>
+    <input type="text" id="ask-input" placeholder="Your answer">
+    <div class="actions" id="ask-actions"></div>
+  </div>
+</div>
 <div id="toast"></div>
 <script>
 "use strict";
@@ -125,17 +284,55 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
 const NAME = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
 const API = `/api/plan/${encodeURIComponent(NAME)}`;
 const NW = 210, NH = 62, COL = 300, ROW = 92, PAD = 40;
-const KINDS = ["requires", "informs"];
+const POLL_MS = 1500;      // how often a running analysis is asked for progress
+const SNAP = 10;           // drag granularity, so hand-placed nodes still align
+const GAP = 16;            // clearance a new node keeps from the existing ones
+const KINDS = ["requires", "informs", "on_true", "on_false"];
+const NODE_KINDS = ["work", "gate", "condition"];
+// Only used when the server sends no reviewer catalog, e.g. a view built
+// without a vocabulary. Every other catalog falls back to the plan's own names.
+const DEFAULT_REVIEWERS =
+  ["physics", "critical", "constructive", "plot", "bibtex", "rendering"];
+const BRANCH_KINDS = ["on_true", "on_false"];
 const INJECTS = ["full", "summary", "none"];
 const GATES = ["commitments", "human", "codesign"];
-const NODE_TYPES = ["commitment", "dataset", "method", "evidence", "figure", "artifact"];
+const COMPARISONS = ["above", "below", "improvement_above", "improvement_below"];
+const EXHAUSTION = ["true", "false", "escalate"];
+const NODE_TYPES =
+  ["commitment", "process", "dataset", "method", "evidence", "figure", "artifact"];
 const EDGE_TYPES = ["derives_from", "supports", "resolves", "downscopes", "commits_to", "requires"];
 
 let plan = null, layout = {}, findings = [], blocking = false, approved = false;
-let reviewers = [];
+let catalog = {};          // what this installation can build: see PlanView.catalog
 let sel = null;            // {type:"node"|"edge", id} | null
 let dirty = false;
 let connecting = null;     // null | "arm" | {from: id}
+let panned = false;        // a canvas drag just panned, so its click is not a deselect
+// The Run/Save buttons of the selected node's panel. Held here because
+// `markDirty` has to enable Save without rebuilding the form under the cursor.
+let nodeButtons = null;
+
+// The run this page is watching. `runSeq` is the last event sequence number
+// seen, so a poll asks for what it missed rather than the whole log, and a
+// reloaded page re-attaches to a run already in flight instead of losing it.
+let run = null;            // the last snapshot from GET .../run
+let runSeq = 0;
+// What the analysis has established, from GET .../state. Read from the analysis
+// directory rather than from the run, so it is right for a plan that has never
+// been run and for one whose run finished in a different process.
+let state = null;
+let tab = "progress";
+let runNodes = {};         // {node_id: "running"|"done"|"blocked"}
+let pollTimer = null;
+let answering = false;     // an answer is in flight; do not double-send
+let shownPrompt = null;    // the prompt id the dialog is currently showing
+const answered = new Set();
+
+// What is currently on the canvas. A drag updates these elements in place: a
+// full render() would destroy the group holding the pointer capture, which is
+// what used to make dragging stutter and drop.
+const drawn = { nodes: new Map(), edges: [] };
+let canvasSize = { width: 0, height: 0 };
 
 const $ = (id) => document.getElementById(id);
 const svg = $("canvas");
@@ -153,6 +350,52 @@ function toast(message, isError) {
 
 function nodeById(id) { return plan.nodes.find((n) => n.id === id); }
 
+/* The names a dropdown may offer. The server sends what this installation can
+   actually build; where it sends nothing, the names the plan already uses are
+   the only honest answer — a list invented here would let the editor write a
+   plan the validator then refuses. */
+function catalogNames(key, fromNode, builtin) {
+  if (Array.isArray(catalog[key])) return catalog[key];
+  const known = new Set(builtin || []);
+  for (const node of plan.nodes) for (const name of fromNode(node) || []) known.add(name);
+  return [...known].sort();
+}
+
+function isBranch(edge) { return BRANCH_KINDS.includes(edge.kind); }
+
+/* Which branch edges loop backwards, by the same rule as
+   `AnalysisPlan.back_branch_keys`: a branch is a back branch exactly when
+   treating it as blocking would close a cycle. This draws the picture only —
+   the server's classification is the one that decides what runs. Duplicating it
+   here is the narrow exception to "the page owns pixels, the server owns
+   structure", because a loop the user cannot see is a loop they cannot fix. */
+function backBranches() {
+  const blocking = new Map(plan.nodes.map((n) => [n.id, []]));
+  for (const edge of plan.edges) {
+    if (edge.kind === "requires") (blocking.get(edge.downstream) || []).push(edge.upstream);
+  }
+  const dependsOn = (from, target) => {
+    const seen = new Set(); const frontier = [from];
+    while (frontier.length) {
+      for (const up of blocking.get(frontier.pop()) || []) {
+        if (up === target) return true;
+        if (!seen.has(up)) { seen.add(up); frontier.push(up); }
+      }
+    }
+    return false;
+  };
+  const back = new Set();
+  for (const edge of plan.edges) {
+    if (!isBranch(edge)) continue;
+    if (edge.upstream === edge.downstream || dependsOn(edge.upstream, edge.downstream)) {
+      back.add(edge);
+    } else if (blocking.has(edge.downstream)) {
+      blocking.get(edge.downstream).push(edge.upstream);
+    }
+  }
+  return back;
+}
+
 function position(node) {
   const meta = node.metadata || {};
   if (typeof meta.x === "number" && typeof meta.y === "number") return { x: meta.x, y: meta.y };
@@ -164,20 +407,111 @@ function setPosition(node, x, y) {
   node.metadata = Object.assign({}, node.metadata, { x: Math.round(x), y: Math.round(y) });
 }
 
+function snap(value) { return Math.round(value / SNAP) * SNAP; }
+
+function overlaps(a, b) {
+  return a.x < b.x + NW + GAP && b.x < a.x + NW + GAP
+      && a.y < b.y + NH + GAP && b.y < a.y + NH + GAP;
+}
+
+function freePosition() {
+  // The first grid cell no existing node occupies, in reading order. Scanning
+  // one row and one column past the current extent guarantees a hit, so a new
+  // node never lands on top of another — which is what made "+ Node" look like
+  // it had done nothing.
+  const taken = plan.nodes.map(position);
+  let columns = 1, rows = 1;
+  for (const p of taken) {
+    columns = Math.max(columns, Math.ceil((p.x - PAD) / COL) + 2);
+    rows = Math.max(rows, Math.ceil((p.y - PAD) / ROW) + 2);
+  }
+  const cells = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      cells.push({ x: PAD + column * COL, y: PAD + row * ROW });
+    }
+  }
+
+  // Cells already on screen come first, so a new node appears where the user is
+  // looking rather than off the far end of a wide plan.
+  const wrap = $("canvas-wrap");
+  const onScreen = (p) => Boolean(wrap.clientWidth && wrap.clientHeight)
+    && p.x >= wrap.scrollLeft && p.x + NW <= wrap.scrollLeft + wrap.clientWidth
+    && p.y >= wrap.scrollTop && p.y + NH <= wrap.scrollTop + wrap.clientHeight;
+
+  for (const spot of cells.filter(onScreen).concat(cells.filter((p) => !onScreen(p)))) {
+    if (!taken.some((p) => overlaps(spot, p))) return spot;
+  }
+  return { x: PAD, y: Math.max(PAD - ROW, ...taken.map((p) => p.y)) + ROW };
+}
+
+function canvasExtent() {
+  let maxX = 0, maxY = 0;
+  for (const node of plan.nodes) {
+    const p = position(node);
+    maxX = Math.max(maxX, p.x + NW); maxY = Math.max(maxY, p.y + NH);
+  }
+  return { width: maxX + PAD, height: maxY + PAD };
+}
+
+function resizeCanvas(width, height) {
+  canvasSize = { width, height };
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", height);
+}
+
+function svgPoint(ev) {
+  // The SVG carries no viewBox, so its box maps 1:1 to user units — and reading
+  // the box every time keeps a drag correct while the pane scrolls under it.
+  const box = svg.getBoundingClientRect();
+  return { x: ev.clientX - box.left, y: ev.clientY - box.top };
+}
+
+function scrollIntoView(p) {
+  const wrap = $("canvas-wrap");
+  const width = wrap.clientWidth, height = wrap.clientHeight;
+  if (!width || !height) return;
+  if (p.x - PAD < wrap.scrollLeft) wrap.scrollLeft = Math.max(0, p.x - PAD);
+  else if (p.x + NW + PAD > wrap.scrollLeft + width) wrap.scrollLeft = p.x + NW + PAD - width;
+  if (p.y - PAD < wrap.scrollTop) wrap.scrollTop = Math.max(0, p.y - PAD);
+  else if (p.y + NH + PAD > wrap.scrollTop + height) wrap.scrollTop = p.y + NH + PAD - height;
+}
+
 function markDirty() {
   dirty = true;
   renderState();
 }
+
+function runActive() { return Boolean(run && run.active); }
 
 function renderState() {
   const pill = $("state");
   if (dirty) { pill.textContent = "unsaved"; pill.className = "pill dirty"; }
   else if (approved) { pill.textContent = "approved"; pill.className = "pill approved"; }
   else { pill.textContent = "saved"; pill.className = "pill"; }
-  $("approve").disabled = blocking || dirty;
-  $("approve").title = blocking
-    ? "Resolve the blocking findings first"
-    : dirty ? "Save your changes first" : "Release this plan to the orchestrator";
+  // A plan cannot be re-launched while it is running, and editing the document
+  // under a run in flight would change a plan the orchestrator has already read.
+  $("approve").disabled = blocking || dirty || runActive();
+  $("approve").title = runActive()
+    ? "This analysis is already running"
+    : blocking ? "Resolve the blocking findings first"
+    : dirty ? "Save your changes first" : "Approve this plan and start the analysis";
+  renderNodeButtons();
+}
+
+/* Keep the selected node's Run and Save buttons honest without rebuilding the
+   panel: a rebuild mid-edit would take the focus out of the field being typed
+   into, which is exactly when Save has to light up. */
+function renderNodeButtons() {
+  if (!nodeButtons) return;
+  const { run: runBtn, save: saveBtn } = nodeButtons;
+  runBtn.disabled = runActive() || blocking;
+  runBtn.title = runActive()
+    ? "This analysis is already running"
+    : blocking ? "Resolve the blocking findings first"
+    : "Run this node, and nothing else";
+  saveBtn.disabled = !dirty;
+  saveBtn.title = dirty ? "Save the plan" : "No unsaved changes";
 }
 
 function nodesWithFindings() {
@@ -193,44 +527,72 @@ function render() {
   const positions = {};
   for (const node of plan.nodes) positions[node.id] = position(node);
 
-  let maxX = 0, maxY = 0;
-  for (const p of Object.values(positions)) {
-    maxX = Math.max(maxX, p.x + NW); maxY = Math.max(maxY, p.y + NH);
-  }
-  svg.setAttribute("width", maxX + PAD);
-  svg.setAttribute("height", maxY + PAD);
+  const extent = canvasExtent();
+  resizeCanvas(extent.width, extent.height);
   svg.textContent = "";
+  drawn.nodes.clear();
+  drawn.edges.length = 0;
 
   const defs = el("defs");
   defs.appendChild(arrowMarker("arrow", "var(--node-line)"));
   defs.appendChild(arrowMarker("arrow-informs", "var(--informs)"));
+  defs.appendChild(arrowMarker("arrow-branch", "var(--branch)"));
   defs.appendChild(arrowMarker("arrow-sel", "var(--sel)"));
   svg.appendChild(defs);
 
+  const back = backBranches();
   plan.edges.forEach((edge, index) => {
     const a = positions[edge.upstream], b = positions[edge.downstream];
     if (!a || !b) return;
     const selected = sel && sel.type === "edge" && sel.id === index;
-    const d = edgePath(a, b);
+    const looping = back.has(edge);
+    const d = edgePath(a, b, looping);
     const hit = el("path", { class: "edge-hit", d });
     hit.addEventListener("click", (ev) => { ev.stopPropagation(); select("edge", index); });
+    const marker = selected ? "arrow-sel"
+      : isBranch(edge) ? "arrow-branch"
+      : edge.kind === "informs" ? "arrow-informs" : "arrow";
     const line = el("path", {
-      class: `edge ${edge.kind === "informs" ? "informs" : ""} ${selected ? "selected" : ""}`,
+      class: `edge ${edge.kind === "informs" ? "informs" : ""} `
+        + `${isBranch(edge) ? "branch" : ""} ${looping ? "loop" : ""} `
+        + `${selected ? "selected" : ""}`,
       d,
-      "marker-end": `url(#${selected ? "arrow-sel" : edge.kind === "informs" ? "arrow-informs" : "arrow"})`,
+      "marker-end": `url(#${marker})`,
     });
     svg.appendChild(line);
     svg.appendChild(hit);
+    let label = null;
+    if (isBranch(edge)) {
+      const mid = edgeMidpoint(a, b, looping);
+      label = text(edge.kind === "on_true" ? "yes" : "no", mid.x, mid.y, "edge-label", "middle");
+      svg.appendChild(label);
+    }
+    drawn.edges.push({ edge, line, hit, label, looping });
   });
 
   for (const node of plan.nodes) {
     const p = positions[node.id];
     const selected = sel && sel.type === "node" && sel.id === node.id;
+    const isCondition = node.kind === "condition";
     const group = el("g", {
-      class: `node ${selected ? "selected" : ""} ${bad.has(node.id) ? "invalid" : ""}`,
+      class: `node ${isCondition ? "condition" : ""} ${selected ? "selected" : ""} `
+        + `${bad.has(node.id) ? "invalid" : ""} ${runClass(node.id)}`,
       transform: `translate(${p.x},${p.y})`,
       "data-id": node.id,
     });
+    if (isCondition) {
+      group.appendChild(el("polygon", {
+        points: `${NW / 2},0 ${NW},${NH / 2} ${NW / 2},${NH} 0,${NH / 2}`,
+      }));
+      group.appendChild(text(node.label || node.id, NW / 2, NH / 2 - 2, "", "middle"));
+      const budget = (node.condition || {}).max_iterations;
+      group.appendChild(
+        text(budget ? `max ${budget}` : node.id, NW / 2, NH / 2 + 14, "sub", "middle"));
+      attachDrag(group, node);
+      svg.appendChild(group);
+      drawn.nodes.set(node.id, group);
+      continue;
+    }
     group.appendChild(el("rect", { width: NW, height: NH }));
     group.appendChild(text(node.label || node.id, 12, 23, ""));
     group.appendChild(text(node.id, 12, 40, "sub"));
@@ -240,7 +602,33 @@ function render() {
     if (node.produces_note) group.appendChild(text("AN", NW - 12, 40, "sub", "end"));
     attachDrag(group, node);
     svg.appendChild(group);
+    drawn.nodes.set(node.id, group);
   }
+}
+
+function moveNode(node, x, y) {
+  // Everything a move can change, changed in place: the group's transform, the
+  // paths touching it, and the canvas bounds if it was dragged past them.
+  setPosition(node, x, y);
+  const group = drawn.nodes.get(node.id);
+  if (group) group.setAttribute("transform", `translate(${x},${y})`);
+  for (const item of drawn.edges) {
+    if (item.edge.upstream !== node.id && item.edge.downstream !== node.id) continue;
+    const from = nodeById(item.edge.upstream), to = nodeById(item.edge.downstream);
+    if (!from || !to) continue;
+    const a = position(from), b = position(to);
+    const d = edgePath(a, b, item.looping);
+    item.line.setAttribute("d", d);
+    item.hit.setAttribute("d", d);
+    if (item.label) {
+      const mid = edgeMidpoint(a, b, item.looping);
+      item.label.setAttribute("x", mid.x);
+      item.label.setAttribute("y", mid.y);
+    }
+  }
+  const width = Math.max(canvasSize.width, x + NW + PAD);
+  const height = Math.max(canvasSize.height, y + NH + PAD);
+  if (width !== canvasSize.width || height !== canvasSize.height) resizeCanvas(width, height);
 }
 
 function el(name, attrs) {
@@ -265,41 +653,98 @@ function arrowMarker(id, color) {
   return marker;
 }
 
-function edgePath(a, b) {
+function edgePath(a, b, looping) {
+  // A loop runs right-to-left against every other edge in the picture, so it
+  // leaves and arrives on the same sides as the forward flow but bows below the
+  // row instead of cutting straight back through the nodes it re-runs.
+  if (looping) {
+    const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y + NH;
+    const drop = Math.max(NH, Math.abs(x1 - x2) / 6) + 30;
+    return `M ${x1} ${y1} C ${x1} ${y1 + drop}, ${x2} ${y2 + drop}, ${x2} ${y2}`;
+  }
   const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2;
   const dx = Math.max(40, Math.abs(x2 - x1) / 2);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
+function edgeMidpoint(a, b, looping) {
+  if (looping) {
+    // The curve sits at three quarters of its drop at the midpoint; lift the
+    // label clear of it so the dashes do not run through the text.
+    const drop = Math.max(NH, Math.abs(a.x - b.x) / 6) + 30;
+    return { x: (a.x + b.x) / 2 + NW / 2, y: (a.y + b.y) / 2 + NH + drop * 0.75 - 6 };
+  }
+  return { x: (a.x + NW + b.x) / 2, y: (a.y + b.y) / 2 + NH / 2 - 6 };
+}
+
 function attachDrag(group, node) {
-  let start = null;
+  let drag = null;
+
+  const finish = () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    group.classList.remove("dragging");
+    // Only now is a full render safe — and only now is it needed, to shrink the
+    // canvas back around whatever the node was dragged away from.
+    if (moved) { markDirty(); render(); }
+  };
+
   group.addEventListener("pointerdown", (ev) => {
-    if (connecting) return;
+    if (connecting || (ev.button != null && ev.button !== 0)) return;
     ev.stopPropagation();
-    const p = position(node);
-    start = { px: ev.clientX, py: ev.clientY, x: p.x, y: p.y, moved: false };
+    if (ev.preventDefault) ev.preventDefault();
+    const p = position(node), at = svgPoint(ev);
+    // Grab offset, not a running delta: the node keeps the point it was
+    // grabbed by, however far the pane scrolls mid-drag.
+    drag = { ox: p.x - at.x, oy: p.y - at.y, px: ev.clientX, py: ev.clientY, moved: false };
     group.setPointerCapture(ev.pointerId);
     group.classList.add("dragging");
   });
+
   group.addEventListener("pointermove", (ev) => {
-    if (!start) return;
-    const dx = ev.clientX - start.px, dy = ev.clientY - start.py;
-    if (!start.moved && Math.hypot(dx, dy) < 3) return;
-    start.moved = true;
-    setPosition(node, Math.max(0, start.x + dx), Math.max(0, start.y + dy));
-    render();
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(ev.clientX - drag.px, ev.clientY - drag.py) < 3) return;
+    drag.moved = true;
+    const at = svgPoint(ev);
+    moveNode(node, snap(Math.max(0, at.x + drag.ox)), snap(Math.max(0, at.y + drag.oy)));
   });
-  group.addEventListener("pointerup", (ev) => {
-    group.classList.remove("dragging");
-    const moved = start && start.moved;
-    start = null;
-    if (moved) markDirty();
-  });
+
+  group.addEventListener("pointerup", finish);
+  group.addEventListener("pointercancel", finish);
+  group.addEventListener("lostpointercapture", finish);
+
   group.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (connecting) { onConnectClick(node.id); return; }
     select("node", node.id);
   });
+}
+
+function startPan(ev) {
+  // Dragging empty canvas scrolls the pane. Node drags never reach here: their
+  // pointerdown stops propagation.
+  if (connecting || (ev.button != null && ev.button !== 0)) return;
+  const wrap = $("canvas-wrap");
+  const from = { x: ev.clientX, y: ev.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
+  panned = false;
+
+  const move = (m) => {
+    if (!panned && Math.hypot(m.clientX - from.x, m.clientY - from.y) < 3) return;
+    panned = true;
+    wrap.classList.add("panning");
+    wrap.scrollLeft = from.left - (m.clientX - from.x);
+    wrap.scrollTop = from.top - (m.clientY - from.y);
+  };
+  const stop = () => {
+    wrap.classList.remove("panning");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
 }
 
 /* ------------------------------------------------------------- side panel */
@@ -318,17 +763,23 @@ function field(parent, label, value, onInput, type) {
   return input;
 }
 
+/* An option is either a bare name — value and text the same — or a
+   `{value, text}` pair, for the dropdowns whose empty choice has to read as
+   something ("the run's platform") rather than as a blank line. */
 function choice(parent, label, value, options, onChange) {
   const l = document.createElement("label");
   l.textContent = label;
   parent.appendChild(l);
   const select_ = document.createElement("select");
   for (const option of options) {
+    const { value: v, text } = typeof option === "string"
+      ? { value: option, text: option } : option;
     const o = document.createElement("option");
-    o.value = option; o.textContent = option;
-    if (option === value) o.selected = true;
+    o.value = v; o.textContent = text;
+    if (v === value) o.selected = true;
     select_.appendChild(o);
   }
+  select_.value = value;
   select_.addEventListener("change", () => { onChange(select_.value); markDirty(); });
   parent.appendChild(select_);
   return select_;
@@ -359,6 +810,63 @@ function checkboxes(parent, label, all, chosen, onChange) {
   parent.appendChild(box);
 }
 
+/* A dropdown that adds to a list, with a removable pill per chosen name.
+   `checkboxes` stays the right shape for the three or six fixed options of a
+   gate or a contract; this one is for the catalogs — twenty function tools do
+   not fit in a checkbox grid, and the set grows whenever a tool is added. */
+function picker(parent, label, all, chosen, onChange) {
+  const l = document.createElement("label");
+  l.textContent = label;
+  parent.appendChild(l);
+
+  const tags = document.createElement("div");
+  tags.className = "tags";
+  for (const name of chosen) {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.appendChild(document.createTextNode(name));
+    const drop = document.createElement("button");
+    drop.textContent = "×";
+    drop.title = `Remove ${name}`;
+    drop.addEventListener("click", () => {
+      onChange(chosen.filter((n) => n !== name));
+      markDirty();
+      renderSide();
+    });
+    tag.appendChild(drop);
+    tags.appendChild(tag);
+  }
+  if (!chosen.length) {
+    const empty = document.createElement("span");
+    empty.className = "tag empty";
+    empty.textContent = "none";
+    tags.appendChild(empty);
+  }
+  parent.appendChild(tags);
+
+  const remaining = all.filter((n) => !chosen.includes(n));
+  const select_ = document.createElement("select");
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = remaining.length ? "+ add…" : "nothing left to add";
+  select_.appendChild(placeholder);
+  for (const name of remaining) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select_.appendChild(option);
+  }
+  select_.disabled = !remaining.length;
+  select_.addEventListener("change", () => {
+    if (!select_.value) return;
+    onChange(chosen.concat([select_.value]));
+    markDirty();
+    renderSide();
+  });
+  parent.appendChild(select_);
+  return select_;
+}
+
 function toggle(parent, label, value, onChange) {
   const wrap = document.createElement("label");
   wrap.style.display = "flex";
@@ -379,11 +887,8 @@ function toggle(parent, label, value, onChange) {
 function renderSide() {
   const side = $("side");
   side.textContent = "";
-  if (!sel) {
-    side.appendChild(heading("Nothing selected"));
-    side.appendChild(hint("Click a node or an edge to edit it. Drag a node to move it."));
-    return;
-  }
+  nodeButtons = null;
+  if (!sel) return renderPromptPanel(side);
   if (sel.type === "node") return renderNodePanel(side, nodeById(sel.id));
   return renderEdgePanel(side, plan.edges[sel.id], sel.id);
 }
@@ -401,13 +906,62 @@ function hint(value) {
   return p;
 }
 
+function renderPromptPanel(side) {
+  // With nothing selected the panel is otherwise dead space, and the question
+  // the plan is meant to answer is the one thing a reviewer needs on screen
+  // while judging it. Read-only: `plan.problem` mirrors the analysis's
+  // `prompt.md`, and editing the copy here would only make the two disagree.
+  side.appendChild(heading("Analysis prompt"));
+  const body = (plan && plan.problem ? String(plan.problem) : "").trim();
+  if (body) {
+    const box = document.createElement("div");
+    box.className = "prompt";
+    box.textContent = body;
+    side.appendChild(box);
+  } else {
+    side.appendChild(hint("This plan carries no prompt."));
+  }
+  side.appendChild(hint(
+    "Click a node or an edge to edit it. Drag a node to move it, "
+    + "or drag the canvas to pan."));
+}
+
+const KIND_HINTS = {
+  work: "Runs an executor agent, which writes the primary artifact.",
+  gate: "Marks a node whose point is the check around it. It still runs an "
+    + "executor today — the gates below are what actually interpose.",
+  condition: "Evaluates a test and routes along its yes or no branch instead of "
+    + "producing work.",
+};
+
+/* Changing a node's kind has to keep the condition payload consistent with it:
+   P10 refuses a condition on a node that is not one, and a condition node with
+   no condition to evaluate. */
+function setKind(node, kind) {
+  node.kind = kind;
+  if (kind === "condition") {
+    node.condition = node.condition
+      || { question: "", metric: null, max_iterations: 3, on_exhaustion: "true" };
+  } else {
+    node.condition = null;
+  }
+  render();
+  renderSide();
+}
+
 function renderNodePanel(side, node) {
   if (!node) { sel = null; return renderSide(); }
-  side.appendChild(heading(`Node · ${node.id}`));
+  side.appendChild(heading(`${node.kind === "condition" ? "Condition" : "Node"} · ${node.id}`));
+  nodeActions(side, node);
+
+  choice(side, "Kind", node.kind || "work", NODE_KINDS, (v) => setKind(node, v));
+  side.appendChild(hint(KIND_HINTS[node.kind] || KIND_HINTS.work));
 
   field(side, "Label", node.label, (v) => { node.label = v; render(); });
   field(side, "Working directory", node.directory, (v) => { node.directory = v; });
   field(side, "Primary artifact", node.artifact, (v) => { node.artifact = v; render(); });
+
+  if (node.kind === "condition") return renderConditionPanel(side, node);
 
   toggle(side, "Writes an analysis note", node.produces_note, (v) => {
     node.produces_note = v; render();
@@ -417,8 +971,9 @@ function renderNodePanel(side, node) {
       (v) => { node.note_artifact = v; });
   }
 
-  checkboxes(side, "Reviewers", reviewers, node.reviewers || [],
-    (v) => { node.reviewers = v; });
+  checkboxes(side, "Reviewers",
+    catalogNames("reviewers", (n) => n.reviewers, DEFAULT_REVIEWERS),
+    node.reviewers || [], (v) => { node.reviewers = v; });
   toggle(side, "Arbiter adjudicates this node", node.arbiter, (v) => { node.arbiter = v; });
 
   const gateNames = (node.gates || []).filter((g) => g.enabled !== false).map((g) => g.name);
@@ -436,6 +991,8 @@ function renderNodePanel(side, node) {
     choice(side, `“${gate.name}” runs`, gate.when, ["before", "after"], (v) => { gate.when = v; });
   }
 
+  renderCapabilities(side, node);
+
   const contract = node.contract || (node.contract = { node_types: [], edge_types: [] });
   checkboxes(side, "May create node types", NODE_TYPES, contract.node_types || [],
     (v) => { contract.node_types = v; });
@@ -446,26 +1003,234 @@ function renderNodePanel(side, node) {
   row.className = "row";
   side.appendChild(row);
   const iterations = document.createElement("div");
-  const model = document.createElement("div");
-  row.appendChild(iterations); row.appendChild(model);
+  const platform = document.createElement("div");
+  row.appendChild(iterations); row.appendChild(platform);
   field(iterations, "Max review iterations", node.max_iterations,
     (v) => { node.max_iterations = parseInt(v, 10) || 1; }, "number");
-  field(model, "Model override", node.model || "",
-    (v) => { node.model = v || null; });
+  renderModel(side, platform, node);
 
   field(side, "Executor prompt", node.prompt, (v) => { node.prompt = v; }, "textarea");
+}
+
+/* ------------------------------------------------------- platform & model */
+
+/* A node's `model` is one string in the form the runtime reads: `"model"` is a
+   model on the run's platform, `"platform:model"` overrides both, and
+   `"platform:"` is that platform at its own default model. The panel edits it
+   as the two things a user actually chooses; these two functions are the only
+   place the string form is assembled or taken apart. */
+function splitModel(spec) {
+  if (!spec) return { platform: "", model: "" };
+  const at = String(spec).indexOf(":");
+  if (at < 0) return { platform: "", model: String(spec) };
+  return { platform: spec.slice(0, at), model: spec.slice(at + 1) };
+}
+
+function joinModel(platform, model) {
+  if (platform) return `${platform}:${model || ""}`;
+  return model || null;
+}
+
+/* What each platform serves: `{platform: {models, default} | {error} | {loading}}`.
+   Listing models is a call to the provider, so it happens when a node that uses
+   the platform is opened, once per page, rather than on every plan view. */
+const platformModels = {};
+
+async function loadModels(platform) {
+  if (!platform || platformModels[platform]) return;
+  platformModels[platform] = { loading: true };
+  let payload = null, error = null;
+  try {
+    const res = await fetch(`/api/platforms/${encodeURIComponent(platform)}/models`);
+    if (res.ok) payload = await res.json();
+    else error = (await res.text()) || `${res.status}`;
+  } catch (err) {
+    error = String(err);
+  }
+  const models = payload && Array.isArray(payload.models) ? payload.models : null;
+  platformModels[platform] = error || !models
+    ? { error: error || "the server listed no models" }
+    : { models, default: payload.default || "" };
+  renderSide();
+}
+
+/* The platform dropdown goes in the row beside max-iterations; the model
+   control needs the full width, so it is appended to the panel below. */
+function renderModel(side, cell, node) {
+  const spec = splitModel(node.model);
+  // Platforms the server says this installation has configured. Where it says
+  // nothing, the platforms the plan itself already names are the only honest
+  // list — the same rule every other dropdown here follows.
+  const platforms = catalogNames(
+    "platforms", (n) => { const p = splitModel(n.model).platform; return p ? [p] : []; });
+  choice(cell, "Platform", spec.platform,
+    [{ value: "", text: "— the run's —" }].concat(platforms),
+    (v) => {
+      // The model that was chosen belongs to the old platform, so it does not
+      // survive the switch: picking a platform means "this platform, its
+      // default model" until a model is picked for it.
+      node.model = joinModel(v, "");
+      renderSide();
+    });
+
+  if (!spec.platform) {
+    field(side, "Model override", spec.model,
+      (v) => { node.model = joinModel("", v.trim()); });
+    side.appendChild(hint(
+      "Blank runs this node on the run's own platform and model. Pick a "
+      + "platform to choose from the models it serves."));
+    return;
+  }
+
+  const known = platformModels[spec.platform];
+  if (!known || known.loading) {
+    loadModels(spec.platform);
+    const waiting = choice(side, "Model", spec.model,
+      [{ value: spec.model, text: spec.model || `listing ${spec.platform}'s models…` }],
+      () => {});
+    waiting.disabled = true;
+    return;
+  }
+  if (known.error) {
+    field(side, "Model", spec.model,
+      (v) => { node.model = joinModel(spec.platform, v.trim()); });
+    side.appendChild(hint(
+      `Could not list the models on ${spec.platform}: ${known.error}. `
+      + "Type a model name, or leave it blank for the platform's default."));
+    return;
+  }
+  // A plan may already name a model this provider no longer lists; dropping it
+  // from the dropdown would silently rewrite the plan on the next save.
+  const names = known.models.includes(spec.model) || !spec.model
+    ? known.models : [spec.model].concat(known.models);
+  const fallback = known.default ? `— default: ${known.default} —` : "— the platform's default —";
+  choice(side, "Model", spec.model,
+    [{ value: "", text: fallback }].concat(names),
+    (v) => { node.model = joinModel(spec.platform, v); });
+  if (!known.models.length) {
+    side.appendChild(hint(`${spec.platform} reported no models; it will use its default.`));
+  }
+}
+
+/* What this node's executor is given: which function tools it may call, which
+   skills are loaded into its prompt, which MCP servers it may reach. */
+function renderCapabilities(side, node) {
+  // `tools: null` and `tools: []` are different statements — the default set
+  // versus none at all — so the toggle owns which of the two is meant and the
+  // picker only edits the list.
+  const restricted = Array.isArray(node.tools);
+  toggle(side, "Restrict function tools", restricted, (v) => {
+    node.tools = v ? [] : null;
+    renderSide();
+  });
+  if (restricted) {
+    picker(side, "Function tools", catalogNames("tools", (n) => n.tools),
+      node.tools, (v) => { node.tools = v; });
+    if (!node.tools.length) {
+      side.appendChild(hint("Nothing selected — this node's executor gets no tools at all."));
+    }
+  } else {
+    side.appendChild(hint("This node's executor gets the full tool set."));
+  }
+
+  picker(side, "Skills", catalogNames("skills", (n) => n.skills),
+    node.skills || [], (v) => { node.skills = v; });
+  side.appendChild(hint("Each skill's SKILL.md is loaded into this node's prompt up front."));
+
+  picker(side, "MCP servers", catalogNames("mcp_servers", (n) => n.mcp_servers),
+    node.mcp_servers || [], (v) => { node.mcp_servers = v; });
+  side.appendChild(hint(
+    "Recorded in the plan and offered from mcp.toml. Nothing attaches an MCP "
+    + "server at run time yet."));
+}
+
+/* Run, Delete, Save — the whole of what a selected node can be told to do,
+   above the form rather than below it. Run starts *this node only*: the plan
+   editor is also where a node gets iterated on, and re-running the pipeline to
+   retry one step is not iteration. */
+function nodeActions(side, node) {
+  const row = document.createElement("div");
+  row.className = "actions-row";
+
+  const runBtn = document.createElement("button");
+  runBtn.className = "primary";
+  runBtn.textContent = "Run";
+  runBtn.addEventListener("click", () => runNode(node.id));
 
   const remove = document.createElement("button");
   remove.className = "danger";
-  remove.textContent = "Delete this node";
-  remove.style.marginTop = "12px";
-  remove.addEventListener("click", () => {
-    plan.nodes = plan.nodes.filter((n) => n.id !== node.id);
-    plan.edges = plan.edges.filter(
-      (e) => e.upstream !== node.id && e.downstream !== node.id);
-    sel = null; markDirty(); render(); renderSide();
+  remove.textContent = "Delete";
+  remove.title = "Delete this node and the edges touching it";
+  remove.addEventListener("click", () => deleteNode(node));
+
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", () => save());
+
+  row.appendChild(runBtn);
+  row.appendChild(remove);
+  row.appendChild(saveBtn);
+  side.appendChild(row);
+
+  nodeButtons = { run: runBtn, save: saveBtn };
+  renderNodeButtons();
+}
+
+function deleteNode(node) {
+  plan.nodes = plan.nodes.filter((n) => n.id !== node.id);
+  plan.edges = plan.edges.filter(
+    (e) => e.upstream !== node.id && e.downstream !== node.id);
+  sel = null; markDirty(); render(); renderSide();
+}
+
+function renderConditionPanel(side, node) {
+  const condition = node.condition
+    || (node.condition = { question: "", metric: null, max_iterations: 3,
+                           on_exhaustion: "true" });
+
+  side.appendChild(hint(
+    "A condition evaluates a test and routes along its yes or no branch. "
+    + "A branch pointing back at an earlier node makes a loop."));
+
+  field(side, "Max iterations (how many times the loop body may run)",
+    condition.max_iterations,
+    (v) => { condition.max_iterations = parseInt(v, 10) || 1; render(); }, "number");
+  choice(side, "When the budget runs out", condition.on_exhaustion, EXHAUSTION,
+    (v) => { condition.on_exhaustion = v; });
+  side.appendChild(hint(
+    condition.on_exhaustion === "escalate"
+      ? "Stops the run for a human rather than choosing a branch."
+      : `Takes the ${condition.on_exhaustion} branch and carries on.`));
+
+  const hasMetric = !!condition.metric;
+  toggle(side, "Decide from a number in a results file", hasMetric, (v) => {
+    condition.metric = v
+      ? { source: "", key: "", compare: "improvement_below", value: 0 }
+      : null;
+    renderSide();
   });
-  side.appendChild(remove);
+
+  if (hasMetric) {
+    const metric = condition.metric;
+    field(side, "Results file (relative to the analysis root)", metric.source,
+      (v) => { metric.source = v; });
+    field(side, "Key (dotted path into the JSON)", metric.key, (v) => { metric.key = v; });
+    choice(side, "Comparison", metric.compare, COMPARISONS, (v) => {
+      metric.compare = v; renderSide();
+    });
+    field(side, "Threshold", metric.value,
+      (v) => { metric.value = parseFloat(v) || 0; }, "number");
+    side.appendChild(hint(
+      metric.compare.startsWith("improvement")
+        ? "Compares the change since the previous pass — the convergence test."
+        : "Compares the value itself against the threshold."));
+  }
+
+  field(side, "Question (used when there is no readable metric)", condition.question,
+    (v) => { condition.question = v; }, "textarea");
+  side.appendChild(hint(
+    "Judged by an agent that reads the upstream artifacts and answers yes or no. "
+    + "Leave both empty and the loop always runs to its budget."));
 }
 
 function renderEdgePanel(side, edge, index) {
@@ -477,10 +1242,7 @@ function renderEdgePanel(side, edge, index) {
   side.appendChild(p);
 
   choice(side, "Kind", edge.kind, KINDS, (v) => { edge.kind = v; render(); });
-  side.appendChild(hint(
-    edge.kind === "informs"
-      ? "Context only: the downstream node does not wait for this."
-      : "Blocking: the downstream node cannot start until this one passes review."));
+  side.appendChild(hint(edgeKindHint(edge)));
 
   choice(side, "Injection", edge.inject, INJECTS, (v) => { edge.inject = v; });
   side.appendChild(hint(
@@ -499,6 +1261,25 @@ function renderEdgePanel(side, edge, index) {
     sel = null; markDirty(); render(); renderSide();
   });
   side.appendChild(remove);
+}
+
+function edgeKindHint(edge) {
+  if (edge.kind === "informs") {
+    return "Context only: the downstream node does not wait for this.";
+  }
+  if (!isBranch(edge)) {
+    return "Blocking: the downstream node cannot start until this one passes review.";
+  }
+  const answer = edge.kind === "on_true" ? "holds" : "does not hold";
+  const source = nodeById(edge.upstream);
+  if (source && source.kind !== "condition") {
+    return `Only a condition node may branch — “${edge.upstream}” is not one.`;
+  }
+  return backBranches().has(edge)
+    ? `Loops: when the condition ${answer}, the analysis rewinds to `
+      + `“${edge.downstream}” and re-runs from there.`
+    : `Routes forward to “${edge.downstream}” when the condition ${answer}. `
+      + "The other branch is skipped.";
 }
 
 /* ------------------------------------------------------------- findings */
@@ -536,6 +1317,7 @@ function applyView(view) {
   findings = view.findings || [];
   blocking = !!view.blocking;
   approved = !!view.approved;
+  catalog = view.catalog || {};
   dirty = false;
   $("title").textContent = `${plan.name} — analysis plan`;
   $("subtitle").textContent =
@@ -551,14 +1333,6 @@ async function load() {
     return;
   }
   applyView(await res.json());
-}
-
-async function loadReviewers() {
-  // The reviewer list is not its own endpoint: the node panel only needs the
-  // names, and every plan the editor opens already carries the ones in use.
-  const known = new Set(["physics", "critical", "constructive", "plot", "bibtex", "rendering"]);
-  for (const node of plan.nodes) for (const r of node.reviewers || []) known.add(r);
-  reviewers = [...known].sort();
 }
 
 async function save() {
@@ -583,23 +1357,256 @@ async function approve() {
     toast(`Not approved: ${(await res.json()).detail || res.status}`, true);
     return;
   }
-  applyView(await res.json());
-  toast("Approved. The analysis can start.");
+  const view = await res.json();
+  applyView(view);
+  // `awaited` says a run is already blocked on this latch — `jfc run
+  // --review-plan` — and approving has just released it. Starting another here
+  // would run the same analysis twice.
+  if (view.awaited) {
+    toast("Approved. The waiting run is starting.");
+    startPolling();
+    return;
+  }
+  await startRun();
+}
+
+/* -------------------------------------------------------------------- run */
+
+function runClass(nodeId) {
+  const status = runNodes[nodeId];
+  return status ? `run-${status}` : "";
+}
+
+async function startRun(onlyNode) {
+  const body = { unattended: Boolean($("run-unattended").checked) };
+  if (onlyNode) body.only_node = onlyNode;
+  const res = await fetch(`${API}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    toast(`Could not start the run: ${(await res.json()).detail || res.status}`, true);
+    return;
+  }
+  runSeq = 0;
+  applyRun(await res.json());
+  toast(onlyNode
+    ? `Running “${onlyNode}” on its own. Questions from the agents appear here.`
+    : "The analysis is running. Questions from the agents appear here.");
+  startPolling();
+}
+
+/* The node panel's Run button. Unlike Approve it does not release the plan:
+   running one node is a statement about that node, not about the pipeline. It
+   still saves first, because what runs is the plan on disk. */
+async function runNode(id) {
+  if (runActive()) return;
+  if (dirty && !(await save())) return;
+  await startRun(id);
+}
+
+async function cancelRun() {
+  const res = await fetch(`${API}/run/cancel`, { method: "POST" });
+  if (!res.ok) {
+    toast(`Could not stop the run: ${(await res.json()).detail || res.status}`, true);
+    return;
+  }
+  applyRun(await res.json());
+  toast("Stopping after the current node finishes.");
+}
+
+async function pollRun() {
+  pollTimer = null;
+  let snapshot = null;
+  try {
+    const res = await fetch(`${API}/run?since=${runSeq}`);
+    if (res.ok) snapshot = await res.json();
+  } catch (err) {
+    // A dropped connection is not a dead run: keep polling.
+  }
+  if (snapshot) applyRun(snapshot);
+  if (runActive()) startPolling();
+}
+
+function startPolling() {
+  if (pollTimer !== null) return;
+  pollTimer = setTimeout(pollRun, POLL_MS);
+}
+
+function applyRun(snapshot) {
+  if (!snapshot || !snapshot.status) return;
+  const wasActive = runActive();
+  run = snapshot;
+  if (typeof snapshot.latest_seq === "number") runSeq = Math.max(runSeq, snapshot.latest_seq);
+
+  const before = JSON.stringify(runNodes);
+  runNodes = snapshot.nodes || {};
+  appendRunEvents(snapshot.events || []);
+  // Something moved, so what the analysis knows may have moved with it. Tying
+  // the refresh to progress rather than to a second timer means a finished run
+  // stops costing anything, and a busy one keeps the panel current.
+  if ((snapshot.events || []).length || JSON.stringify(runNodes) !== before) loadState();
+  renderRun();
+  renderState();
+  // Re-drawing on every poll would fight a drag in progress, so the picture is
+  // rebuilt only when a node actually changed colour.
+  if (JSON.stringify(runNodes) !== before) render();
+  if (wasActive && !runActive() && snapshot.status !== "idle") {
+    toast(snapshot.status === "done"
+      ? `Analysis complete: ${snapshot.result || "finished"}`
+      : `Run ${snapshot.status}: ${(snapshot.error || "").split("\n")[0]}`,
+      snapshot.status !== "done");
+  }
+  renderAsk(snapshot.prompt);
+}
+
+function appendRunEvents(events) {
+  const log = $("run-log");
+  for (const event of events) {
+    const row = document.createElement("div");
+    row.className = `e ${event.level || "info"}`;
+    const where = document.createElement("code");
+    where.textContent = event.node;
+    row.appendChild(where);
+    row.appendChild(document.createTextNode(event.message));
+    log.appendChild(row);
+  }
+  if (events.length) log.scrollTop = log.scrollHeight;
+}
+
+function renderRun() {
+  const box = $("run");
+  if (!run || run.status === "idle") { box.hidden = true; return; }
+  box.hidden = false;
+  const pill = $("run-state");
+  pill.textContent = run.status;
+  pill.className = "pill " + (
+    run.status === "done" ? "approved"
+    : run.status === "blocked" ? "blocked"
+    : run.status === "failed" || run.status === "cancelled" ? "failed" : "run");
+  const done = Object.values(runNodes).filter((s) => s === "done").length;
+  $("run-detail").textContent = plan
+    ? `${done}/${plan.nodes.length} nodes complete` + (run.unattended ? " · unattended" : "")
+    : "";
+  $("cancel-run").disabled = !runActive();
+  $("run-unattended").disabled = runActive();
+}
+
+/* The one place a running analysis talks back to its human: bash approvals,
+   `ask_user_for_info` and the human gate all arrive here as a pending prompt. */
+function renderAsk(prompt) {
+  const box = $("ask");
+  // An answered prompt can still appear in the very next snapshot — the run
+  // thread clears it a moment after the answer is delivered — so the id is
+  // remembered rather than trusted to disappear, and the dialog does not flicker
+  // back on top of a user who has already dealt with it.
+  if (!prompt || answered.has(prompt.id)) { box.hidden = true; return; }
+  if (shownPrompt === prompt.id) return;  // already showing it
+  shownPrompt = prompt.id;
+  box.hidden = false;
+  answering = false;
+
+  const approval = prompt.kind === "approval";
+  $("ask-title").textContent = approval ? "Run this command?" : "The analysis has a question";
+  $("ask-text").textContent = approval ? (prompt.cwd ? `Working directory: ${prompt.cwd}` : "")
+                                       : prompt.text;
+  $("ask-cmd").hidden = !approval;
+  $("ask-cmd").textContent = prompt.cmd || "";
+  $("ask-thought").textContent = prompt.thought ? `Why: ${prompt.thought}` : "";
+  const input = $("ask-input");
+  input.value = "";
+  input.hidden = approval;
+  input.placeholder = approval ? "" : "Your answer";
+
+  const actions = $("ask-actions");
+  actions.textContent = "";
+  if (approval) {
+    actions.appendChild(askButton("✅ Approve", "primary",
+      () => answerAsk(prompt.id, { approved: true })));
+    actions.appendChild(askButton("✋ Reject", "danger", () => {
+      // The reason goes back to the agent, so it can choose differently.
+      input.hidden = false;
+      input.placeholder = "Why are you rejecting it? (sent to the agent)";
+      actions.textContent = "";
+      actions.appendChild(askButton("Send rejection", "danger",
+        () => answerAsk(prompt.id, { approved: false, reason: input.value })));
+    }));
+  } else {
+    for (const choice of prompt.choices || []) {
+      actions.appendChild(askButton(choice, "primary",
+        () => answerAsk(prompt.id, { text: choice })));
+    }
+    actions.appendChild(askButton("Send", (prompt.choices || []).length ? "" : "primary",
+      () => answerAsk(prompt.id, { text: input.value })));
+  }
+}
+
+function askButton(label, cls, onClick) {
+  const button = document.createElement("button");
+  button.textContent = label;
+  if (cls) button.className = cls;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+async function answerAsk(promptId, payload) {
+  if (answering) return;
+  answering = true;
+  answered.add(promptId);
+  const res = await fetch(`${API}/run/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ id: promptId, since: runSeq }, payload)),
+  });
+  if (!res.ok) {
+    answering = false;
+    answered.delete(promptId);
+    toast(`Answer not accepted: ${(await res.json()).detail || res.status}`, true);
+    return;
+  }
+  $("ask").hidden = true;
+  shownPrompt = null;
+  applyRun(await res.json());
+  startPolling();
 }
 
 function addNode() {
   const base = "node";
   let n = 1, id = base + n;
   while (nodeById(id)) id = base + (++n);
+  const spot = freePosition();
   plan.nodes.push({
     id, label: `Node ${n}`, directory: id, artifact: `${id.toUpperCase()}.md`,
     prompt: "Describe what this node must produce.\n",
     kind: "work", role: "executor", reviewers: ["critical"], arbiter: false,
     produces_note: false, note_artifact: "", context_paths: [], gates: [],
     contract: { node_types: [], edge_types: [] },
-    max_iterations: 3, model: null, tools: null, metadata: {},
+    condition: null,
+    max_iterations: 3, model: null, tools: null, skills: [], mcp_servers: [],
+    // Placed explicitly: a node the server has never seen is in no layout, and
+    // the fallback would stack it on the first node.
+    metadata: { x: spot.x, y: spot.y },
   });
-  markDirty(); select("node", id);
+  markDirty(); select("node", id); scrollIntoView(spot);
+}
+
+function addCondition() {
+  const base = "check";
+  let n = 1, id = base + n;
+  while (nodeById(id)) id = base + (++n);
+  const spot = freePosition();
+  plan.nodes.push({
+    id, label: `Check ${n}`, directory: id, artifact: `${id.toUpperCase()}.md`,
+    prompt: "",
+    kind: "condition", role: "executor", reviewers: [], arbiter: false,
+    produces_note: false, note_artifact: "", context_paths: [], gates: [],
+    contract: { node_types: [], edge_types: [] },
+    condition: { question: "", metric: null, max_iterations: 3, on_exhaustion: "true" },
+    max_iterations: 3, model: null, tools: null, skills: [], mcp_servers: [],
+    metadata: { x: spot.x, y: spot.y },
+  });
+  markDirty(); select("node", id); scrollIntoView(spot);
 }
 
 function onConnectClick(id) {
@@ -621,27 +1628,238 @@ function onConnectClick(id) {
   select("edge", plan.edges.length - 1);
 }
 
-function relayout() {
+async function relayout() {
+  // Ask the server to lay out what is *on screen*. Dropping the stored x/y and
+  // falling back to the layout that arrived with the last view only worked
+  // until the plan changed: nodes added since were in no layout at all and
+  // piled up on the origin, which is why this looked like it did nothing until
+  // a save went round the same algorithm.
+  const res = await fetch(`${API}/layout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  if (!res.ok) {
+    toast(`Auto-layout failed: ${(await res.json()).detail || res.status}`, true);
+    return;
+  }
+  const grid = (await res.json()).layout || {};
+  layout = grid;
   for (const node of plan.nodes) {
-    if (node.metadata) { delete node.metadata.x; delete node.metadata.y; }
+    const [column, row] = grid[node.id] || [0, 0];
+    setPosition(node, PAD + column * COL, PAD + row * ROW);
   }
   markDirty(); render();
-  toast("Positions reset to the computed layout. Save to keep it.");
+  $("canvas-wrap").scrollLeft = 0;
+  $("canvas-wrap").scrollTop = 0;
+  toast("Nodes rearranged by dependency depth. Save to keep it.");
+}
+
+/* ------------------------------------------------------------- progress */
+
+/* The dock's Progress tab: what the analysis has established, as opposed to
+   what it is doing. Everything drawn here is derived server-side from the
+   analysis directory (`GET .../state`), so it is correct for a plan that has
+   never run, and it survives both a reload and a server restart. */
+
+function htm(tag, cls, textValue) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (textValue !== undefined && textValue !== null) node.textContent = String(textValue);
+  return node;
+}
+
+async function loadState() {
+  try {
+    const res = await fetch(`${API}/state`);
+    if (!res.ok) return;
+    state = await res.json();
+  } catch (err) {
+    return;  // the panel is a view, not a control: a failed poll changes nothing
+  }
+  renderProgress();
+}
+
+/* How tall the dock is. Kept in a CSS variable so both tab bodies follow it,
+   and in localStorage so the choice survives a reload — a physicist who wants
+   the graph big and the log small should not have to say so twice.
+
+   Storage is optional on purpose: a page served from a file:// URL or a locked
+   down profile has no localStorage, and the dock still resizes there. */
+const DOCK_MIN = 60, DOCK_DEFAULT = 240, DOCK_KEY = "hepagent.plan.dockHeight";
+
+function dockMax() {
+  return Math.max(DOCK_MIN, (window.innerHeight || 800) - 220);
+}
+
+function storedDockHeight() {
+  try {
+    const saved = Number(localStorage.getItem(DOCK_KEY));
+    return saved > 0 ? saved : 0;
+  } catch (err) {
+    return 0;  // no storage available; the default is not worth an error
+  }
+}
+
+/* The height the page believes in, rather than the height the layout happens to
+   report: reading it back off an element would round-trip through whatever the
+   flexbox did with it, and a drag that fought its own measurement is the bug
+   this avoids. */
+let dockHeight = DOCK_DEFAULT;
+
+function setDockHeight(px, remember) {
+  dockHeight = Math.round(Math.min(dockMax(), Math.max(DOCK_MIN, px)));
+  $("dock").style.setProperty("--dock-h", `${dockHeight}px`);
+  if (remember) {
+    try { localStorage.setItem(DOCK_KEY, String(dockHeight)); } catch (err) { /* ignore */ }
+  }
+  return dockHeight;
+}
+
+/* Dragging the grip resizes both bodies at once. The pointer is captured, so a
+   fast drag that leaves the 7px strip keeps resizing instead of stopping dead. */
+function startDockResize(ev) {
+  if (ev.button) return;
+  const grip = $("dock-grip");
+  const startY = ev.clientY;
+  const startHeight = dockHeight;
+  $("dock").classList.add("resizing");
+  grip.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+
+  const move = (move_ev) => setDockHeight(startHeight + (startY - move_ev.clientY), false);
+  const stop = () => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", stop);
+    grip.removeEventListener("pointercancel", stop);
+    $("dock").classList.remove("resizing");
+    setDockHeight(dockHeight, true);
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", stop);
+  grip.addEventListener("pointercancel", stop);
+}
+
+function showTab(name) {
+  tab = name;
+  $("tab-progress").classList.toggle("on", name === "progress");
+  $("tab-log").classList.toggle("on", name === "log");
+  $("progress").hidden = name !== "progress";
+  $("run-log").hidden = name !== "log";
+}
+
+/* One pill per plan node. A node is "produced" when its artifact is on disk,
+   which is a claim about the filesystem; the live run status, when there is
+   one, wins over it, because a node being re-run is not a finished node. */
+function renderSteps(parent) {
+  const strip = htm("div", "steps");
+  for (const node of (state && state.nodes) || []) {
+    const live = runNodes[node.id];
+    const status = live || (node.produced ? "produced" : "");
+    const pill = htm("span", `step ${status === "done" ? "produced" : status}`);
+    pill.appendChild(htm("span", "dot"));
+    pill.appendChild(htm("span", null, node.label || node.id));
+    if (node.figures) pill.appendChild(htm("span", "imp", `${node.figures} fig`));
+    pill.title = node.artifact + (node.produced ? " — written" : " — not written yet");
+    strip.appendChild(pill);
+  }
+  parent.appendChild(strip);
+}
+
+const SECTION_TITLES = {
+  signal: "Signal",
+  irreducible: "Irreducible background",
+  reducible: "Reducible background",
+  instrumental: "Instrumental background",
+  data: "Observed data",
+};
+
+/* The strategy's answer to "what are we modelling, and out of what files".
+   Empty sections are drawn too: a strategy that identified no instrumental
+   background has said something, and hiding the heading hides the claim. */
+function renderProcesses(parent) {
+  const processes = (state && state.processes) || {};
+  const heading = htm("h3", null, "Processes and datasets");
+  if (processes.recorded) {
+    const count = (processes.datasets || []).length;
+    heading.appendChild(htm("span", "meta",
+      `  ${processes.count} processes · ${count} datasets · from ${processes.node_id}`));
+  }
+  parent.appendChild(heading);
+
+  if (!processes.recorded) {
+    parent.appendChild(htm("p", "hint",
+      "Not established yet. The strategy step decides the signal, classifies each " +
+      "background as irreducible, reducible or instrumental, and records the datasets " +
+      "carrying each — they appear here as it does."));
+    return;
+  }
+
+  const groups = htm("div", "groups");
+  for (const section of processes.sections || []) {
+    const box = htm("div", `group ${section.name}`);
+    const title = htm("div", "t");
+    title.appendChild(htm("span", null, SECTION_TITLES[section.name] || section.name));
+    title.appendChild(htm("span", "n", section.processes.length));
+    box.appendChild(title);
+    if (!section.processes.length) {
+      box.appendChild(htm("div", "empty", "none identified"));
+    }
+    for (const process of section.processes) {
+      const row = htm("div", "proc");
+      const line = htm("div");
+      line.appendChild(htm("span", "n", process.label || process.id));
+      if (process.importance && process.importance !== "unknown") {
+        line.appendChild(htm("span", "imp", ` · ${process.importance}`));
+      }
+      row.appendChild(line);
+      if (process.estimation) row.appendChild(htm("div", "est", process.estimation));
+      for (const dataset of process.datasets || []) {
+        const ds = htm("div", "ds", dataset.name);
+        ds.appendChild(htm("span", "src", ` (${dataset.source})`));
+        ds.title = dataset.path || dataset.name;
+        row.appendChild(ds);
+      }
+      if (process.rationale) row.title = process.rationale;
+      box.appendChild(row);
+    }
+    groups.appendChild(box);
+  }
+  parent.appendChild(groups);
+}
+
+function renderProgress() {
+  const box = $("progress");
+  box.textContent = "";
+  renderSteps(box);
+  renderProcesses(box);
 }
 
 /* ----------------------------------------------------------------- wiring */
 
 $("save").addEventListener("click", save);
 $("approve").addEventListener("click", approve);
+$("cancel-run").addEventListener("click", cancelRun);
+$("dock-grip").addEventListener("pointerdown", startDockResize);
+$("dock-grip").addEventListener("dblclick", () => setDockHeight(DOCK_DEFAULT, true));
+$("tab-progress").addEventListener("click", () => showTab("progress"));
+$("tab-log").addEventListener("click", () => showTab("log"));
 $("add-node").addEventListener("click", addNode);
+$("add-condition").addEventListener("click", addCondition);
 $("relayout").addEventListener("click", relayout);
 $("connect").addEventListener("click", () => {
   connecting = connecting ? null : "arm";
   $("connect").classList.toggle("on", !!connecting);
   toast(connecting ? "Click the upstream node, then the downstream one." : "Cancelled.");
 });
+$("show-prompt").addEventListener("click", () => {
+  sel = null; render(); renderSide();
+  $("side").scrollTop = 0;
+});
+$("canvas-wrap").addEventListener("pointerdown", startPan);
 $("canvas-wrap").addEventListener("click", () => {
   if (connecting) return;
+  if (panned) { panned = false; return; }  // that click was the end of a pan
   sel = null; render(); renderSide();
 });
 window.addEventListener("keydown", (ev) => {
@@ -654,7 +1872,13 @@ window.addEventListener("beforeunload", (ev) => {
   if (dirty) { ev.preventDefault(); ev.returnValue = ""; }
 });
 
-load().then(() => { if (plan) { loadReviewers(); renderSide(); } });
+setDockHeight(storedDockHeight() || DOCK_DEFAULT, false);
+showTab(tab);   // explicit, so the page and its markup cannot disagree
+load();
+loadState();
+// A run belongs to the analysis, not to this page: asking once on load is what
+// lets a reload — or a second tab — pick up an analysis already in flight.
+pollRun();
 </script>
 </body>
 </html>

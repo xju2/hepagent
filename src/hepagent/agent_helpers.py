@@ -251,18 +251,35 @@ class AgentManifestLoader:
 
     def get_skill_catalog(self) -> str:
         """Scans all skill directories and returns their YAML descriptions."""
-        catalog = []
-        skills_root = self.agents_dir / "skills"
-        if not skills_root.exists():
-            return ""  # No skills available
+        return "\n".join(f"- **{name}**: {desc}" for name, desc in list_skills(self.agents_dir))
 
-        for skill_dir in skills_root.iterdir():
-            if skill_dir.is_dir():
-                skill_file = skill_dir / "SKILL.md"
-                if skill_file.exists():
-                    meta, _ = extract_yaml(skill_file)
-                    skill_name = meta.get("name", skill_dir.name)
-                    desc = meta.get("description", "No description provided.")
-                    catalog.append(f"- **{skill_name}**: {desc}")
 
-        return "\n".join(catalog)
+def list_skills(agents_dir=None) -> list[tuple[str, str]]:
+    """Installed skills as ``(name, description)``, sorted by name.
+
+    The data behind `AgentManifestLoader.get_skill_catalog`'s markdown, so the
+    plan editor can offer the same set of skills the agent would see without
+    parsing a bullet list back apart.
+
+    Args:
+        agents_dir: Agents root to scan. Defaults to the active one.
+    """
+    from hepagent.helpers import get_agent_dir
+
+    skills_root = (agents_dir or get_agent_dir()) / "skills"
+    if not skills_root.exists():
+        return []
+
+    skills: list[tuple[str, str]] = []
+    for skill_dir in sorted(skills_root.iterdir()):
+        skill_file = skill_dir / "SKILL.md"
+        if not skill_dir.is_dir() or not skill_file.exists():
+            continue
+        meta, _ = extract_yaml(skill_file)
+        skills.append(
+            (
+                meta.get("name", skill_dir.name),
+                meta.get("description", "No description provided."),
+            )
+        )
+    return sorted(skills)

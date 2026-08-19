@@ -18,6 +18,7 @@ NodeType = Literal[
     "problem",
     "analysis_root",
     "commitment",
+    "process",
     "dataset",
     "method",
     "artifact",

@@ -287,3 +287,71 @@ def test_resume_point_of_a_fresh_analysis_is_the_entry_node(root):
 
 def test_resume_point_survives_a_missing_graph(tmp_path):
     assert resume_point(tmp_path / "nowhere", ["strategy"]) is None
+
+
+# ------------------------------------------------------------------- skipping
+
+
+@pytest.fixture
+def fork_root(tmp_path):
+    """A plan that forks: check → (true) fast, (false) slow, both re-joining."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_condition, make_node, make_plan
+
+    plan = make_plan(
+        node_ids=("start", "fast", "slow", "combine"),
+        edges=(
+            ("start", "check"),
+            PlanEdge(upstream="check", downstream="fast", kind="on_true"),
+            PlanEdge(upstream="check", downstream="slow", kind="on_false"),
+            ("fast", "combine"),
+            ("slow", "combine"),
+        ),
+        nodes=(
+            make_node("start"),
+            make_condition("check"),
+            make_node("fast"),
+            make_node("slow"),
+            make_node("combine"),
+        ),
+    )
+    analysis = tmp_path / "fork"
+    analysis.mkdir()
+    save_plan(analysis, plan)
+    bootstrap_graph(analysis, plan)
+    return analysis, plan
+
+
+def test_a_skipped_prerequisite_satisfies_the_node_that_re_joins(fork_root):
+    """The untaken branch never runs, so waiting on it would stall the analysis."""
+    analysis, plan = fork_root
+    graph = AnalysisGraph.load(analysis)
+    completed = ["start", "check", "fast"]
+
+    assert "combine" not in ready_phases(graph, completed, plan)
+    assert "combine" in ready_phases(graph, completed, plan, skipped=["slow"])
+
+
+def test_a_skipped_node_is_never_offered_for_execution(fork_root):
+    analysis, plan = fork_root
+    graph = AnalysisGraph.load(analysis)
+    ready = ready_phases(graph, ["start", "check"], plan, skipped=["slow"])
+    assert "slow" not in ready
+    assert "fast" in ready
+
+
+def test_next_phase_routes_past_a_skipped_branch(fork_root):
+    analysis, plan = fork_root
+    graph = AnalysisGraph.load(analysis)
+    assert next_phase(graph, ["start", "check", "fast"], plan=plan, skipped=["slow"]) == "combine"
+
+
+def test_readiness_still_names_a_genuinely_blocked_prerequisite(fork_root):
+    """Skipping is not a way to make everything runnable."""
+    analysis, plan = fork_root
+    graph = AnalysisGraph.load(analysis)
+    blocked = {r.phase: r.blocked_by for r in phase_readiness(graph, [], plan, skipped=["slow"])}
+    assert blocked["combine"] == ["fast"]

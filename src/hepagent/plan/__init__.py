@@ -16,7 +16,10 @@ See `docs/PLAN.md` for the schema and the invariants.
 from hepagent.plan.compile import execution_order, plan_to_graph
 from hepagent.plan.layout import layer
 from hepagent.plan.schema import (
+    BRANCH_KINDS,
+    COMPARISONS,
     EDGE_KINDS,
+    EXHAUSTION,
     GATE_TIMINGS,
     GATES,
     INJECT_MODES,
@@ -24,6 +27,8 @@ from hepagent.plan.schema import (
     PLAN_SCHEMA_VERSION,
     ROLES,
     AnalysisPlan,
+    ConditionMetric,
+    PlanCondition,
     PlanContract,
     PlanEdge,
     PlanGate,
@@ -43,7 +48,10 @@ from hepagent.plan.store import (
 from hepagent.plan.validate import validate_plan
 
 __all__ = [
+    "BRANCH_KINDS",
+    "COMPARISONS",
     "EDGE_KINDS",
+    "EXHAUSTION",
     "GATES",
     "GATE_TIMINGS",
     "HISTORY_DIRNAME",
@@ -53,6 +61,8 @@ __all__ = [
     "PLAN_SCHEMA_VERSION",
     "ROLES",
     "AnalysisPlan",
+    "ConditionMetric",
+    "PlanCondition",
     "PlanContract",
     "PlanEdge",
     "PlanFormatError",

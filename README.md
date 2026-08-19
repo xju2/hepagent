@@ -38,7 +38,6 @@ cd hepagent
 uv python install 3.12
 make sync
 source .venv/bin/activate
-export OPENAI_AGENTS_DISABLE_TRACING=1  # Optional: disable tracing logs if you don't have OPENAI_API_KEY
 hepagent list-platforms
 hepagent list-models --platform cborg
 ```
@@ -48,8 +47,11 @@ After the installation, you can find default configurations at `$HOME/.hepagent`
 The environment variables are stored in `$HOME/.hepagent/config/env_vars.toml`.
 
 To use a LLM provider, set the corresponding API keys as environment variables.
-You may also want to set `OPENAI_AGENTS_DISABLE_TRACING=1` to disable the tracing logs,
-especially if you do not have an OPENAI_API_KEY.
+
+OpenAI Agents SDK tracing (which uploads traces to the OpenAI platform) is
+**disabled by default**, since HepAgent usually runs against other providers.
+Set `HEPAGENT_OPENAI_TRACING=1` (or the key of the same name in
+`env_vars.toml`) to opt back in; it needs a valid `OPENAI_API_KEY`.
 
 If you don't want to store API keys in the TOML file,
 you can set them to environment variables directly.

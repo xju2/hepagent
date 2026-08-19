@@ -1,0 +1,18 @@
+# MCP servers this installation may attach to an analysis node.
+#
+# This file is a *catalog*, not a launcher. hepagent does not start or connect to
+# MCP servers yet: the plan editor offers the names declared here, and
+# `plan.json` records which nodes selected them. Adding a server below makes it
+# selectable and stops `plan validate` from calling the name unknown — nothing
+# more. Wiring the selection into a running agent is a separate change.
+#
+# Each entry is a table under [servers], keyed by the name a plan node refers to.
+# `description` is the only field read today; `command`/`args`/`url` are recorded
+# for the eventual client and ignored for now.
+#
+# [servers.lep-corpus]
+# description = "SciTreeRAG index of LEP-era analysis notes"
+# command = "uvx"
+# args = ["scitreerag-mcp", "--corpus", "lep"]
+
+[servers]

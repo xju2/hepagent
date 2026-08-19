@@ -59,6 +59,29 @@ def test_bootstrap_copies_toml_defaults(tmp_path):
         bootstrap_hepagent_home()
     assert (tmp_path / "config" / "providers.toml").exists()
     assert (tmp_path / "config" / "env_vars.toml").exists()
+    assert (tmp_path / "config" / "mcp.toml").exists()
+
+
+def test_the_mcp_catalog_is_empty_rather_than_an_error(tmp_path):
+    """Having no MCP server is the normal state, unlike having no provider."""
+    from hepagent.helpers import load_mcp_config
+
+    load_mcp_config.cache_clear()
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        assert load_mcp_config() == {}
+    load_mcp_config.cache_clear()
+
+
+def test_the_mcp_catalog_reads_the_users_servers(tmp_path):
+    from hepagent.helpers import load_mcp_config
+
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "mcp.toml").write_text('[servers.lep-corpus]\ndescription = "LEP notes"\n')
+    load_mcp_config.cache_clear()
+    with patch("hepagent.helpers.get_hepagent_home", return_value=tmp_path):
+        assert list(load_mcp_config()) == ["lep-corpus"]
+    load_mcp_config.cache_clear()
 
 
 def test_bootstrap_copies_agents_dir(tmp_path):
@@ -313,3 +336,40 @@ def test_get_env_var_toml_value_conversion_error(monkeypatch):
         monkeypatch.delenv("TEST_KEY", raising=False)
         with pytest.raises(ValueError, match="TEST_KEY"):
             get_env_var("TEST_KEY", dtype=int)
+
+
+def _reset_openai_tracing_cache():
+    from hepagent.config.env import env_config
+
+    env_config.__dict__.pop("openai_tracing", None)
+
+
+def test_configure_openai_tracing_disabled_by_default(monkeypatch):
+    """OpenAI Agents SDK tracing is off unless HEPAGENT_OPENAI_TRACING is set."""
+    from agents.tracing import get_trace_provider
+    from hepagent.helpers import configure_openai_tracing
+
+    monkeypatch.delenv("HEPAGENT_OPENAI_TRACING", raising=False)
+    _reset_openai_tracing_cache()
+    try:
+        assert configure_openai_tracing() is False
+        assert get_trace_provider()._disabled is True
+    finally:
+        _reset_openai_tracing_cache()
+        configure_openai_tracing()
+
+
+def test_configure_openai_tracing_opt_in(monkeypatch):
+    """Setting HEPAGENT_OPENAI_TRACING re-enables SDK tracing."""
+    from agents.tracing import get_trace_provider
+    from hepagent.helpers import configure_openai_tracing
+
+    monkeypatch.setenv("HEPAGENT_OPENAI_TRACING", "true")
+    _reset_openai_tracing_cache()
+    try:
+        assert configure_openai_tracing() is True
+        assert get_trace_provider()._disabled is False
+    finally:
+        monkeypatch.delenv("HEPAGENT_OPENAI_TRACING", raising=False)
+        _reset_openai_tracing_cache()
+        configure_openai_tracing()

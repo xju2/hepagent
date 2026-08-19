@@ -13,17 +13,24 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from agents import Runner
 from hepagent.agents.common import AgentContext
+from hepagent.agents.jfc.capabilities import plan_vocabulary
 from hepagent.agents.jfc.codesign import run_codesign_gate
 from hepagent.agents.jfc.commitment_checker import (
     CommitmentsNotResolved,
     check_phase1_commitments,
+)
+from hepagent.agents.jfc.condition import (
+    ConditionOutcome,
+    evaluate_condition,
+    exhaust,
+    record_evaluation,
 )
 from hepagent.agents.jfc.executor import (
     create_note_writer,
@@ -31,7 +38,12 @@ from hepagent.agents.jfc.executor import (
     create_typesetter,
 )
 from hepagent.agents.jfc.fixer import run_fixer
-from hepagent.agents.jfc.graph_builder import bootstrap_graph, ingest_node, ingest_review
+from hepagent.agents.jfc.graph_builder import (
+    bootstrap_graph,
+    ingest_condition,
+    ingest_node,
+    ingest_review,
+)
 from hepagent.agents.jfc.investigator import RegressionTicket, run_investigator
 from hepagent.agents.jfc.planner import next_phase
 from hepagent.agents.jfc.review_gate import (
@@ -40,9 +52,9 @@ from hepagent.agents.jfc.review_gate import (
     ReviewGateResult,
     run_review_gate,
 )
-from hepagent.agents.jfc.reviewers import REVIEWER_NAMES
 from hepagent.graph.store import AnalysisGraph
 from hepagent.graph.validation import validate_commitments
+from hepagent.interaction import current_backend
 from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.service import APPROVAL_GATE, PlanApprovalGate
 from hepagent.plan.store import has_plan, load_plan, save_plan
@@ -76,6 +88,14 @@ class JFCOrchestrationState:
     model_name: str | None = None
     completed_nodes: list[str] = field(default_factory=list)
     phase_iterations: dict[str, int] = field(default_factory=dict)
+    #: Nodes a condition routed past. Durable, unlike a node merely not run yet:
+    #: the branch was decided, and downstream work must stop waiting on it.
+    skipped_nodes: list[str] = field(default_factory=list)
+    #: Evaluations spent per condition node — the loop budget, tracked across
+    #: resumes so a restart cannot silently refill it.
+    condition_iterations: dict[str, int] = field(default_factory=dict)
+    #: Metric values each condition has read, oldest first, for `improvement_*`.
+    condition_history: dict[str, list[float]] = field(default_factory=dict)
 
     def model_dump_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -114,22 +134,23 @@ def load_state(analysis_root: Path) -> JFCOrchestrationState:
 def update_graph(
     analysis_root: Path,
     node: PlanNode,
-    stage: Literal["phase", "review"],
+    stage: Literal["phase", "review", "condition"],
     plan: AnalysisPlan | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
 ) -> None:
-    """Fold a node's outputs (or its review round) into the analysis graph.
+    """Fold a node's outputs, its review round or its branch decision into the graph.
 
     Graph ingestion is bookkeeping, not analysis: a failure here must never take
     down a run that is otherwise progressing, so this swallows exceptions the
     same way `git_commit_phase` does and reports them through the callback.
     """
+    ingesters = {
+        "phase": ingest_node,
+        "review": ingest_review,
+        "condition": ingest_condition,
+    }
     try:
-        report = (
-            ingest_node(analysis_root, node.id, plan)
-            if stage == "phase"
-            else ingest_review(analysis_root, node.id, plan)
-        )
+        report = ingesters[stage](analysis_root, node.id, plan)
     except Exception as exc:  # noqa: BLE001 - bookkeeping must not abort a run
         if progress_callback:
             progress_callback(node.id, f"graph {stage} ingestion failed: {exc}")
@@ -158,24 +179,34 @@ def _phase_sequence(
     plan: AnalysisPlan,
     assumed: set[str],
     progress_callback: Callable[[str, str], None] | None = None,
+    attempted: set[str] | None = None,
 ) -> Iterator[PlanNode]:
     """Yield nodes to run, re-reading the graph frontier after each one.
 
     The order is derived from `requires` edges rather than declared, so a node
     becomes runnable exactly when its prerequisites are complete — including
     after a regression cycle has un-completed part of the analysis.
+
+    Args:
+        attempted: Nodes already offered, owned by the caller. A loop rewinds by
+            removing its body from this set as well as from `completed_nodes`;
+            keeping the set private here would mean a node could be offered only
+            once per run and no loop could ever take a second pass.
     """
-    attempted: set[str] = set()
+    if attempted is None:
+        attempted = set()
 
     while True:
         satisfied = set(state.completed_nodes) | assumed
         try:
             graph = AnalysisGraph.load(analysis_root)
-            node_id = next_phase(graph, satisfied, skip=attempted, plan=plan)
+            node_id = next_phase(
+                graph, satisfied, skip=attempted, plan=plan, skipped=state.skipped_nodes
+            )
         except Exception as exc:  # noqa: BLE001 - fall back rather than abort
             if progress_callback:
                 progress_callback("planner", f"graph planning failed ({exc}); using plan order")
-            node_id = _fallback_next(plan, satisfied, attempted)
+            node_id = _fallback_next(plan, satisfied, attempted | set(state.skipped_nodes))
 
         if node_id is None:
             return
@@ -328,6 +359,18 @@ async def _human_gate(node: PlanNode, pdf_path: Path | None) -> bool:
     """Ask a person to approve what a node produced. True when they approve."""
     pdf_str = str(pdf_path) if pdf_path else "(PDF compilation failed — check logs)"
 
+    # A run launched from the plan page has no terminal: the gate is asked there
+    # instead, as two buttons. See `hepagent.interaction`.
+    backend = current_backend()
+    if backend is not None:
+        answer = backend.ask(
+            f"{node.label} is complete. Draft analysis note PDF: {pdf_str}\n\n"
+            "Review the PDF, then APPROVE to continue or ITERATE to send the node back.",
+            thought=f"Human gate after node '{node.id}'.",
+            choices=("APPROVE", "ITERATE"),
+        )
+        return answer.strip().upper().startswith("APPROVE")
+
     print(
         f"\n{'=' * 60}\n"
         f"HUMAN GATE: {node.label} complete\n"
@@ -434,6 +477,7 @@ async def _run_regression_cycle(
     err: PhaseRegressionError,
     progress_callback: Callable[[str, str], None] | None,
     max_turns: int | None = None,
+    attempted: set[str] | None = None,
 ) -> None:
     """
     Handle a regression verdict:
@@ -481,6 +525,8 @@ async def _run_regression_cycle(
     for node_id in nodes_to_rerun:
         if node_id in state.completed_nodes:
             state.completed_nodes.remove(node_id)
+        if attempted is not None:
+            attempted.discard(node_id)
     save_state(state)
 
     git_commit_phase(
@@ -491,7 +537,9 @@ async def _run_regression_cycle(
 
     for node_id in nodes_to_rerun:
         node = plan.node(node_id)
-        if node is not None:
+        # A condition is evaluated, not executed. Un-completing it above is
+        # enough — the sequence offers it again once its body has re-run.
+        if node is not None and node.kind != "condition":
             await run_phase_with_review(state, node, plan, progress_callback, max_turns=max_turns)
 
 
@@ -527,6 +575,212 @@ def _reach(plan: AnalysisPlan, start: str, *, forward: bool) -> set[str]:
                 seen.add(nxt)
                 frontier.append(nxt)
     return seen
+
+
+async def run_condition_node(
+    state: JFCOrchestrationState,
+    node: PlanNode,
+    plan: AnalysisPlan,
+    attempted: set[str],
+    progress_callback: Callable[[str, str], None] | None = None,
+    max_turns: int | None = None,
+) -> None:
+    """Evaluate a condition node and route the analysis along one of its branches.
+
+    A condition is evaluated, not executed: no executor, no note writer, and no
+    review gate. That bypass has to be explicit — `reviewers_for` deliberately
+    hands a node declaring no reviewers the critical reviewer, so an empty panel
+    would not have been enough.
+
+    Taking a **back** branch rewinds: the loop body is dropped from
+    `completed_nodes` *and* from `attempted`, which is what lets the planner
+    offer it again. Taking a **forward** branch skips whatever the other branch
+    exclusively leads to, so a node that re-joins downstream stops waiting on
+    work the analysis decided not to do.
+
+    Raises:
+        PhaseEscalationError: the budget ran out and the plan asked for a human.
+    """
+    limit = node.condition.max_iterations if node.condition else 1
+    history = list(state.condition_history.get(node.id, []))
+    iteration = state.condition_iterations.get(node.id, 0) + 1
+
+    if progress_callback:
+        progress_callback(node.id, f"evaluating condition (iteration {iteration}/{limit})")
+
+    outcome = await evaluate_condition(
+        node,
+        state.root,
+        plan,
+        iteration=iteration,
+        history=history,
+        model_provider=state.model_provider,
+        model_name=state.model_name,
+        max_turns=max_turns if max_turns is not None else 10,
+    )
+    state.condition_iterations[node.id] = iteration
+    if outcome.metric_value is not None:
+        history.append(outcome.metric_value)
+        state.condition_history[node.id] = history
+
+    outcome, target = _apply_budget(plan, node, outcome, iteration, limit, progress_callback)
+    record_evaluation(state.root, node, iteration, outcome, target)
+
+    if node.id not in state.completed_nodes:
+        state.completed_nodes.append(node.id)
+    save_state(state)
+
+    update_graph(state.root, node, "condition", plan, progress_callback)
+
+    if progress_callback:
+        progress_callback(
+            node.id,
+            f"condition {outcome.branch} via {outcome.source} → "
+            f"{target or 'nowhere'}: {_one_line(outcome.rationale)}",
+        )
+
+    if outcome.escalate:
+        raise PhaseEscalationError(
+            node.id,
+            ReviewGateResult(verdict="ESCALATE", category_a_findings=[outcome.rationale]),
+        )
+
+    if target is None:
+        return
+
+    if _is_back_branch(plan, node.id, target, outcome.branch):
+        _rewind_loop(state, plan, node, target, attempted, progress_callback)
+    else:
+        _skip_untaken_branch(state, plan, node, target, progress_callback)
+    save_state(state)
+
+
+def _apply_budget(
+    plan: AnalysisPlan,
+    node: PlanNode,
+    outcome: ConditionOutcome,
+    iteration: int,
+    limit: int,
+    progress_callback: Callable[[str, str], None] | None,
+) -> tuple[ConditionOutcome, str | None]:
+    """Refuse a rewind that would exceed the loop's budget.
+
+    `max_iterations` bounds how many times the **body runs**, which is the cost a
+    plan author is choosing. The condition is still evaluated on the final pass —
+    the reading is cheap and the decision record should say what the metric
+    actually showed when the budget, rather than convergence, ended the loop.
+    """
+    target = _branch_target(plan, node, outcome.branch)
+    if target is None or not _is_back_branch(plan, node.id, target, outcome.branch):
+        return outcome, target
+    if iteration < limit:
+        return outcome, target
+
+    exhausted = exhaust(node)
+    fallback = _branch_target(plan, node, exhausted.branch)
+    if fallback is not None and _is_back_branch(plan, node.id, fallback, exhausted.branch):
+        # The plan's own exhaustion branch loops as well. Honouring it would run
+        # forever, which is the one outcome the budget exists to rule out.
+        if progress_callback:
+            progress_callback(
+                node.id,
+                f"on_exhaustion '{exhausted.branch}' also loops back; stopping here instead",
+            )
+        return exhausted, None
+    return exhausted, fallback
+
+
+def _branch_target(plan: AnalysisPlan, node: PlanNode, branch: str) -> str | None:
+    """The node a condition routes to for this outcome, or None if it declares none."""
+    kind = "on_true" if branch == "true" else "on_false"
+    for edge in plan.branch_edges(node.id):
+        if edge.kind == kind:
+            return edge.downstream
+    return None
+
+
+def _is_back_branch(plan: AnalysisPlan, condition_id: str, target: str, branch: str) -> bool:
+    kind = "on_true" if branch == "true" else "on_false"
+    return (condition_id, target, kind) in plan.back_branch_keys()
+
+
+def _rewind_loop(
+    state: JFCOrchestrationState,
+    plan: AnalysisPlan,
+    node: PlanNode,
+    head: str,
+    attempted: set[str],
+    progress_callback: Callable[[str, str], None] | None,
+) -> None:
+    """Un-complete the loop body so the planner offers it again.
+
+    The body is everything downstream of the loop head and upstream of the
+    condition — the same `_between` a regression cycle rewinds, which on a
+    branching plan is the correct set rather than a slice.
+
+    **The condition itself is part of the body it rewinds.** Leaving it complete
+    would let the loop run its body a second time and then walk straight past the
+    test that sent it round, so the loop would take exactly one extra pass
+    whatever the metric said. The budget lives in `condition_iterations`, which
+    is not rewound, so re-offering the condition cannot refill it.
+    """
+    body = _between(plan, head, node.id)
+    for node_id in sorted(body):
+        if node_id in state.completed_nodes:
+            state.completed_nodes.remove(node_id)
+        attempted.discard(node_id)
+        # A node re-entering the loop starts its review budget over; the fixer
+        # is answering a fresh execution, not continuing the previous round.
+        state.phase_iterations.pop(node_id, None)
+
+    if progress_callback:
+        progress_callback(node.id, f"looping back to {head}: re-running {sorted(body)}")
+
+    git_commit_phase(state.root, node.id, f"loop iteration via {head}")
+
+
+def _skip_untaken_branch(
+    state: JFCOrchestrationState,
+    plan: AnalysisPlan,
+    node: PlanNode,
+    taken: str,
+    progress_callback: Callable[[str, str], None] | None,
+) -> None:
+    """Mark what the branch not taken exclusively leads to as skipped.
+
+    Only what is reachable *solely* through the untaken branch is skipped: a node
+    downstream of both branches is reachable from the taken one and still runs,
+    which is what makes a fork that re-joins work.
+    """
+    others = [
+        edge.downstream
+        for edge in plan.branch_edges(node.id)
+        if edge.downstream != taken and edge.key not in plan.back_branch_keys()
+    ]
+    if not others:
+        return
+
+    kept = _reach(plan, taken, forward=True)
+    abandoned: set[str] = set()
+    for other in others:
+        abandoned |= _reach(plan, other, forward=True)
+    abandoned -= kept
+    abandoned -= set(state.completed_nodes)
+    if not abandoned:
+        return
+
+    for node_id in sorted(abandoned):
+        if node_id not in state.skipped_nodes:
+            state.skipped_nodes.append(node_id)
+
+    if progress_callback:
+        progress_callback(node.id, f"branch not taken: skipping {sorted(abandoned)}")
+
+
+def _one_line(text: str, limit: int = 160) -> str:
+    """Flatten a rationale for a single-line progress message."""
+    flat = " ".join((text or "").split())
+    return flat[:limit] + ("…" if len(flat) > limit else "")
 
 
 async def run_phase_with_review(
@@ -640,7 +894,7 @@ def require_runnable_plan(plan: AnalysisPlan) -> AnalysisPlan:
     `--plan` file declaring `directory: "../somewhere-else"` scaffolded itself
     outside the analysis root: P2 catches it, but nothing was asking P2.
     """
-    report = validate_plan(plan, known_reviewers=REVIEWER_NAMES)
+    report = validate_plan(plan, vocabulary=plan_vocabulary())
     if report.blocking:
         detail = "\n".join(f"  - [{f.rule}] {f.message}" for f in report.blocking)
         raise PlanNotRunnableError(
@@ -711,6 +965,7 @@ async def run_jfc_analysis(
     model_provider: str = "cborg",
     model_name: str | None = None,
     start_from_phase: str | None = None,
+    only_node: str | None = None,
     max_iterations_per_phase: int = 3,
     max_turns: int | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
@@ -734,6 +989,10 @@ async def run_jfc_analysis(
         model_name: Specific model name.
         start_from_phase: Node id to resume from. None starts from the plan's
             entry node; naming a node asserts everything upstream of it is done.
+        only_node: Run exactly this one node and stop — the plan page's per-node
+            "Run" button. Nothing upstream is run and nothing downstream follows,
+            so the node reads whatever its dependencies last left on disk. The
+            return value is that node's primary artifact, not the final PDF.
         max_iterations_per_phase: Floor on review iterations per node; a node
             asking for more in its plan entry gets more.
         max_turns: Per-agent turn cap.
@@ -747,7 +1006,7 @@ async def run_jfc_analysis(
         approval_gate: The latch to wait on. Defaults to the process-wide one.
     """
     analysis_root = Path(base_dir).resolve() / analysis_name
-    fresh = start_from_phase is None
+    fresh = start_from_phase is None and only_node is None
 
     # Before the scaffolder turns node directories into real ones. `_prepare_plan`
     # checks again for the plans that do not come in this way.
@@ -798,12 +1057,37 @@ async def run_jfc_analysis(
     # Nodes whose prerequisites an explicit resume point declares satisfied.
     assumed = _nodes_before(active_plan, start_from_phase)
 
-    for node in _phase_sequence(analysis_root, state, active_plan, assumed, progress_callback):
+    # Owned here rather than by the generator: a loop rewinds by taking its body
+    # back out, and a node offered only once per run could never take a second pass.
+    attempted: set[str] = set()
+
+    # A single-node run skips the planner rather than asking it for a frontier of
+    # one: the point of the button is to re-run *this* node whatever the graph
+    # thinks is ready, and `next_phase` would refuse it while something upstream
+    # is incomplete.
+    sequence: Iterable[PlanNode]
+    if only_node is None:
+        sequence = _phase_sequence(
+            analysis_root, state, active_plan, assumed, progress_callback, attempted
+        )
+    else:
+        single = active_plan.node(only_node)
+        if single is None:
+            raise ValueError(f"Plan '{active_plan.name}' has no node '{only_node}'.")
+        sequence = [single]
+
+    for node in sequence:
         state.current_node = node.id
         save_state(state)
 
         if progress_callback:
             progress_callback(node.id, "starting")
+
+        if node.kind == "condition":
+            await run_condition_node(
+                state, node, active_plan, attempted, progress_callback, max_turns=max_turns
+            )
+            continue
 
         await _run_gates(state, node, active_plan, "before", progress_callback, max_turns=max_turns)
 
@@ -813,7 +1097,12 @@ async def run_jfc_analysis(
             )
         except PhaseRegressionError as reg_err:
             await _run_regression_cycle(
-                state, active_plan, reg_err, progress_callback, max_turns=max_turns
+                state,
+                active_plan,
+                reg_err,
+                progress_callback,
+                max_turns=max_turns,
+                attempted=attempted,
             )
             # The detected node has been re-run and marked complete; move on.
             continue
@@ -833,6 +1122,13 @@ async def run_jfc_analysis(
                 max_turns=max_turns,
                 codesign_feedback=_codesign_feedback(analysis_root),
             )
+
+    if only_node is not None:
+        node = active_plan.node(only_node)
+        artifact = analysis_root / node.artifact_path if node else analysis_root
+        if progress_callback:
+            progress_callback("complete", f"Node '{only_node}' complete: {artifact}")
+        return artifact
 
     final_pdf = _final_pdf(analysis_root, active_plan)
     if progress_callback:

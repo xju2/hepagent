@@ -24,9 +24,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hepagent.agents.jfc.commitment_checker import check_phase1_commitments
+from hepagent.agents.jfc.condition import DECISIONS_DIRNAME
+from hepagent.agents.jfc.processes import INVENTORY_FILENAME, load_inventory
 from hepagent.agents.jfc.review_gate import parse_verdict_from_adjudication
 from hepagent.graph.schema import Edge, GraphSchemaError, Node, make_id
 from hepagent.graph.store import AnalysisGraph
+from hepagent.helpers import read_md
 from hepagent.plan.compile import plan_to_graph
 from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.store import resolve_plan
@@ -179,6 +182,7 @@ def ingest_node(
     _ingest_figures(graph, report, root, node, artifact_id)
     _ingest_results(graph, report, root, node, artifact_id)
     _ingest_scripts(graph, report, root, node, artifact_id)
+    _ingest_processes(graph, report, root, node, artifact_id)
     _ingest_commitments(graph, report, root, plan, node)
     return report
 
@@ -323,6 +327,11 @@ def _ingest_results(
     for result in candidates:
         if not result.is_file():
             continue
+        if result.name == INVENTORY_FILENAME:
+            # Ingested as process/dataset nodes by `_ingest_processes`, which
+            # reads its meaning; recording it again as opaque evidence would put
+            # the same file in the graph twice under two different stories.
+            continue
         rel = str(result.relative_to(root))
         evidence_id = make_id("evidence", rel)
         _add_node(
@@ -390,6 +399,103 @@ def _ingest_scripts(
                     type="derives_from",
                     evidence_ref=rel,
                     phase=key,
+                    created_by=BUILDER,
+                ),
+            )
+
+
+def _ingest_processes(
+    graph: AnalysisGraph,
+    report: IngestReport,
+    root: Path,
+    node: PlanNode,
+    artifact_id: str | None,
+) -> None:
+    """Record the process inventory this node wrote, if it wrote one.
+
+    The inventory (`outputs/processes.json`) is the strategy's answer to "what is
+    the signal, what are the backgrounds, and which datasets carry each". It is
+    ingested rather than authored here: the file stays the source of truth, so
+    re-running the builder over an unchanged file changes nothing, and a plan that
+    moves the inventory to a different node needs no change in this function.
+
+    Each process becomes a `process` node carrying its classification, each
+    dataset a `dataset` node, and the link between them a `requires` edge — a
+    process cannot be estimated without the dataset that carries it.
+    """
+    inventory = load_inventory(root, node)
+    if inventory is None:
+        return
+    if inventory.problems():
+        report.skipped.append(
+            f"Node {node.id}: {INVENTORY_FILENAME} is present but does not validate — not ingested"
+        )
+        return
+
+    rel = f"{node.outputs_dir}/{INVENTORY_FILENAME}"
+    for process in inventory.processes:
+        process_id = make_id("process", process.id)
+        _add_node(
+            graph,
+            report,
+            Node(
+                id=process_id,
+                type="process",
+                label=process.label or process.id,
+                content_ref=rel,
+                metadata={
+                    "role": process.role,
+                    "category": process.category,
+                    "importance": process.importance,
+                    "rationale": process.rationale,
+                    "estimation": process.estimation,
+                },
+                phase=node.id,
+                created_by=BUILDER,
+            ),
+        )
+        if artifact_id:
+            _add_edge(
+                graph,
+                report,
+                Edge(
+                    src=artifact_id,
+                    dst=process_id,
+                    type="derives_from",
+                    evidence_ref=rel,
+                    phase=node.id,
+                    created_by=BUILDER,
+                ),
+            )
+        for dataset in process.datasets:
+            dataset_id = make_id("dataset", dataset.name)
+            _add_node(
+                graph,
+                report,
+                Node(
+                    id=dataset_id,
+                    type="dataset",
+                    label=dataset.name,
+                    content_ref=dataset.path or None,
+                    metadata={
+                        "kind": dataset.kind,
+                        "source": dataset.source,
+                        "events": dataset.events,
+                        **dataset.metadata,
+                    },
+                    phase=node.id,
+                    created_by=BUILDER,
+                ),
+            )
+            _add_edge(
+                graph,
+                report,
+                Edge(
+                    src=process_id,
+                    dst=dataset_id,
+                    type="requires",
+                    evidence_ref=rel,
+                    phase=node.id,
                     created_by=BUILDER,
                 ),
             )
@@ -642,6 +748,110 @@ def _ingest_verdict(
     )
 
 
+def ingest_condition(
+    analysis_root: Path | str,
+    node_id: str,
+    plan: AnalysisPlan | None = None,
+) -> IngestReport:
+    """Ingest a condition node's branch decisions, one per evaluation.
+
+    Each `decisions/iteration_NN.md` becomes its own `decision` node. Per
+    iteration rather than per node, because a loop's third pass is a different
+    decision from its first and the graph is the record of what actually
+    happened — and because a real file per evaluation keeps ids content-addressed
+    and re-ingestion idempotent.
+
+    The edge a decision writes is what makes the record useful downstream:
+
+    - routing **forward** approves the target it released, so the graph shows
+      which branch the analysis took and why;
+    - routing **back** invalidates the loop head it re-ran, which is also what
+      makes `planner.is_consistent_checkpoint` refuse a superseded iteration, so
+      `jfc resume` mid-loop lands in the right place with no special casing.
+
+    Args:
+        analysis_root: The analysis root directory.
+        node_id: Id of the condition node whose decisions should be ingested.
+        plan: The analysis plan. Read from `plan.json` when omitted.
+    """
+    root = Path(analysis_root)
+    report = IngestReport(phase=str(node_id))
+
+    try:
+        plan = resolve_plan(root, plan)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised into the orchestrator
+        report.skipped.append(f"Could not read the analysis plan: {exc}")
+        return report
+
+    node = plan.node(str(node_id))
+    if node is None or node.kind != "condition":
+        report.skipped.append(f"Plan node '{node_id}' is not a condition — nothing ingested")
+        return report
+
+    decisions_dir = root / node.directory / DECISIONS_DIRNAME
+    if not decisions_dir.is_dir():
+        return report
+
+    graph = AnalysisGraph.load(root)
+    graph.ensure_dir()
+
+    for record in sorted(decisions_dir.glob("iteration_*.md")):
+        rel = f"{node.directory}/{DECISIONS_DIRNAME}/{record.name}"
+        branch, target = _parse_decision(record)
+        decision_id = make_id("decision", rel)
+
+        _add_node(
+            graph,
+            report,
+            Node(
+                id=decision_id,
+                type="decision",
+                label=f"{node.label} — {branch or 'undecided'}",
+                content_ref=rel,
+                metadata={"branch": branch, "target": target, "condition": node.id},
+                phase=node.id,
+                created_by=BUILDER,
+            ),
+        )
+
+        target_node = plan.node(target) if target else None
+        if target_node is None:
+            continue
+        target_id = make_id("artifact", target_node.artifact_path)
+        if not graph.has_node(target_id):
+            report.skipped.append(f"Branch target '{target}' is not in the graph")
+            continue
+
+        is_back = any(key[0] == node.id and key[1] == target for key in plan.back_branch_keys())
+        _add_edge(
+            graph,
+            report,
+            Edge(
+                src=decision_id if is_back else target_id,
+                dst=target_id if is_back else decision_id,
+                type="invalidates" if is_back else "approved_by",
+                evidence_ref=rel,
+                phase=node.id,
+                created_by=BUILDER,
+            ),
+        )
+
+    return report
+
+
+def _parse_decision(record: Path) -> tuple[str, str]:
+    """Read `(branch, target)` out of a decision record written by `condition.py`."""
+    branch = target = ""
+    for line in read_md(record).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- **Result**:"):
+            branch = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("- **Routes to**:"):
+            candidate = stripped.split(":", 1)[1].strip()
+            target = "" if candidate.startswith("(") else candidate
+    return branch, target
+
+
 def rebuild(analysis_root: Path | str, plan: AnalysisPlan | None = None) -> IngestReport:
     """Re-derive the deterministic graph for every plan node from files on disk.
 
@@ -662,6 +872,9 @@ def rebuild(analysis_root: Path | str, plan: AnalysisPlan | None = None) -> Inge
         return combined
 
     for node in plan.nodes:
+        if node.kind == "condition":
+            combined.merge(ingest_condition(root, node.id, plan))
+            continue
         combined.merge(ingest_node(root, node.id, plan))
         combined.merge(ingest_review(root, node.id, plan))
     return combined

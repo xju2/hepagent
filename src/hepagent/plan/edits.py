@@ -22,7 +22,13 @@ import dataclasses
 import re
 from dataclasses import dataclass, field
 
-from hepagent.plan.schema import AnalysisPlan, PlanEdge, PlanNode
+from hepagent.plan.schema import (
+    AnalysisPlan,
+    ConditionMetric,
+    PlanCondition,
+    PlanEdge,
+    PlanNode,
+)
 
 #: Operations an edit may name. Anything else is skipped with a note.
 OPS = (
@@ -32,6 +38,7 @@ OPS = (
     "add_edge",
     "remove_edge",
     "set_prompt",
+    "add_loop",
 )
 
 _SLUG_UNSAFE = re.compile(r"[^a-z0-9_-]+")
@@ -55,10 +62,22 @@ class PlanEdit:
         like: An existing node whose reviewers, contract, gates, role and
             iteration budget the new node should inherit.
         into: New node ids, for `split_node`.
-        upstream: Producing node, for the edge operations.
-        downstream: Consuming node, for the edge operations.
-        kind: `requires` (blocking) or `informs` (context only).
+        upstream: Producing node, for the edge operations. For `add_loop`, the
+            node whose output the condition tests.
+        downstream: Consuming node, for the edge operations. For `add_loop`, the
+            node the analysis moves on to once the condition holds.
+        kind: `requires` (blocking), `informs` (context only), or `on_true` /
+            `on_false` for a condition's branches.
         inject: `full`, `summary` or `none` — how the artifact enters the prompt.
+        loop_to: For `add_loop`, the node to rewind to when the condition does
+            not hold. This is what makes the plan loop.
+        question: For `add_loop`, the natural-language break condition.
+        metric_source: For `add_loop`, an analysis-root-relative results JSON.
+        metric_key: For `add_loop`, a dotted path into that JSON.
+        metric_compare: For `add_loop`, see `COMPARISONS`.
+        metric_value: For `add_loop`, the threshold.
+        max_iterations: For `add_loop`, how many times the body may run. This is
+            the loop's termination guarantee, so it is never left unset.
     """
 
     op: str
@@ -73,6 +92,13 @@ class PlanEdit:
     downstream: str | None = None
     kind: str | None = None
     inject: str | None = None
+    loop_to: str | None = None
+    question: str | None = None
+    metric_source: str | None = None
+    metric_key: str | None = None
+    metric_compare: str | None = None
+    metric_value: float | None = None
+    max_iterations: int | None = None
 
 
 @dataclass
@@ -282,6 +308,79 @@ def _set_prompt(plan: AnalysisPlan, edit: PlanEdit) -> tuple[AnalysisPlan, str]:
     )
 
 
+def _add_loop(plan: AnalysisPlan, edit: PlanEdit) -> tuple[AnalysisPlan, str]:
+    """Insert a condition node that loops, in one atomic edit.
+
+    A loop is three things at once — a condition node, a branch back to the node
+    that gets re-run, and a branch forward to whatever comes after. Proposing
+    them as three separate edits means any one of them can be skipped, leaving a
+    plan with a condition that routes nowhere or a branch from a work node. This
+    is the same reasoning as `split_node`: the reviewable unit is the structural
+    change, not its parts.
+    """
+    tested = _require_node(plan, edit.upstream, "upstream node")
+    rewind = _require_node(plan, edit.loop_to, "loop_to node")
+    node_id = slugify(edit.node_id or f"{tested.id}_converged")
+    if not node_id:
+        raise _EditRejected(f"'{edit.node_id}' is not a usable node id")
+    if plan.node(node_id) is not None:
+        raise _EditRejected(f"node '{node_id}' already exists")
+
+    exit_node = plan.node(edit.downstream) if edit.downstream else None
+    if edit.downstream and exit_node is None:
+        raise _EditRejected(f"no node '{edit.downstream}' to leave the loop for")
+
+    metric = None
+    if edit.metric_source and edit.metric_key:
+        metric = ConditionMetric(
+            source=edit.metric_source,
+            key=edit.metric_key,
+            compare=edit.metric_compare or "improvement_below",
+            value=float(edit.metric_value or 0.0),
+        )
+    if metric is None and not (edit.question or "").strip():
+        raise _EditRejected("a loop needs a metric or a question to break on")
+
+    condition = PlanNode(
+        id=node_id,
+        label=edit.label or node_id.replace("_", " ").title(),
+        directory=edit.directory or node_id,
+        artifact=edit.artifact or f"{node_id.upper()}.md",
+        kind="condition",
+        condition=PlanCondition(
+            question=edit.question or "",
+            metric=metric,
+            # Bounded whatever the proposal said: an unbounded loop is the one
+            # thing a condition node exists to make impossible.
+            max_iterations=max(int(edit.max_iterations or 3), 1),
+        ),
+    )
+
+    edges = [
+        PlanEdge(upstream=tested.id, downstream=node_id, inject=edit.inject or "summary"),
+        PlanEdge(upstream=node_id, downstream=rewind.id, kind="on_false", inject="full"),
+    ]
+    if exit_node is not None:
+        edges.append(PlanEdge(upstream=node_id, downstream=exit_node.id, kind="on_true"))
+        # Whatever used to depend on the tested node now waits for the loop to
+        # finish instead; otherwise the exit node runs before the first pass.
+        remaining = tuple(
+            e for e in plan.edges if not (e.upstream == tested.id and e.downstream == exit_node.id)
+        )
+    else:
+        remaining = plan.edges
+
+    return (
+        dataclasses.replace(
+            plan,
+            nodes=_insert_after(plan.nodes, tested.id, [condition]),
+            edges=remaining + tuple(edges),
+        ),
+        f"added loop '{node_id}': {tested.id} → {node_id}, "
+        f"rewinding to '{rewind.id}', max {condition.condition.max_iterations} pass(es)",
+    )
+
+
 _HANDLERS = {
     "add_node": _add_node,
     "remove_node": _remove_node,
@@ -289,4 +388,5 @@ _HANDLERS = {
     "add_edge": _add_edge,
     "remove_edge": _remove_edge,
     "set_prompt": _set_prompt,
+    "add_loop": _add_loop,
 }

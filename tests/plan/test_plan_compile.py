@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plan_factory import make_plan
+from plan_factory import make_loop_plan, make_plan
 
 from hepagent.agents.jfc.graph_builder import bootstrap_graph
 from hepagent.plan.compile import artifact_id, execution_order, plan_to_graph, problem_id
@@ -169,3 +169,41 @@ def test_search_template_has_the_same_topology_as_the_measurement_one():
     search = instantiate("jfc-search", analysis_type="search", **kwargs)
     assert execution_order(measurement) == execution_order(search)
     assert requires(plan_to_graph(measurement)[1]) == requires(plan_to_graph(search)[1])
+
+
+# ------------------------------------------------------------------- loops
+
+
+def test_a_forward_branch_compiles_but_a_back_branch_does_not():
+    """The back branch is a rewind instruction, not a dependency.
+
+    Compiling it would put a cycle into the graph the planner derives execution
+    order from, and every node in the loop would wait on the loop.
+    """
+    plan = make_loop_plan()
+    _, edges = plan_to_graph(plan)
+    requires = {(e.src, e.dst) for e in edges if e.type == "requires"}
+
+    condition = artifact_id(plan.node("converged"))
+    assert (artifact_id(plan.node("inference")), condition) in requires
+    assert (condition, artifact_id(plan.node("propose"))) not in requires
+    assert (artifact_id(plan.node("propose")), condition) not in requires
+
+
+def test_the_loop_head_stays_wired_to_the_problem_node():
+    """It has no prerequisite, so the physics question is its root."""
+    plan = make_loop_plan()
+    _, edges = plan_to_graph(plan)
+    assert (artifact_id(plan.node("propose")), problem_id(plan)) in {
+        (e.src, e.dst) for e in edges if e.type == "requires"
+    }
+
+
+def test_execution_order_walks_a_loop_once():
+    """`execution_order` is what the plan says happens, not how often."""
+    assert execution_order(make_loop_plan()) == [
+        "propose",
+        "evaluate",
+        "converged",
+        "inference",
+    ]

@@ -101,6 +101,31 @@ class ChainlitBridge:
         async with cl.Step(name=f"bash (exit {returncode})", type="tool") as step:
             step.output = f"```\n{output}\n```"
 
+    async def open_plan(self, name: str, url: str) -> None:
+        """Send the user to the plan editor for a freshly created analysis.
+
+        The link is the contract; the auto-open is a convenience. A browser is
+        entitled to block `window.open` outside a user gesture, so the element
+        renders a button that does the same thing when it does — the handover
+        must not depend on a popup being allowed.
+        """
+        elements = []
+        try:
+            elements.append(cl.CustomElement(name="PlanLink", props={"url": url, "analysis": name}))
+        except Exception:  # noqa: BLE001 - a link in the text is enough on its own
+            elements = []
+        await cl.Message(
+            content=(
+                f"### Analysis `{name}` is ready to shape\n"
+                f"Opening its plan editor: [{url}]({url})\n\n"
+                "Edit the graph there — add, split or re-prompt nodes — then press "
+                "**Approve & run**. The run reports back on that page, and asks you "
+                "there when it needs a decision."
+            ),
+            author="system",
+            elements=elements,
+        ).send()
+
     async def ask_user(self, prompt: str, thought: str) -> str:
         if thought:
             await cl.Message(content=f"**Thinking:** {thought}", author="agent").send()
@@ -235,6 +260,8 @@ async def on_chat_start() -> None:
             f"### hepagent\n{state.status_line()}\n\n"
             f"Session `{state.session_id}` — resume it later with "
             f"`hepagent repl --chat {state.session_id}`.\n\n"
+            "Say **“create a new analysis”** to start one: I will ask what you want "
+            "measured, then open its plan for you to shape and launch.\n\n"
             "Type `/help` for slash commands, or use the ⚙ panel to change settings."
         ),
         author="system",

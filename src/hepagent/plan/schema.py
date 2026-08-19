@@ -31,9 +31,10 @@ from typing import Any
 #: Bumped when a change to this module cannot be read by the previous version.
 PLAN_SCHEMA_VERSION = 1
 
-#: What a node *is*. ``work`` runs an agent; ``gate`` only interposes a check.
+#: What a node *is*. ``work`` runs an agent; ``gate`` only interposes a check;
+#: ``condition`` evaluates a test and routes to one of two branch targets.
 #: The discriminator exists so fully general agent nodes stay an additive change.
-NODE_KINDS: tuple[str, ...] = ("work", "gate")
+NODE_KINDS: tuple[str, ...] = ("work", "gate", "condition")
 
 #: Which agent factory owns a node. ``note_writer``/``typesetter`` normally run
 #: as sub-steps of a ``produces_note`` node rather than as nodes of their own.
@@ -52,10 +53,29 @@ GATE_TIMINGS: tuple[str, ...] = ("before", "after")
 
 #: ``requires`` is blocking and orders execution. ``informs`` injects the upstream
 #: artifact when it happens to exist but never delays the downstream node.
-EDGE_KINDS: tuple[str, ...] = ("requires", "informs")
+#: ``on_true``/``on_false`` leave a condition node for the target it routes to.
+EDGE_KINDS: tuple[str, ...] = ("requires", "informs", "on_true", "on_false")
+
+#: The two edges a condition node routes along. Only a ``condition`` node may
+#: emit one; see `AnalysisPlan.back_branch_keys` for how they are classified.
+BRANCH_KINDS: tuple[str, ...] = ("on_true", "on_false")
 
 #: How much of an upstream artifact enters the downstream prompt.
 INJECT_MODES: tuple[str, ...] = ("full", "summary", "none")
+
+#: How a `ConditionMetric` turns a number into a branch. ``above``/``below``
+#: compare the value itself; ``improvement_*`` compare the change since the
+#: previous iteration, which is what a convergence test actually asks.
+COMPARISONS: tuple[str, ...] = (
+    "above",
+    "below",
+    "improvement_above",
+    "improvement_below",
+)
+
+#: Which branch a condition takes when its iteration budget runs out.
+#: ``escalate`` stops the run for a human instead of choosing.
+EXHAUSTION: tuple[str, ...] = ("true", "false", "escalate")
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
@@ -73,6 +93,24 @@ def _known(data: dict[str, Any], cls: type) -> dict[str, Any]:
     """Drop keys `cls` does not declare, so a newer file loads in an older build."""
     fields = set(cls.__dataclass_fields__)
     return {k: v for k, v in data.items() if k in fields}
+
+
+def _depends_on(blocking: dict[str, list[str]], node_id: str, candidate: str) -> bool:
+    """True when `node_id` transitively depends on `candidate`.
+
+    Walks a ``{node: blocking upstreams}`` map, tolerating cycles in it — a plan
+    with a plain `requires` cycle still has to be drawable for a user to fix it.
+    """
+    seen: set[str] = set()
+    frontier = [node_id]
+    while frontier:
+        for upstream in blocking.get(frontier.pop(), ()):
+            if upstream == candidate:
+                return True
+            if upstream not in seen:
+                seen.add(upstream)
+                frontier.append(upstream)
+    return False
 
 
 @dataclass(frozen=True)
@@ -134,6 +172,79 @@ class PlanContract:
 
 
 @dataclass(frozen=True)
+class ConditionMetric:
+    """A machine-checkable test over a number an upstream node wrote.
+
+    Evaluating this costs no model call, which is why it is tried before the
+    natural-language `PlanCondition.question`.
+
+    Args:
+        source: Analysis-root-relative JSON file holding the number.
+        key: Dotted path into that JSON, e.g. ``"significance.expected"``.
+        compare: See `COMPARISONS`.
+        value: The threshold to compare against.
+    """
+
+    source: str
+    key: str
+    compare: str = "below"
+    value: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ConditionMetric | None:
+        if not data:
+            return None
+        payload = _known(data, cls)
+        if not payload.get("source") or not payload.get("key"):
+            return None
+        payload["value"] = float(payload.get("value") or 0.0)
+        return cls(**payload)
+
+
+@dataclass(frozen=True)
+class PlanCondition:
+    """The test a `condition` node evaluates, and the budget it may spend.
+
+    `max_iterations` is the termination guarantee: a loop exists only where a
+    condition routes backwards, and it may do so at most this many times. It is
+    independent of any model's judgement, which is what makes a cycle safe to
+    allow at all.
+
+    Args:
+        question: Natural-language test, judged by an agent. Used when `metric`
+            is absent or cannot be read.
+        metric: Machine-checkable test, tried first.
+        max_iterations: How many times this condition may route along a back
+            branch before its budget is spent.
+        on_exhaustion: What to do once it is. See `EXHAUSTION`.
+    """
+
+    question: str = ""
+    metric: ConditionMetric | None = None
+    max_iterations: int = 3
+    on_exhaustion: str = "true"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "question": self.question,
+            "metric": self.metric.to_dict() if self.metric else None,
+            "max_iterations": self.max_iterations,
+            "on_exhaustion": self.on_exhaustion,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> PlanCondition | None:
+        if data is None:
+            return None
+        payload = _known(data, cls)
+        payload["metric"] = ConditionMetric.from_dict(payload.get("metric"))
+        return cls(**payload)
+
+
+@dataclass(frozen=True)
 class PlanNode:
     """One unit of work in the analysis.
 
@@ -158,11 +269,20 @@ class PlanNode:
         arbiter: Whether an arbiter adjudicates this node's reviews.
         produces_note: Whether the node runs the note writer and typesetter.
         gates: Checks interposed around the node, see `PlanGate`.
+        condition: The test a `kind="condition"` node evaluates. Meaningless —
+            and refused by P10 — on any other kind of node.
         contract: The node's graph write-back allowance.
         max_iterations: Review iterations allowed before escalating.
         model: Optional ``"provider:model"`` override for this node.
-        tools: Optional tool-name allowlist. ``None`` means the default set for
-            `role`.
+        tools: Optional function-tool allowlist, by tool name. ``None`` means the
+            default set for `role` — which is a different statement from ``()``,
+            "this node gets no tools at all", so the tri-state is preserved
+            through serialisation.
+        skills: Skill names whose ``SKILL.md`` is loaded into the node's prompt.
+        mcp_servers: MCP server names this node may talk to. **Declarative
+            today**: the plan records the selection and the editor offers the
+            names configured in ``mcp.toml``, but nothing in this codebase
+            launches or attaches an MCP server yet.
         metadata: Free-form detail. The editor stores layout coordinates here
             under ``"x"`` and ``"y"``.
     """
@@ -180,10 +300,13 @@ class PlanNode:
     arbiter: bool = False
     produces_note: bool = False
     gates: tuple[PlanGate, ...] = ()
+    condition: PlanCondition | None = None
     contract: PlanContract = field(default_factory=PlanContract)
     max_iterations: int = 3
     model: str | None = None
     tools: tuple[str, ...] | None = None
+    skills: tuple[str, ...] = ()
+    mcp_servers: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -231,9 +354,12 @@ class PlanNode:
         data = asdict(self)
         data["contract"] = self.contract.to_dict()
         data["gates"] = [gate.to_dict() for gate in self.gates]
+        data["condition"] = self.condition.to_dict() if self.condition else None
         data["context_paths"] = list(self.context_paths)
         data["reviewers"] = list(self.reviewers)
         data["tools"] = None if self.tools is None else list(self.tools)
+        data["skills"] = list(self.skills)
+        data["mcp_servers"] = list(self.mcp_servers)
         return data
 
     @classmethod
@@ -241,8 +367,11 @@ class PlanNode:
         payload = _known(data, cls)
         payload["contract"] = PlanContract.from_dict(payload.get("contract"))
         payload["gates"] = tuple(PlanGate.from_dict(g) for g in payload.get("gates") or ())
+        payload["condition"] = PlanCondition.from_dict(payload.get("condition"))
         payload["context_paths"] = tuple(payload.get("context_paths") or ())
         payload["reviewers"] = tuple(payload.get("reviewers") or ())
+        payload["skills"] = tuple(payload.get("skills") or ())
+        payload["mcp_servers"] = tuple(payload.get("mcp_servers") or ())
         tools = payload.get("tools")
         payload["tools"] = None if tools is None else tuple(tools)
         return cls(**payload)
@@ -358,9 +487,68 @@ class AnalysisPlan:
             if edge.upstream == node_id and (kind is None or edge.kind == kind)
         ]
 
+    def branch_edges(self, node_id: str) -> list[PlanEdge]:
+        """The `on_true`/`on_false` edges leaving a condition node."""
+        return [edge for edge in self.downstream_edges(node_id) if edge.kind in BRANCH_KINDS]
+
+    def back_branch_keys(self) -> frozenset[tuple[str, str, str]]:
+        """Keys of the branch edges that point *backwards* — the loops.
+
+        A branch is a back branch exactly when treating it as blocking would
+        close a cycle; anything else is a forward branch. This is the
+        distinction the whole loop design rests on. A forward branch compiles
+        into a graph `requires` edge, so its target cannot start before the
+        condition decides. A back branch compiles into nothing — it is a rewind
+        instruction — which is what keeps a loop from deadlocking the planner
+        the way a plain `requires` cycle would.
+
+        Branches are classified one at a time, in declaration order, against the
+        blocking edges accepted so far. Testing each against the `requires`
+        edges alone is not enough: with nested loops the *outer* back branch
+        only closes its cycle through a forward branch of the inner one, and
+        classifying it forward would put a real cycle into the blocking graph.
+        Declaration order settles the otherwise-ambiguous case where two
+        branches could each be the one that closes the same cycle.
+
+        The blocking graph this builds is acyclic by construction, so P4 reports
+        a cycle only when the `requires` edges themselves contain one.
+        """
+        branches = [edge for edge in self.edges if edge.kind in BRANCH_KINDS]
+        if not branches:
+            return frozenset()
+
+        blocking: dict[str, list[str]] = {
+            node.id: [edge.upstream for edge in self.upstream_edges(node.id, kind="requires")]
+            for node in self.nodes
+        }
+        back: set[tuple[str, str, str]] = set()
+        for edge in branches:
+            # The edge would make `downstream` depend on `upstream`; that closes
+            # a cycle precisely when `upstream` already depends on `downstream`.
+            if edge.upstream == edge.downstream or _depends_on(
+                blocking, edge.upstream, edge.downstream
+            ):
+                back.add(edge.key)
+            else:
+                blocking.setdefault(edge.downstream, []).append(edge.upstream)
+        return frozenset(back)
+
     def prerequisites(self, node_id: str) -> list[str]:
-        """Node ids that must complete before `node_id` may run."""
-        return [edge.upstream for edge in self.upstream_edges(node_id, kind="requires")]
+        """Node ids that must complete before `node_id` may run.
+
+        Blocking edges are `requires` plus *forward* branches. Back branches are
+        excluded — including one here is what would make a loop unrunnable.
+
+        Recomputes the branch classification on each call. That is O(V+E) on a
+        plan of a few dozen nodes and keeps `AnalysisPlan` a plain frozen record
+        with nothing cached to invalidate.
+        """
+        back = self.back_branch_keys()
+        return [
+            edge.upstream
+            for edge in self.upstream_edges(node_id)
+            if edge.kind == "requires" or (edge.kind in BRANCH_KINDS and edge.key not in back)
+        ]
 
     def entry_nodes(self) -> list[PlanNode]:
         """Nodes with no blocking prerequisite — where an analysis starts."""
