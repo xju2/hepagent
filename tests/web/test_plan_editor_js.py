@@ -543,3 +543,55 @@ def test_delete_takes_the_node_and_the_edges_that_touched_it(observations):
     assert deleted["edges_left"] == 0
     # Nothing is selected afterwards, so the panel falls back to the prompt.
     assert deleted["panel_heading"] == "Analysis prompt"
+
+
+# ------------------------------------------------------- predefined nodes
+
+
+def test_the_library_is_fetched_once_and_grouped_by_pipeline(observations):
+    """One request on first open, none on filtering or re-opening."""
+    library = observations["library"]
+    assert library["fetches"] == ["GET /api/plan/zbb/predefined"]
+    assert library["open"] is True
+    assert library["entries"] == [
+        "group:jfc-measurement — Seven-phase measurement",
+        "row:Strategy",
+        "group:jfc-search — Search pipeline",
+        "row:Limits",
+    ]
+    assert library["refetched_on_filter"] == 0
+    assert library["refetched_on_reopen"] == 0
+    assert library["hidden_after_close"] is True
+
+
+def test_the_filter_narrows_the_library_in_the_browser(observations):
+    assert observations["library"]["filtered"] == ["Limits"]
+
+
+def test_picking_a_predefined_node_inserts_a_copy_of_the_whole_node(observations):
+    """Prompt, reviewers and contract come with it — that is the point of the library."""
+    inserted = observations["library"]["inserted"]
+    assert inserted["added"] == 1
+    assert inserted["prompt"] == "Choose a technique."
+    assert inserted["reviewers"] == ["physics"]
+    assert inserted["contract"] == {"node_types": ["commitment"], "edge_types": ["commits_to"]}
+
+
+def test_an_inserted_node_never_collides_with_one_the_plan_already_has(observations):
+    """The plan already runs `strategy` out of `phase1_strategy`.
+
+    A duplicate id is refused by the validator, and a shared directory would put
+    two nodes' artifacts on top of each other.
+    """
+    inserted = observations["library"]["inserted"]
+    assert inserted["id"] == "strategy_2"
+    assert inserted["directory"] == "phase1_strategy_2"
+
+
+def test_inserting_places_selects_and_dirties_the_plan(observations):
+    inserted = observations["library"]["inserted"]
+    assert inserted["placed"] is True
+    assert inserted["overlaps_an_existing_node"] is False
+    assert inserted["closed_after_pick"] is True
+    assert inserted["selected_heading"] == "Node · strategy_2"
+    assert inserted["dirty"] is True

@@ -121,6 +121,34 @@ def preview_layout(payload: dict[str, Any]) -> dict[str, list[int]]:
     return grid(store.plan_from_dict(payload, source="submitted plan"))
 
 
+def predefined_nodes(analysis_root: Path | str | None = None) -> list[dict[str, Any]]:
+    """The nodes a user may drop into a plan, ready to insert.
+
+    Today's library is the nodes of the built-in JFC templates, resolved for the
+    analysis they are being offered to; more sources can be appended here later
+    without the editor or the route learning anything new.
+
+    Kept off `PlanView` on purpose: the catalog is only wanted when the user
+    opens the picker, while a view is rebuilt on every save.
+
+    Args:
+        analysis_root: The analysis the nodes are offered to. Its plan name is
+            substituted into the prompts; a root with no readable plan falls
+            back to the directory name, and `None` to a neutral placeholder.
+    """
+    from hepagent.plan.templates import predefined_nodes as library
+
+    name = "analysis"
+    if analysis_root is not None:
+        root = Path(analysis_root)
+        name = root.name or name
+        try:
+            name = store.load_plan(root).name or name
+        except (store.PlanNotFoundError, store.PlanFormatError):
+            pass
+    return library(analysis_name=name)
+
+
 def catalog_of(vocabulary: PlanVocabulary | None) -> dict[str, list[str]]:
     """The vocabulary as sorted JSON-ready lists, omitting the unknown catalogs.
 

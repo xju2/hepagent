@@ -69,6 +69,8 @@ function makeEl(tag) {
 
 const IDS = [
   "canvas", "title", "subtitle", "state", "add-node", "add-condition", "connect",
+  // The predefined-node library: the button, its dialog, and the picker inside.
+  "add-predefined", "library", "library-search", "library-list", "library-close",
   "relayout", "save", "approve", "side", "findings", "toast", "canvas-wrap",
   "show-prompt",
   // The run supervisor: progress log, and the dialog a running analysis asks
@@ -157,6 +159,36 @@ const STATE = {
   },
 };
 
+// What `GET /api/plan/{name}/predefined` returns: two pipelines' worth of
+// nodes, one of which collides with a node the plan already has — which is the
+// case that proves the page renames rather than duplicates.
+const PREDEFINED = {
+  nodes: [
+    { key: "jfc-measurement:strategy", source: "jfc-measurement",
+      source_description: "Seven-phase measurement", analysis_type: "measurement",
+      summary: "Phase 1: Strategy",
+      node: { id: "strategy", label: "Strategy", directory: "phase1_strategy",
+              artifact: "STRATEGY.md", note_artifact: "", prompt: "Choose a technique.",
+              kind: "work", role: "executor", context_paths: [],
+              reviewers: ["physics"], arbiter: true, produces_note: false,
+              gates: [], condition: null,
+              contract: { node_types: ["commitment"], edge_types: ["commits_to"] },
+              max_iterations: 3, max_turns: null, model: null, tools: null,
+              skills: [], mcp_servers: [], metadata: {} } },
+    { key: "jfc-search:limits", source: "jfc-search",
+      source_description: "Search pipeline", analysis_type: "search",
+      summary: "Set the limits",
+      node: { id: "limits", label: "Limits", directory: "phase6_limits",
+              artifact: "LIMITS.md", note_artifact: "", prompt: "Set CLs limits.",
+              kind: "work", role: "executor", context_paths: [],
+              reviewers: ["critical"], arbiter: false, produces_note: true,
+              gates: [], condition: null,
+              contract: { node_types: ["evidence"], edge_types: ["supports"] },
+              max_iterations: 3, max_turns: null, model: null, tools: null,
+              skills: [], mcp_servers: [], metadata: {} } },
+  ],
+};
+
 function layoutResponse(request) {
   // A grid nothing else could have produced, so a position matching it proves
   // the page applied the server's answer rather than the layout that arrived
@@ -176,6 +208,7 @@ globalThis.fetch = async (url, init) => {
   const payload = url.endsWith("/layout") ? layoutResponse(body)
     : models ? { platform: models[1], default: "default-model",
                  models: ["big-model", "small-model"] }
+    : url.endsWith("/predefined") ? PREDEFINED
     : url.endsWith("/state") ? STATE
     : url.endsWith("/run") && method === "POST" && runResponse ? runResponse
     : nextResponse;
@@ -191,7 +224,8 @@ const source = fs.readFileSync(scriptPath, "utf8");
 const expose = `${source}
 return { addNode, addCondition, save, approve, relayout, position, select,
          onConnectClick, render, renderSide, renderFindings, overlaps,
-         backBranches, applyRun, runNode, plan: () => plan,
+         backBranches, applyRun, runNode, openLibrary, closeLibrary,
+         plan: () => plan,
          dirty: () => dirty, connect: (v) => { connecting = v; } };`;
 const api = new Function(expose)();
 
@@ -677,5 +711,60 @@ out.ask_answer = {
   body: requests[0] ? requests[0].body : null,
   hidden_after: byId.ask.hidden,
 };
+
+// --- The predefined-node library. Opening it fetches the catalog once and
+// groups it by the pipeline each node came from; picking one inserts a copy.
+requests.length = 0;
+await api.openLibrary();
+const rows = () => byId["library-list"].children;
+out.library = {
+  hidden_before: false,
+  fetches: requests.map((r) => `${r.method} ${r.url}`),
+  open: byId.library.hidden === false,
+  entries: rows().map((c) => `${c.className}:${c.textContent
+    || (c.children[0] ? c.children[0].textContent : "")}`),
+};
+
+// Filtering narrows the list without going back to the server.
+requests.length = 0;
+byId["library-search"].value = "limits";
+byId["library-search"].dispatch("input", { target: byId["library-search"] });
+out.library.filtered = rows()
+  .filter((c) => c.className === "row")
+  .map((c) => c.children[0].textContent);
+out.library.refetched_on_filter = requests.length;
+
+byId["library-search"].value = "";
+byId["library-search"].dispatch("input", { target: byId["library-search"] });
+
+const nodesBefore = plan.nodes.length;
+const strategyRow = rows().find(
+  (c) => c.className === "row" && c.children[0].textContent === "Strategy");
+strategyRow.dispatch("click");
+const inserted = plan.nodes[plan.nodes.length - 1];
+out.library.inserted = {
+  added: plan.nodes.length - nodesBefore,
+  // The plan already has a "strategy"; the copy must not collide with it.
+  id: inserted.id,
+  directory: inserted.directory,
+  prompt: inserted.prompt,
+  reviewers: inserted.reviewers,
+  contract: inserted.contract,
+  placed: typeof (inserted.metadata || {}).x === "number",
+  overlaps_an_existing_node: plan.nodes
+    .filter((n) => n.id !== inserted.id)
+    .some((n) => api.overlaps(api.position(inserted), api.position(n))),
+  closed_after_pick: byId.library.hidden,
+  selected_heading: byId.side.children[0].textContent,
+  dirty: api.dirty(),
+};
+
+// Re-opening does not re-fetch: the catalog is a property of the installation,
+// not of the plan on screen.
+requests.length = 0;
+await api.openLibrary();
+out.library.refetched_on_reopen = requests.length;
+api.closeLibrary();
+out.library.hidden_after_close = byId.library.hidden;
 
 process.stdout.write(JSON.stringify(out, null, 1));

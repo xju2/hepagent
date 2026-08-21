@@ -11,6 +11,7 @@ Routes:
     GET  /api/plan/{name}           the plan, its layout, order and findings
     PUT  /api/plan/{name}           save an edited plan, returns the fresh view
     POST /api/plan/{name}/layout    auto-layout an unsaved plan, saving nothing
+    GET  /api/plan/{name}/predefined   nodes the editor may offer to insert
     GET  /api/plan/{name}/state     what the analysis has established so far
     POST /api/plan/{name}/approve   release the plan to the orchestrator
     POST /api/plan/{name}/run       start the analysis in this process
@@ -222,6 +223,21 @@ def create_router(
             return JSONResponse({"layout": await asyncio.to_thread(computed)})
         except store.PlanFormatError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("/api/plan/{name}/predefined")
+    async def predefined_nodes(name: str) -> JSONResponse:
+        """Nodes a user may drop into this plan, from the built-in templates.
+
+        Its own route rather than part of the plan view: the library only
+        matters when somebody opens the picker, and reading every template's
+        prompt markdown on each save would be work nobody asked for.
+        """
+        root = _resolve_root(name, base_dir)
+
+        def library() -> list[dict[str, Any]]:
+            return service.predefined_nodes(root)
+
+        return JSONResponse({"nodes": await asyncio.to_thread(library)})
 
     @router.get("/api/plan/{name}/state")
     async def plan_state(name: str) -> JSONResponse:

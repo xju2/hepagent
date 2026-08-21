@@ -460,6 +460,28 @@ original pipeline — `phase1_strategy/outputs/STRATEGY.md` and so on — becaus
 `data/methodology/` and `data/conventions/` corpus cites those paths by name.
 They are data now, so a user may rename them; the shipped default does not.
 
+### Predefined nodes
+
+`predefined_nodes(analysis_name=...)` flattens every built-in template into a
+catalog of **whole nodes** — prompt inlined, reviewers, gates and contract
+included — that the editor offers under *+ Predefined*, served by
+`GET /api/plan/{name}/predefined` via `service.predefined_nodes`. Three things
+about it:
+
+- A pick is a **copy**, not a reference. The node lands in the plan and is an
+  ordinary node from then on; nothing tracks where it came from, and editing it
+  cannot change the template.
+- Prompts resolve against the **template's own** analysis type, so a node lifted
+  out of the search pipeline keeps the search conventions it was written for
+  wherever it is dropped.
+- The page makes the id and the working directory unique against the plan it is
+  inserting into (`strategy` → `strategy_2`, `phase1_strategy` →
+  `phase1_strategy_2`): a duplicate id is refused by P1, and a shared directory
+  would put two nodes' artifacts on top of each other.
+
+Growing the library means appending a source in `service.predefined_nodes`; the
+route and the page learn nothing new.
+
 ---
 
 ## The architect

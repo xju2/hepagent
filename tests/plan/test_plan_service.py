@@ -25,6 +25,27 @@ def analysis(tmp_path, fan_plan):
     return tmp_path
 
 
+# ------------------------------------------------------- predefined nodes
+
+
+def test_the_predefined_library_is_insertable_plan_nodes(analysis):
+    from hepagent.plan.schema import PlanNode
+
+    library = service.predefined_nodes(analysis)
+    assert library, "the built-in templates should offer nodes"
+    for entry in library:
+        assert entry["key"] == f"{entry['source']}:{entry['node']['id']}"
+        assert PlanNode.from_dict(entry["node"]).prompt
+
+
+def test_the_library_is_offered_without_an_analysis_to_put_it_in(tmp_path):
+    """The chat can list what exists before anything has been scaffolded."""
+    keys = [entry["key"] for entry in service.predefined_nodes()]
+    assert keys and keys == [
+        entry["key"] for entry in service.predefined_nodes(tmp_path / "nothing-here")
+    ]
+
+
 # ------------------------------------------------------------------ the view
 
 

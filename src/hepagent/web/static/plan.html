@@ -230,6 +230,33 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
   overflow-y: auto; flex: 1 1 auto; min-height: 4em; }
 #ask .actions { display: flex; gap: 8px; margin-top: 12px; flex: 0 0 auto; }
 #ask .actions button { flex: 0 0 auto; }
+/* The predefined-node library. Modal for the same reason the question dialog
+   is: it is a choice the user came here to make, and a picker that shares the
+   canvas with a 40-node plan is a picker nobody finds. */
+#library { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
+  align-items: center; justify-content: center; z-index: 11; }
+#library[hidden] { display: none; }
+#library .dialog { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 18px 20px; width: min(720px, 92vw);
+  box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; max-height: 86vh; }
+#library h3 { margin: 0 0 6px; font-size: 15px; }
+#library input[type="text"] { width: 100%; margin: 8px 0; padding: 6px 8px; }
+/* The list is the part that grows, so it scrolls and the buttons stay put. */
+#library-list { overflow-y: auto; flex: 1 1 auto; min-height: 6em;
+  border: 1px solid var(--line); border-radius: 6px; }
+#library-list .group { padding: 6px 10px; font-size: 11.5px; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted); background: var(--bg);
+  border-bottom: 1px solid var(--line); }
+#library-list .row { display: block; width: 100%; text-align: left; border: 0;
+  border-bottom: 1px solid var(--line); background: none; color: var(--ink);
+  padding: 8px 10px; cursor: pointer; border-radius: 0; }
+#library-list .row:hover { background: var(--bg); }
+#library-list .row .name { font-weight: 600; font-size: 13px; }
+#library-list .row .meta { display: block; color: var(--muted); font-size: 12px;
+  margin-top: 2px; overflow-wrap: anywhere; }
+#library-list .empty { padding: 10px; color: var(--muted); font-size: 12.5px; }
+#library .actions { display: flex; gap: 8px; margin-top: 12px; flex: 0 0 auto; }
 #toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -248,6 +275,7 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
   <button id="show-prompt">Prompt</button>
   <button id="add-node">+ Node</button>
   <button id="add-condition">+ Condition</button>
+  <button id="add-predefined">+ Predefined</button>
   <button id="connect">Connect</button>
   <button id="relayout">Auto-layout</button>
   <button id="save">Save</button>
@@ -299,6 +327,17 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
     <p class="hint" id="ask-thought"></p>
     <input type="text" id="ask-input" placeholder="Your answer">
     <div class="actions" id="ask-actions"></div>
+  </div>
+</div>
+<div id="library" hidden>
+  <div class="dialog">
+    <h3>Predefined nodes</h3>
+    <p class="hint">Nodes from the built-in analysis pipelines. Picking one
+      <em>copies</em> it into this plan — rename it, rewrite its prompt, rewire
+      it: it is an ordinary node from then on.</p>
+    <input type="text" id="library-search" placeholder="Filter by name, id or pipeline">
+    <div id="library-list"></div>
+    <div class="actions"><button id="library-close">Close</button></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -1678,6 +1717,109 @@ function addCondition() {
   markDirty(); select("node", id); scrollIntoView(spot);
 }
 
+/* ------------------------------------------------- predefined node library */
+
+/* What the server offers to insert, fetched once on first open: a catalog of
+   whole nodes — prompt, reviewers, gates, contract — lifted out of the built-in
+   pipelines. The point is that a hand-built plan does not have to retype a
+   phase the shipped pipeline already spells out. */
+let library = null;
+let libraryFilter = "";
+
+async function openLibrary() {
+  $("library").hidden = false;
+  $("library-search").value = libraryFilter;
+  if (library === null) {
+    renderLibrary("Loading…");
+    const res = await fetch(`${API}/predefined`);
+    if (!res.ok) {
+      library = [];
+      toast(`Could not load predefined nodes: ${(await res.json()).detail || res.status}`, true);
+    } else {
+      library = (await res.json()).nodes || [];
+    }
+  }
+  renderLibrary();
+}
+
+function closeLibrary() { $("library").hidden = true; }
+
+function libraryMatches(entry) {
+  if (!libraryFilter) return true;
+  const hay = [entry.node.label, entry.node.id, entry.source, entry.summary]
+    .join(" ").toLowerCase();
+  return hay.includes(libraryFilter.toLowerCase());
+}
+
+function renderLibrary(message) {
+  const list = $("library-list");
+  list.textContent = "";
+  if (message || library === null) {
+    const note = document.createElement("p");
+    note.className = "empty";
+    note.textContent = message || "Loading…";
+    list.appendChild(note);
+    return;
+  }
+  const shown = library.filter(libraryMatches);
+  if (!shown.length) {
+    const note = document.createElement("p");
+    note.className = "empty";
+    note.textContent = library.length
+      ? "No predefined node matches that."
+      : "This installation ships no predefined nodes.";
+    list.appendChild(note);
+    return;
+  }
+  let group = null;
+  for (const entry of shown) {
+    if (entry.source !== group) {
+      group = entry.source;
+      const head = document.createElement("div");
+      head.className = "group";
+      head.textContent = entry.source_description
+        ? `${entry.source} — ${entry.source_description}` : entry.source;
+      list.appendChild(head);
+    }
+    const row = document.createElement("button");
+    row.className = "row";
+    row.title = "Insert a copy of this node";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = entry.node.label || entry.node.id;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = [entry.node.id, entry.summary].filter(Boolean).join(" · ");
+    row.appendChild(name);
+    row.appendChild(meta);
+    row.addEventListener("click", () => insertPredefined(entry));
+    list.appendChild(row);
+  }
+}
+
+/* Insert a copy. The id and the working directory are made unique against the
+   plan rather than reused: two nodes sharing a directory write their artifacts
+   over each other, and the validator refuses a duplicate id outright. */
+function insertPredefined(entry) {
+  const node = JSON.parse(JSON.stringify(entry.node));
+  let n = 1, id = node.id;
+  while (nodeById(id)) id = `${node.id}_${++n}`;
+  node.id = id;
+  let directory = n > 1 ? `${node.directory}_${n}` : node.directory;
+  let suffix = n;
+  while (plan.nodes.some((other) => other.directory === directory)) {
+    directory = `${node.directory}_${++suffix}`;
+  }
+  node.directory = directory;
+  const spot = freePosition();
+  node.metadata = Object.assign({}, node.metadata, { x: spot.x, y: spot.y });
+  plan.nodes.push(node);
+  closeLibrary();
+  markDirty(); select("node", node.id); scrollIntoView(spot);
+  toast(`Inserted “${node.label || node.id}” from ${entry.source}.`);
+  return node;
+}
+
 function onConnectClick(id) {
   if (connecting === "arm") {
     connecting = { from: id };
@@ -1915,6 +2057,12 @@ $("tab-progress").addEventListener("click", () => showTab("progress"));
 $("tab-log").addEventListener("click", () => showTab("log"));
 $("add-node").addEventListener("click", addNode);
 $("add-condition").addEventListener("click", addCondition);
+$("add-predefined").addEventListener("click", openLibrary);
+$("library-close").addEventListener("click", closeLibrary);
+$("library-search").addEventListener("input", (ev) => {
+  libraryFilter = ev.target.value || "";
+  renderLibrary();
+});
 $("relayout").addEventListener("click", relayout);
 $("connect").addEventListener("click", () => {
   connecting = connecting ? null : "arm";
@@ -1935,6 +2083,7 @@ window.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && connecting) {
     connecting = null; $("connect").classList.remove("on");
   }
+  if (ev.key === "Escape" && !$("library").hidden) closeLibrary();
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") { ev.preventDefault(); save(); }
 });
 window.addEventListener("beforeunload", (ev) => {

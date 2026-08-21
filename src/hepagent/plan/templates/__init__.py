@@ -17,6 +17,7 @@ from hepagent.plan.templates.registry import (
     instantiate,
     list_templates,
     load_template,
+    predefined_nodes,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "instantiate",
     "list_templates",
     "load_template",
+    "predefined_nodes",
 ]

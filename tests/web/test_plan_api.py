@@ -328,3 +328,18 @@ def test_include_router_after_a_catch_all_would_not_have_worked(analyses):
 
     app.include_router(create_router(base_dir=analyses))
     assert TestClient(app).get("/api/plan/zbb").json() == {"spa": "api/plan/zbb"}
+
+
+# -------------------------------------------------------- predefined nodes
+
+
+def test_predefined_nodes_are_served_ready_to_insert(client):
+    body = client.get("/api/plan/zbb/predefined").json()
+    assert body["nodes"], "the built-in templates should offer nodes"
+    entry = body["nodes"][0]
+    assert {"key", "source", "summary", "node"} <= entry.keys()
+    assert entry["node"]["prompt"] and "{{" not in entry["node"]["prompt"]
+
+
+def test_predefined_nodes_refuse_an_unknown_analysis(client):
+    assert client.get("/api/plan/nope/predefined").status_code == 404
