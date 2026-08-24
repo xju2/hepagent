@@ -620,6 +620,20 @@ implementation — the browser must never grow a second one. Three rules follow:
   paths incident to it, the canvas bounds — and re-renders only on release.
   A full render mid-drag destroys the element holding the pointer capture,
   which the browser reports as `lostpointercapture`, and the drag dies with it.
+- **The drawing is scaled to the pane's width, never scrolled sideways.**
+  `resizeCanvas()` sizes the element to `drawing x scale`, where the scale is
+  `pane width / drawing width` clamped to `[MIN_SCALE, 1]`, and applies it as a
+  transform on the single stage group everything is drawn into. Nothing is ever
+  magnified, and a plan too wide for `MIN_SCALE` is panned rather than zoomed —
+  `#canvas-wrap` hides overflow on the x axis, so there is no horizontal
+  scrollbar either way, and `scrollbar-gutter: stable` keeps the vertical bar
+  from changing the width the fit is computed from. Two consequences:
+  - **Everything else stays in drawing units.** Layout, edge routing, the free-
+    cell search and the plan's own `metadata.x`/`y` never see the scale; only
+    `svgPoint()` (pixels in) and `scrollIntoView()` (pixels out) convert.
+  - **A pane resize re-fits**, through a `ResizeObserver` on the pane as well as
+    the window's `resize` — the dock being dragged changes the canvas without
+    changing the window.
 
 ### Approval
 

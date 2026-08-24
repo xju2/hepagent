@@ -91,8 +91,14 @@ def test_the_page_loads_the_plan_and_labels_itself(observations):
 
 
 def test_every_node_and_edge_is_drawn(observations):
-    """One group per node, one path plus one click target per edge, plus defs."""
+    """One group per node, one path plus one click target per edge."""
     assert observations["svg_children"] == observations["svg_expected"]
+
+
+def test_the_drawing_hangs_off_one_scaled_group(observations):
+    """The SVG carries the markers and a single stage group; everything drawn
+    lives under that group, which is where the fit-to-pane scale is applied."""
+    assert observations["canvas_children"] == ["defs", "g"]
 
 
 def test_a_clean_plan_loads_saved_and_approvable(observations):
@@ -170,6 +176,25 @@ def test_the_canvas_grows_around_the_routed_edges(observations):
     routing = observations["routing"]
     assert routing["lowest_point"] > 40 + 62  # below the row of boxes
     assert routing["canvas_height"] >= routing["lowest_point"] + 40
+
+
+def test_a_drawing_that_fits_is_drawn_at_full_size(observations):
+    """Nothing is ever magnified: a plan smaller than its pane is drawn 1:1."""
+    fit = observations["fit"]
+    assert fit["scale_when_it_fits"] == 1
+    assert fit["width_when_it_fits"] == fit["drawing_width"]
+
+
+def test_a_wide_plan_is_shrunk_to_the_pane_rather_than_scrolled_sideways(observations):
+    """The element is never wider than the pane, so the editor has no horizontal
+    scrollbar; the shrinking is a transform on the stage, so the plan's own
+    coordinates — what gets saved — are untouched by it."""
+    fit = observations["fit"]
+    assert fit["drawing_width"] > fit["pane_width"]      # it would have overflowed
+    assert fit["svg_width"] <= fit["pane_width"]
+    assert 0 < fit["scale"] < 1
+    assert fit["stage_transform"] == f"scale({fit['scale']})"
+    assert fit["first_node_position"] == observations["layout_position"]
 
 
 def test_a_drag_can_leave_the_current_canvas_bounds(observations):

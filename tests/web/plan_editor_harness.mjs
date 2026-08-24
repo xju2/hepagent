@@ -95,6 +95,10 @@ const IDS = [
   "ask", "ask-title", "ask-text", "ask-cmd", "ask-thought", "ask-input", "ask-actions",
 ];
 const byId = Object.fromEntries(IDS.map((id) => [id, makeEl("div")]));
+// The canvas pane is wider than the template's drawing, so the page draws it at
+// 1:1 and every coordinate below is both a pixel and a drawing unit. The fit is
+// exercised on its own further down, by narrowing this pane.
+byId["canvas-wrap"].clientWidth = 2400;
 
 globalThis.document = {
   getElementById: (id) => byId[id],
@@ -250,8 +254,15 @@ return { addNode, addCondition, save, approve, relayout, position, select,
          backBranches, applyRun, runNode, openLibrary, closeLibrary,
          entryNodes, promptPosition, PROMPT_ID,
          plan: () => plan,
+         scale: () => canvasScale, canvas: () => canvasSize,
          dirty: () => dirty, connect: (v) => { connecting = v; } };`;
 const api = new Function(expose)();
+
+/* The page draws into one group under the SVG — the group carrying the
+   fit-to-pane scale — so everything drawn is a child of that, not of `canvas`
+   itself, whose only children are the marker defs and the stage. */
+const stage = () => byId.canvas.children[byId.canvas.children.length - 1];
+const drawnOn = () => stage().children;
 
 await tick();
 await tick(); // let the page's own load() settle
@@ -264,11 +275,13 @@ const out = {
   approve_disabled_after_load: byId.approve.disabled,
   nodes: plan.nodes.length,
   edges: plan.edges.length,
-  // defs + one path and one hit-target per edge + one group per node
-  svg_children: byId.canvas.children.length,
-  // defs + one path per prompt-to-entry edge + the prompt's own group
+  // one path and one hit-target per edge + one group per node
+  svg_children: drawnOn().length,
+  // one path per prompt-to-entry edge + the prompt's own group
   // + one path and one hit-target per plan edge + one group per plan node
-  svg_expected: 1 + api.entryNodes().length + 1 + plan.edges.length * 2 + plan.nodes.length,
+  svg_expected: api.entryNodes().length + 1 + plan.edges.length * 2 + plan.nodes.length,
+  // the marker defs and the stage group, and nothing else
+  canvas_children: byId.canvas.children.map((c) => c.tagName),
   findings_rows: byId.findings.children.length,
 };
 
@@ -282,8 +295,8 @@ out.layout_position = api.position(plan.nodes[0]);
 // fifteen dependencies. The page is asked for its drawing and the geometry is
 // re-derived here, independently of the page's own sampler, so this checks the
 // picture rather than the code that made it.
-const edgesAt = 1 + api.entryNodes().length + 1;
-const drawnPaths = plan.edges.map((_, i) => byId.canvas.children[edgesAt + 2 * i].attrs.d);
+const edgesAt = api.entryNodes().length + 1;
+const drawnPaths = plan.edges.map((_, i) => drawnOn()[edgesAt + 2 * i].attrs.d);
 
 /* An `M`/`C`/`L` path, flattened to points along it. Written here rather than
    borrowed from the page so a routing bug cannot hide behind the page agreeing
@@ -324,14 +337,39 @@ out.routing = {
   }),
   // The drawing reaches below the boxes, so the canvas has to have grown for it.
   lowest_point: Math.max(...drawnPaths.flatMap((d) => curvePoints(d).map((q) => q.y))),
-  canvas_height: Number(byId.canvas.attrs.height),
+  // Back in drawing units: the element is sized in pixels, and the drawing is
+  // scaled down to whatever fits the pane.
+  canvas_height: api.canvas().height,
 };
+
+/* Fitting the drawing to the pane. The pane is narrowed to less than half the
+   drawing's width and the page re-drawn: the element must come out no wider
+   than the pane — a horizontal scrollbar is the bug this prevents — with the
+   shrinking done by the stage's transform, so the plan's own coordinates are
+   untouched. The pane is restored afterwards, so everything below is back at
+   1:1. */
+const wideAt = { scale: api.scale(), width: Number(byId.canvas.attrs.width) };
+byId["canvas-wrap"].clientWidth = 1100;
+api.render();
+out.fit = {
+  scale_when_it_fits: wideAt.scale,
+  width_when_it_fits: wideAt.width,
+  drawing_width: api.canvas().width,
+  svg_width: Number(byId.canvas.attrs.width),
+  pane_width: byId["canvas-wrap"].clientWidth,
+  stage_transform: stage().attrs.transform,
+  scale: api.scale(),
+  // The node coordinates are the plan's, whatever the drawing is scaled to.
+  first_node_position: api.position(plan.nodes[0]),
+};
+byId["canvas-wrap"].clientWidth = 2400;
+api.render();
 
 // Dragging. The node is grabbed at (100,100) — 60px right and below its own
 // corner — and the pointer is moved to (143,178); the node keeps the offset and
 // lands on the 10px grid. The group must survive the whole drag: re-rendering
 // mid-move is what used to destroy the element holding the pointer capture.
-const groupOf = (id) => byId.canvas.children.find((c) => c.attrs["data-id"] === id);
+const groupOf = (id) => drawnOn().find((c) => c.attrs["data-id"] === id);
 const dragged = plan.nodes[0];
 api.select("node", dragged.id);
 const group = groupOf(dragged.id);
@@ -348,8 +386,8 @@ out.drag = {
   // defs, the prompt's seed edges and the prompt group, then a path and a hit
   // target per plan edge: the line for edge i is at `edgesAt + 2i`.
   edge_path: edgeIndex < 0 ? null
-    : byId.canvas.children[1 + api.entryNodes().length + 1 + 2 * edgeIndex].attrs.d,
-  canvas_width: Number(byId.canvas.attrs.width),
+    : drawnOn()[api.entryNodes().length + 1 + 2 * edgeIndex].attrs.d,
+  canvas_width: api.canvas().width,
 };
 group.dispatch("pointerup", { pointerId: 1 });
 out.drag.position_after_release = api.position(dragged);
@@ -510,19 +548,19 @@ out.classified = {
   total_branches: plan.edges.filter((e) => e.kind.startsWith("on_")).length,
 };
 
-const groupFor = (id) => byId.canvas.children.find((c) => c.attrs["data-id"] === id);
+const groupFor = (id) => drawnOn().find((c) => c.attrs["data-id"] === id);
 const checkGroup = groupFor(check.id);
 out.condition_render = {
   classes: checkGroup.attrs.class,
   shapes: checkGroup.children.map((c) => c.tagName),
 };
 
-const paths = byId.canvas.children.filter(
+const paths = drawnOn().filter(
   (c) => c.tagName === "path" && (c.attrs.class || "").startsWith("edge"));
 out.edge_render = {
   loops: paths.filter((c) => c.attrs.class.includes("loop")).length,
   branches: paths.filter((c) => c.attrs.class.includes("branch")).length,
-  labels: byId.canvas.children
+  labels: drawnOn()
     .filter((c) => c.tagName === "text" && c.attrs.class === "edge-label")
     .map((c) => c.textContent),
 };
@@ -743,7 +781,7 @@ await tick();
 
 // A run in flight paints itself onto the plan and logs its progress. The
 // snapshots below are what `GET /api/plan/{name}/run` returns.
-const nodeGroup = (id) => byId.canvas.children.find((c) => c.attrs["data-id"] === id);
+const nodeGroup = (id) => drawnOn().find((c) => c.attrs["data-id"] === id);
 api.applyRun({
   name: "zbb", status: "running", active: true, unattended: false,
   nodes: { strategy: "done", selection: "running" }, latest_seq: 2, prompt: null,
