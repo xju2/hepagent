@@ -102,7 +102,8 @@ def test_a_clean_plan_loads_saved_and_approvable(observations):
 
 
 def test_positions_come_from_the_layout_until_a_node_is_dragged(observations):
-    assert observations["layout_position"] == {"x": 40, "y": 40}
+    """Column 0 belongs to the prompt, so the plan's own first column is column 1."""
+    assert observations["layout_position"] == {"x": 340, "y": 40}
     assert observations["dragged_position"] == {"x": 500, "y": 12}
 
 
@@ -110,10 +111,13 @@ def test_positions_come_from_the_layout_until_a_node_is_dragged(observations):
 
 
 def test_a_dragged_node_keeps_the_point_it_was_grabbed_by(observations):
-    """Grabbed 60px inside its own corner, it stays 60px inside all the way."""
+    """Grabbed 60px inside its own corner, it stays 60px inside all the way.
+
+    Its corner is at x=340, not x=40: the prompt owns column 0.
+    """
     drag = observations["drag"]
-    assert drag["position"] == {"x": 80, "y": 120}
-    assert drag["transform"] == "translate(80,120)"
+    assert drag["position"] == {"x": 380, "y": 120}
+    assert drag["transform"] == "translate(380,120)"
 
 
 def test_dragging_does_not_rebuild_the_element_it_is_dragging(observations):
@@ -130,29 +134,62 @@ def test_dragging_does_not_rebuild_the_element_it_is_dragging(observations):
 
 
 def test_edges_follow_the_node_while_it_is_dragged(observations):
-    """The node's right edge is at 80+210, its middle at 120+31."""
-    assert observations["drag"]["edge_path"].startswith("M 290 151")
+    """The node's right edge is at 380+210, its middle at 120+31."""
+    assert observations["drag"]["edge_path"].startswith("M 590 151")
 
 
 def test_a_drag_can_leave_the_current_canvas_bounds(observations):
     """The canvas grows under the pointer, so a node cannot hit an invisible wall."""
-    assert observations["drag"]["canvas_width"] >= 80 + 210 + 40
+    assert observations["drag"]["canvas_width"] >= 380 + 210 + 40
 
 
 def test_a_completed_drag_marks_the_document_unsaved(observations):
     drag = observations["drag"]
-    assert drag["position_after_release"] == {"x": 80, "y": 120}
+    assert drag["position_after_release"] == {"x": 380, "y": 120}
     assert drag["dirty_after_release"] is True
 
 
 # ------------------------------------------------------------------- prompt
 
 
-def test_the_physics_prompt_is_shown_when_nothing_is_selected(observations):
-    """The question the plan answers, on screen while a reviewer judges it."""
+def test_the_physics_prompt_is_drawn_as_the_head_of_the_graph(observations):
+    """The question is the analysis's starting point, so it is drawn as one."""
+    node = observations["prompt_node"]
+    assert node["drawn"] is True
+    assert node["label"] == "Physics prompt"
+    # Column 0, level with the node it feeds — which the drag above left at y=120.
+    assert node["position"] == {"x": 40, "y": 120}
+    # Everything with nothing blocking it hangs off the prompt.
+    assert node["seeds"] == ["strategy"]
+
+
+def test_clicking_the_prompt_opens_its_panel(observations):
+    assert observations["prompt_panel_from_canvas"] == "Physics prompt"
+
+
+def test_the_physics_prompt_is_editable(observations):
+    """The complaint this answers: the prompt could be read and not changed."""
     panel = observations["prompt_panel"]
-    assert panel["heading"] == "Analysis prompt"
+    assert panel["heading"] == "Physics prompt"
+    assert panel["editable"] is True
     assert "Z->bb cross section" in panel["body"]
+
+
+def test_editing_the_prompt_rewrites_the_plans_own_question(observations):
+    edit = observations["prompt_edit"]
+    assert edit["problem"] == "Measure the Z->bb cross section at 91 GeV."
+    assert edit["dirty"] is True
+
+
+def test_the_panel_shows_the_wordings_the_prompt_has_had(observations):
+    """Traceability: what we asked before, from `plan.history/`."""
+    assert observations["prompt_panel"]["history"] == ["Measure something with b jets."]
+
+
+def test_the_prompt_can_be_dragged_and_remembers_where(observations):
+    drag = observations["prompt_drag"]
+    assert drag["position"] == {"x": 240, "y": 220}
+    assert drag["metadata"] == {"x": 240, "y": 220}
 
 
 def test_selecting_a_node_replaces_the_prompt_with_its_editor(observations):
@@ -198,7 +235,7 @@ def test_auto_layout_sends_the_plan_on_screen(observations):
 def test_auto_layout_applies_the_grid_the_server_returned(observations):
     """The stub answers with a grid the stale layout could not have produced."""
     relayout = observations["relayout"]
-    assert relayout["position"] == {"x": 40 + 2 * 300, "y": 40 + 92}
+    assert relayout["position"] == {"x": 40 + 3 * 300, "y": 40 + 92}
     assert relayout["every_node_placed"] is True
     assert relayout["overlaps"] is False
 
@@ -542,7 +579,7 @@ def test_delete_takes_the_node_and_the_edges_that_touched_it(observations):
     assert deleted["still_present"] is False
     assert deleted["edges_left"] == 0
     # Nothing is selected afterwards, so the panel falls back to the prompt.
-    assert deleted["panel_heading"] == "Analysis prompt"
+    assert deleted["panel_heading"] == "Physics prompt"
 
 
 # ------------------------------------------------------- predefined nodes

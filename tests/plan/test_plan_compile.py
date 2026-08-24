@@ -61,6 +61,31 @@ def test_a_plan_edge_compiles_to_an_inverted_requires_edge(plan):
     assert (a, b) not in requires(edges)
 
 
+def test_the_problem_node_says_which_wording_it_is(plan):
+    """An artifact descends from a *question*, and the question is editable."""
+    import dataclasses
+
+    from hepagent.plan.compile import prompt_digest
+
+    asked = dataclasses.replace(plan, problem="Measure sigma(Zbb).", revision=7)
+    node = next(n for n in plan_to_graph(asked)[0] if n.type == "problem")
+    assert node.label == "Measure sigma(Zbb)."
+    assert node.content_ref == "prompt.md"
+    assert node.metadata["plan_revision"] == 7
+    assert node.metadata["prompt_sha256"] == prompt_digest("Measure sigma(Zbb).")
+
+
+def test_rewording_the_question_changes_the_digest(plan):
+    import dataclasses
+
+    digest = lambda p: next(  # noqa: E731
+        n for n in plan_to_graph(dataclasses.replace(plan, problem=p))[0] if n.type == "problem"
+    ).metadata["prompt_sha256"]
+    assert digest("Measure sigma(Zbb).") != digest("Measure sigma(Zbb) at 91 GeV.")
+    # Whitespace around it is not a different question.
+    assert digest("Measure sigma(Zbb).") == digest("  Measure sigma(Zbb).\n")
+
+
 def test_entry_nodes_require_the_problem_node(fan_plan):
     _, edges = plan_to_graph(fan_plan)
     root = artifact_id(fan_plan.require_node("root"))

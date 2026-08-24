@@ -61,6 +61,7 @@ hepagent repl --chat web-1a2b3c4d5e6f
 | Tool calls and outputs | collapsible steps |
 | Bash approval (`confirm`/`yolo`/`human`) | Approve/Reject buttons, rejection reason sent back to the agent |
 | Creating an analysis from the conversation | `create_analysis`, then the plan editor opens |
+| Editing the physics prompt | the prompt node at the head of the plan page's graph; see `docs/PLAN.md` |
 | Launching and supervising a JFC run | on the plan page: node status, log, questions |
 | `ask_user_for_info` | inline question in the transcript |
 | Agent / platform / model switching | ⚙ settings panel *and* slash commands |
@@ -111,7 +112,9 @@ The two surfaces are one workflow, not two apps:
    custom element that opens `/plan/<name>` in a new tab. **The link is the
    contract and the auto-open is a convenience** — a popup blocker may refuse
    `window.open` outside a user gesture, and the button still works when it does.
-3. The user shapes the graph and presses **Approve & run**. Approval and launch
+3. The user shapes the graph — the physics prompt included: it is drawn as the
+   head of the plan and edits `plan.problem`, which `prompt.md` mirrors, so the
+   question the agents read is the one on screen — and presses **Approve & run**. Approval and launch
    are separate calls: `POST /approve` reports `awaited`, and only when nothing
    was already waiting on the latch does the page `POST /run` itself.
 4. The run is supervised on the plan page: node colouring, a progress log, and a

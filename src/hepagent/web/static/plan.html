@@ -65,6 +65,16 @@ svg { display: block; min-width: 100%; min-height: 100%; }
   fill: var(--node); stroke: var(--branch); stroke-width: 1.8;
 }
 .node.condition.selected polygon { stroke: var(--sel); stroke-width: 2.8; }
+/* The physics question the whole plan descends from. Drawn like a node because
+   it is one — the first one — but tinted so it never reads as work to be run. */
+.node.prompt rect {
+  fill: var(--warn-bg); stroke: var(--warn); stroke-width: 1.8; rx: 8;
+}
+.node.prompt.selected rect { stroke: var(--sel); stroke-width: 2.8; }
+.node.prompt text.badge { fill: var(--warn); }
+/* Prompt-to-node edges are drawn, never authored: they say "everything starts
+   here", so they are faint and cannot be selected or retyped. */
+path.edge.seed { stroke: var(--informs); stroke-dasharray: 3 5; stroke-width: 1.2; }
 .node.condition.invalid polygon { stroke: var(--err); }
 .node.condition.dragging polygon { stroke: var(--sel); }
 path.edge { fill: none; stroke: var(--node-line); stroke-width: 1.6; }
@@ -124,6 +134,10 @@ textarea { min-height: 200px; resize: vertical; font-family: ui-monospace, monos
   line-height: 1.5; background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 10px 12px; margin-top: 8px;
 }
+#side textarea.prompt-edit { min-height: 180px; }
+/* One superseded wording of the prompt, in the panel's history list. */
+.revision { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 10px; }
+.revision .when { color: var(--muted); font-size: 11px; }
 .pill { display: inline-block; padding: 1px 7px; border-radius: 99px;
   border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .pill.dirty { color: var(--warn); border-color: var(--warn); }
@@ -352,6 +366,12 @@ const SNAP = 10;           // drag granularity, so hand-placed nodes still align
 const GAP = 16;            // clearance a new node keeps from the existing ones
 const KINDS = ["requires", "informs", "on_true", "on_false"];
 const NODE_KINDS = ["work", "gate", "condition"];
+/* The physics prompt is drawn as the head of the graph, but it is a *field* of
+   the plan (`plan.problem`), not a node in it — nothing runs it, nothing may
+   wire it by hand, and the validator never sees it. This id names it on the
+   canvas and nowhere else; it can never collide with a node id, which must
+   start with a letter. */
+const PROMPT_ID = "__prompt__";
 // Only used when the server sends no reviewer catalog, e.g. a view built
 // without a vocabulary. Every other catalog falls back to the plan's own names.
 const DEFAULT_REVIEWERS =
@@ -459,15 +479,58 @@ function backBranches() {
   return back;
 }
 
+/* Column 0 of the drawing belongs to the prompt, so the server's layout — which
+   only knows about plan nodes — is shifted one column right. Everything that
+   turns a layout column into an x coordinate goes through here. */
+function columnX(column) { return PAD + (column + 1) * COL; }
+
 function position(node) {
   const meta = node.metadata || {};
   if (typeof meta.x === "number" && typeof meta.y === "number") return { x: meta.x, y: meta.y };
   const [col, row] = layout[node.id] || [0, 0];
-  return { x: PAD + col * COL, y: PAD + row * ROW };
+  return { x: columnX(col), y: PAD + row * ROW };
 }
 
 function setPosition(node, x, y) {
   node.metadata = Object.assign({}, node.metadata, { x: Math.round(x), y: Math.round(y) });
+}
+
+/* The prompt's own placement lives on the plan rather than on a node, because
+   there is no node to hang it from. Default: column 0, level with the first
+   thing it feeds. */
+function promptPosition() {
+  const meta = (plan && plan.metadata) || {};
+  if (typeof meta.prompt_x === "number" && typeof meta.prompt_y === "number") {
+    return { x: meta.prompt_x, y: meta.prompt_y };
+  }
+  const heads = entryNodes().map(position);
+  const y = heads.length ? Math.min(...heads.map((p) => p.y)) : PAD;
+  return { x: PAD, y };
+}
+
+function setPromptPosition(x, y) {
+  plan.metadata = Object.assign({}, plan.metadata,
+    { prompt_x: Math.round(x), prompt_y: Math.round(y) });
+}
+
+/* The nodes the prompt feeds: everything with nothing blocking it. Same rule
+   `plan/compile.py` uses when it wires the graph's problem node, so the picture
+   and the provenance graph agree on where the analysis starts. */
+function entryNodes() {
+  if (!plan) return [];
+  const known = new Set(plan.nodes.map((n) => n.id));
+  const blocked = new Set(
+    plan.edges.filter((e) => e.kind === "requires" && known.has(e.upstream))
+      .map((e) => e.downstream));
+  return plan.nodes.filter((n) => !blocked.has(n.id));
+}
+
+/* Where a drawn thing sits, prompt included, so an edge can be recomputed
+   without caring which of the two ends moved. */
+function pointOf(id) {
+  if (id === PROMPT_ID) return promptPosition();
+  const node = nodeById(id);
+  return node ? position(node) : null;
 }
 
 function snap(value) { return Math.round(value / SNAP) * SNAP; }
@@ -482,7 +545,9 @@ function freePosition() {
   // one row and one column past the current extent guarantees a hit, so a new
   // node never lands on top of another — which is what made "+ Node" look like
   // it had done nothing.
-  const taken = plan.nodes.map(position);
+  // The prompt is in `taken` too: column 0 is its column, and a new node
+  // dropped on top of it would hide the head of the graph.
+  const taken = plan.nodes.map(position).concat([promptPosition()]);
   let columns = 1, rows = 1;
   for (const p of taken) {
     columns = Math.max(columns, Math.ceil((p.x - PAD) / COL) + 2);
@@ -491,7 +556,7 @@ function freePosition() {
   const cells = [];
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
-      cells.push({ x: PAD + column * COL, y: PAD + row * ROW });
+      cells.push({ x: columnX(column - 1), y: PAD + row * ROW });
     }
   }
 
@@ -510,8 +575,7 @@ function freePosition() {
 
 function canvasExtent() {
   let maxX = 0, maxY = 0;
-  for (const node of plan.nodes) {
-    const p = position(node);
+  for (const p of plan.nodes.map(position).concat([promptPosition()])) {
     maxX = Math.max(maxX, p.x + NW); maxY = Math.max(maxY, p.y + NH);
   }
   return { width: maxX + PAD, height: maxY + PAD };
@@ -607,6 +671,20 @@ function render() {
   defs.appendChild(arrowMarker("arrow-sel", "var(--sel)"));
   svg.appendChild(defs);
 
+  // The prompt and the edges out of it are drawn first, under everything else:
+  // they are the backdrop the plan hangs from, not part of its wiring.
+  const promptAt = promptPosition();
+  for (const node of entryNodes()) {
+    const d = edgePath(promptAt, positions[node.id], false);
+    const line = el("path", { class: "edge seed", d, "marker-end": "url(#arrow-informs)" });
+    svg.appendChild(line);
+    drawn.edges.push({
+      edge: { upstream: PROMPT_ID, downstream: node.id, kind: "seed" },
+      line, hit: null, label: null, looping: false,
+    });
+  }
+  svg.appendChild(promptGroup(promptAt));
+
   const back = backBranches();
   plan.edges.forEach((edge, index) => {
     const a = positions[edge.upstream], b = positions[edge.downstream];
@@ -673,20 +751,69 @@ function render() {
   }
 }
 
+/* The prompt, drawn as the first node of the plan. Its label is the question's
+   own first line, so the canvas says what the analysis is about without anyone
+   opening the panel. */
+function promptGroup(at) {
+  const selected = sel && sel.type === "prompt";
+  const group = el("g", {
+    class: `node prompt ${selected ? "selected" : ""}`,
+    transform: `translate(${at.x},${at.y})`,
+    "data-id": PROMPT_ID,
+  });
+  group.appendChild(el("rect", { width: NW, height: NH }));
+  group.appendChild(text("Physics prompt", 12, 23, ""));
+  const question = String((plan && plan.problem) || "").trim();
+  const first = question.split("\n").map((l) => l.trim()).filter(Boolean)[0] || "";
+  group.appendChild(text(first.length > 30 ? first.slice(0, 29) + "…" : first, 12, 40, "sub"));
+  group.appendChild(text(question ? "prompt.md" : "not written yet", 12, 55, "sub"));
+  attachDrag(group, promptHandle());
+  drawn.nodes.set(PROMPT_ID, group);
+  return group;
+}
+
+/* What a drag and a click act on. Plan nodes and the prompt differ in where
+   their position is stored and in what selecting them opens, and in nothing
+   else — so the drag code takes one of these rather than a node. */
+function nodeHandle(node) {
+  return {
+    id: node.id,
+    at: () => position(node),
+    place: (x, y) => setPosition(node, x, y),
+    open: () => select("node", node.id),
+    connectable: true,
+  };
+}
+
+function promptHandle() {
+  return {
+    id: PROMPT_ID,
+    at: promptPosition,
+    place: setPromptPosition,
+    open: () => select("prompt", PROMPT_ID),
+    // The prompt feeds every starting node by construction; wiring it by hand
+    // would create an edge the plan has no node to hang from.
+    connectable: false,
+  };
+}
+
 function moveNode(node, x, y) {
+  moveDrawn(nodeHandle(node), x, y);
+}
+
+function moveDrawn(handle, x, y) {
   // Everything a move can change, changed in place: the group's transform, the
   // paths touching it, and the canvas bounds if it was dragged past them.
-  setPosition(node, x, y);
-  const group = drawn.nodes.get(node.id);
+  handle.place(x, y);
+  const group = drawn.nodes.get(handle.id);
   if (group) group.setAttribute("transform", `translate(${x},${y})`);
   for (const item of drawn.edges) {
-    if (item.edge.upstream !== node.id && item.edge.downstream !== node.id) continue;
-    const from = nodeById(item.edge.upstream), to = nodeById(item.edge.downstream);
-    if (!from || !to) continue;
-    const a = position(from), b = position(to);
+    if (item.edge.upstream !== handle.id && item.edge.downstream !== handle.id) continue;
+    const a = pointOf(item.edge.upstream), b = pointOf(item.edge.downstream);
+    if (!a || !b) continue;
     const d = edgePath(a, b, item.looping);
     item.line.setAttribute("d", d);
-    item.hit.setAttribute("d", d);
+    if (item.hit) item.hit.setAttribute("d", d);
     if (item.label) {
       const mid = edgeMidpoint(a, b, item.looping);
       item.label.setAttribute("x", mid.x);
@@ -744,7 +871,10 @@ function edgeMidpoint(a, b, looping) {
   return { x: (a.x + NW + b.x) / 2, y: (a.y + b.y) / 2 + NH / 2 - 6 };
 }
 
-function attachDrag(group, node) {
+function attachDrag(group, handle) {
+  // Called with a plan node for the plan's own nodes, and with a handle for the
+  // prompt; a bare node is wrapped so both call sites stay readable.
+  if (typeof handle.at !== "function") handle = nodeHandle(handle);
   let drag = null;
 
   const finish = () => {
@@ -761,7 +891,7 @@ function attachDrag(group, node) {
     if (connecting || (ev.button != null && ev.button !== 0)) return;
     ev.stopPropagation();
     if (ev.preventDefault) ev.preventDefault();
-    const p = position(node), at = svgPoint(ev);
+    const p = handle.at(), at = svgPoint(ev);
     // Grab offset, not a running delta: the node keeps the point it was
     // grabbed by, however far the pane scrolls mid-drag.
     drag = { ox: p.x - at.x, oy: p.y - at.y, px: ev.clientX, py: ev.clientY, moved: false };
@@ -774,7 +904,7 @@ function attachDrag(group, node) {
     if (!drag.moved && Math.hypot(ev.clientX - drag.px, ev.clientY - drag.py) < 3) return;
     drag.moved = true;
     const at = svgPoint(ev);
-    moveNode(node, snap(Math.max(0, at.x + drag.ox)), snap(Math.max(0, at.y + drag.oy)));
+    moveDrawn(handle, snap(Math.max(0, at.x + drag.ox)), snap(Math.max(0, at.y + drag.oy)));
   });
 
   group.addEventListener("pointerup", finish);
@@ -783,8 +913,15 @@ function attachDrag(group, node) {
 
   group.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (connecting) { onConnectClick(node.id); return; }
-    select("node", node.id);
+    if (connecting) {
+      if (!handle.connectable) {
+        toast("The prompt feeds every starting node already; it is not wired by hand.");
+        return;
+      }
+      onConnectClick(handle.id);
+      return;
+    }
+    handle.open();
   });
 }
 
@@ -955,7 +1092,7 @@ function renderSide() {
   const side = $("side");
   side.textContent = "";
   nodeButtons = null;
-  if (!sel) return renderPromptPanel(side);
+  if (!sel || sel.type === "prompt") return renderPromptPanel(side);
   if (sel.type === "node") return renderNodePanel(side, nodeById(sel.id));
   return renderEdgePanel(side, plan.edges[sel.id], sel.id);
 }
@@ -974,23 +1111,69 @@ function hint(value) {
 }
 
 function renderPromptPanel(side) {
-  // With nothing selected the panel is otherwise dead space, and the question
-  // the plan is meant to answer is the one thing a reviewer needs on screen
-  // while judging it. Read-only: `plan.problem` mirrors the analysis's
-  // `prompt.md`, and editing the copy here would only make the two disagree.
-  side.appendChild(heading("Analysis prompt"));
-  const body = (plan && plan.problem ? String(plan.problem) : "").trim();
-  if (body) {
-    const box = document.createElement("div");
-    box.className = "prompt";
-    box.textContent = body;
-    side.appendChild(box);
-  } else {
-    side.appendChild(hint("This plan carries no prompt."));
+  // The question the plan exists to answer, editable in the one place the plan
+  // is edited. `plan.problem` is the source and `prompt.md` is its mirror —
+  // saving rewrites the file — so editing here cannot make the two disagree,
+  // and the edit is archived in `plan.history/` like any other.
+  side.appendChild(heading("Physics prompt"));
+  side.appendChild(hint(
+    "The starting point of the analysis: every node with nothing upstream of it "
+    + "reads this. Saving rewrites prompt.md and records the new wording in the "
+    + "provenance graph."));
+  const box = field(side, "Question", (plan && plan.problem) || "",
+    (v) => { plan.problem = v; render(); }, "textarea");
+  box.className = "prompt-edit";
+  if (plan) {
+    side.appendChild(hint(
+      `Revision ${plan.revision}${plan.updated_at ? ` · saved ${plan.updated_at}` : ""}`));
   }
+  renderPromptHistory(side);
   side.appendChild(hint(
     "Click a node or an edge to edit it. Drag a node to move it, "
     + "or drag the canvas to pan."));
+}
+
+/* Every earlier wording of the question, newest first. Fetched when the panel
+   is opened rather than carried on the plan view: it is the answer to "what did
+   we ask before?", which nobody asks on every save. */
+let promptHistory = null;
+
+async function loadPromptHistory() {
+  try {
+    const res = await fetch(`${API}/problem`);
+    if (!res.ok) return;
+    promptHistory = (await res.json()).revisions || [];
+  } catch (err) {
+    promptHistory = [];
+  }
+  // Never while the user is mid-sentence: re-rendering the panel would swap the
+  // textarea out from under the caret.
+  const active = document.activeElement;
+  if ((!sel || sel.type === "prompt") && !(active && active.tagName === "TEXTAREA")) renderSide();
+}
+
+function renderPromptHistory(side) {
+  if (promptHistory === null) { loadPromptHistory(); return; }
+  const earlier = promptHistory.filter((entry) => !entry.current);
+  if (!earlier.length) {
+    side.appendChild(hint("No earlier wording: this is the question it started with."));
+    return;
+  }
+  const label = document.createElement("label");
+  label.textContent = `Earlier wordings (${earlier.length})`;
+  side.appendChild(label);
+  for (const entry of earlier) {
+    const item = document.createElement("div");
+    item.className = "revision";
+    const when = document.createElement("div");
+    when.className = "when";
+    when.textContent = `rev ${entry.revision} · ${entry.updated_at}`;
+    const body = document.createElement("div");
+    body.className = "prompt";
+    body.textContent = String(entry.problem || "").trim() || "(no question)";
+    item.appendChild(when); item.appendChild(body);
+    side.appendChild(item);
+  }
 }
 
 const KIND_HINTS = {
@@ -1432,6 +1615,7 @@ async function save() {
     toast(`Save failed: ${(await res.json()).detail || res.status}`, true);
     return false;
   }
+  promptHistory = null;   // a save may have added a wording to it
   applyView(await res.json());
   toast(`Saved revision ${plan.revision}.`);
   return true;
@@ -1858,8 +2042,10 @@ async function relayout() {
   layout = grid;
   for (const node of plan.nodes) {
     const [column, row] = grid[node.id] || [0, 0];
-    setPosition(node, PAD + column * COL, PAD + row * ROW);
+    setPosition(node, columnX(column), PAD + row * ROW);
   }
+  // The prompt goes back to the head of the picture with them.
+  plan.metadata = Object.assign({}, plan.metadata, { prompt_x: null, prompt_y: null });
   markDirty(); render();
   $("canvas-wrap").scrollLeft = 0;
   $("canvas-wrap").scrollTop = 0;
@@ -2070,7 +2256,8 @@ $("connect").addEventListener("click", () => {
   toast(connecting ? "Click the upstream node, then the downstream one." : "Cancelled.");
 });
 $("show-prompt").addEventListener("click", () => {
-  sel = null; render(); renderSide();
+  select("prompt", PROMPT_ID);
+  scrollIntoView(promptPosition());
   $("side").scrollTop = 0;
 });
 $("canvas-wrap").addEventListener("pointerdown", startPan);

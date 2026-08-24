@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from plan_factory import make_node, make_plan
@@ -23,6 +24,79 @@ def analysis(tmp_path, fan_plan):
     """An analysis directory with a valid plan already saved."""
     store.save_plan(tmp_path, fan_plan)
     return tmp_path
+
+
+# ---------------------------------------------------------- the physics prompt
+
+
+def _save_question(root, plan, question):
+    import dataclasses
+
+    return store.save_plan(root, dataclasses.replace(plan, problem=question))
+
+
+def test_the_prompt_history_is_the_plans_history(tmp_path, fan_plan):
+    """Nothing extra is recorded: the question is a field of the plan."""
+    _save_question(tmp_path, fan_plan, "First question.")
+    _save_question(tmp_path, fan_plan, "Second question.")
+
+    history = service.problem_history(tmp_path)
+    assert [entry["problem"] for entry in history] == ["Second question.", "First question."]
+    assert [entry["revision"] for entry in history] == [2, 1]
+    assert [entry["current"] for entry in history] == [True, False]
+
+
+def test_saves_that_left_the_question_alone_are_not_listed(tmp_path, fan_plan):
+    """A plan is saved on every node drag; forty identical prompts say nothing."""
+    _save_question(tmp_path, fan_plan, "First question.")
+    _save_question(tmp_path, fan_plan, "First question.")
+    _save_question(tmp_path, fan_plan, "Second question.")
+    _save_question(tmp_path, fan_plan, "Second question.")
+
+    history = service.problem_history(tmp_path)
+    assert [entry["problem"] for entry in history] == ["Second question.", "First question."]
+    assert history[0]["current"] is True
+
+
+def test_the_prompt_history_of_an_analysis_without_a_plan_is_empty(tmp_path):
+    assert service.problem_history(tmp_path) == []
+
+
+def test_editing_the_prompt_rewrites_the_file_the_agents_read(tmp_path, fan_plan):
+    store.save_plan(tmp_path, fan_plan)
+    view = service.put_plan(tmp_path, dict(fan_plan.to_dict(), problem="Rephrased."))
+    assert view.plan["problem"] == "Rephrased."
+    assert store.read_prompt_file(tmp_path) == "Rephrased."
+
+
+def test_an_edited_prompt_is_recorded_in_the_provenance_graph(tmp_path, fan_plan):
+    """The graph is append-only, so it keeps every question the analysis was asked."""
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.graph.store import AnalysisGraph
+    from hepagent.plan.compile import problem_id, prompt_digest
+
+    saved = _save_question(tmp_path, fan_plan, "First question.")
+    bootstrap_graph(tmp_path, saved)
+
+    service.put_plan(tmp_path, dict(saved.to_dict(), problem="Second question."))
+
+    graph = AnalysisGraph.load(tmp_path)
+    node = graph.get_node(problem_id(saved))
+    assert node.label == "Second question."
+    assert node.metadata["prompt_sha256"] == prompt_digest("Second question.")
+    recorded = [
+        json.loads(line)["metadata"]["prompt_sha256"]
+        for line in (tmp_path / "graph" / "nodes.jsonl").read_text().splitlines()
+        if json.loads(line)["id"] == problem_id(saved)
+    ]
+    assert recorded == [prompt_digest("First question."), prompt_digest("Second question.")]
+
+
+def test_recording_the_prompt_is_skipped_when_there_is_no_graph(tmp_path, fan_plan):
+    """An analysis that has never run is seeded from the plan when it does."""
+    saved = store.save_plan(tmp_path, fan_plan)
+    assert service.record_problem(tmp_path, saved) is False
+    assert not (tmp_path / "graph").exists()
 
 
 # ------------------------------------------------------- predefined nodes

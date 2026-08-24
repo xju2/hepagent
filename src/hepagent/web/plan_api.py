@@ -13,6 +13,7 @@ Routes:
     POST /api/plan/{name}/layout    auto-layout an unsaved plan, saving nothing
     GET  /api/plan/{name}/predefined   nodes the editor may offer to insert
     GET  /api/plan/{name}/state     what the analysis has established so far
+    GET  /api/plan/{name}/problem   every wording the physics prompt has had
     POST /api/plan/{name}/approve   release the plan to the orchestrator
     POST /api/plan/{name}/run       start the analysis in this process
                                     (`only_node` runs one node and stops)
@@ -238,6 +239,21 @@ def create_router(
             return service.predefined_nodes(root)
 
         return JSONResponse({"nodes": await asyncio.to_thread(library)})
+
+    @router.get("/api/plan/{name}/problem")
+    async def problem_history(name: str) -> JSONResponse:
+        """Every wording the analysis's physics prompt has had, newest first.
+
+        The prompt is edited on the plan page like any other field, so "what did
+        we ask before?" has to be answerable there. It comes from `plan.history/`
+        rather than from a log of its own — see `plan/store.py`.
+        """
+        root = _resolve_root(name, base_dir)
+
+        def history() -> list[dict[str, Any]]:
+            return service.problem_history(root)
+
+        return JSONResponse({"revisions": await asyncio.to_thread(history)})
 
     @router.get("/api/plan/{name}/state")
     async def plan_state(name: str) -> JSONResponse:

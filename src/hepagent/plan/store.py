@@ -10,6 +10,14 @@ beside it: every save copies the outgoing version to
 ``plan.history/<revision>.json`` before overwriting. Nothing is ever lost, the
 current shape is one `json.load` away, and both files stay git-diffable and ride
 the existing per-phase commits.
+
+**`prompt.md` is a mirror, not a second source.** The physics question is a
+field of the plan (`AnalysisPlan.problem`), and every save rewrites `prompt.md`
+from it. The executors, the reviewers and the codesign gate all read the file,
+so the file has to keep existing — but nothing writes it independently, which is
+what lets the prompt be edited in the plan editor without the two copies
+drifting apart. Editing the prompt therefore lands in `plan.history/` like any
+other edit, and that archive *is* the prompt's history.
 """
 
 from __future__ import annotations
@@ -22,6 +30,12 @@ from hepagent.plan.schema import AnalysisPlan, PlanSchemaError, utc_now
 
 PLAN_FILENAME = "plan.json"
 HISTORY_DIRNAME = "plan.history"
+PROMPT_FILENAME = "prompt.md"
+
+#: Heading `prompt.md` is written under. It is presentation, not content: added
+#: on write and stripped on read, so `plan.problem` holds the question and
+#: nothing else.
+PROMPT_HEADING = "# Physics Prompt"
 
 
 class PlanNotFoundError(FileNotFoundError):
@@ -35,6 +49,47 @@ class PlanFormatError(PlanSchemaError):
 def plan_path(analysis_root: Path | str) -> Path:
     """Return the path to the plan document for this analysis."""
     return Path(analysis_root) / PLAN_FILENAME
+
+
+def prompt_path(analysis_root: Path | str) -> Path:
+    """Return the path to the mirrored physics prompt for this analysis."""
+    return Path(analysis_root) / PROMPT_FILENAME
+
+
+def strip_prompt_heading(text: str) -> str:
+    """Drop the `# Physics Prompt` heading a mirrored `prompt.md` carries."""
+    body = text.strip()
+    if body.startswith(PROMPT_HEADING):
+        body = body[len(PROMPT_HEADING) :]
+    return body.strip()
+
+
+def read_prompt_file(analysis_root: Path | str) -> str:
+    """Read `prompt.md` back as a bare question, or "" when there is none.
+
+    Only migration and the pre-plan directories need this: everything else reads
+    `plan.problem`, which this file mirrors.
+    """
+    path = prompt_path(analysis_root)
+    if not path.is_file():
+        return ""
+    try:
+        return strip_prompt_heading(path.read_text(encoding="utf-8"))
+    except OSError:
+        return ""
+
+
+def write_prompt_file(analysis_root: Path | str, problem: str) -> Path:
+    """Write the analysis's physics prompt to `prompt.md`.
+
+    The single writer of that file; see the module docstring. A plan with no
+    problem statement still gets the file, because every reader assumes it is
+    there and an empty question is an honest answer.
+    """
+    path = prompt_path(analysis_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{PROMPT_HEADING}\n\n{problem.strip()}\n", encoding="utf-8")
+    return path
 
 
 def history_dir(analysis_root: Path | str) -> Path:
@@ -127,6 +182,10 @@ def save_plan(
         json.dumps(written.to_dict(), indent=2, ensure_ascii=False, sort_keys=False) + "\n",
         encoding="utf-8",
     )
+    # `prompt.md` is derived from the plan, so it is rewritten with it. Doing it
+    # here rather than at each call site is what guarantees the file and the
+    # field cannot disagree, whoever did the editing.
+    write_prompt_file(root, written.problem)
     return written
 
 

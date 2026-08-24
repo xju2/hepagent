@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from hepagent.plan import layout, store
-from hepagent.plan.compile import execution_order
+from hepagent.plan.compile import execution_order, problem_node as compile_problem_node
 from hepagent.plan.schema import AnalysisPlan
 from hepagent.plan.validate import PlanVocabulary, validate_plan
 
@@ -149,6 +149,87 @@ def predefined_nodes(analysis_root: Path | str | None = None) -> list[dict[str, 
     return library(analysis_name=name)
 
 
+def problem_history(analysis_root: Path | str) -> list[dict[str, Any]]:
+    """Every wording the physics prompt has had, newest first.
+
+    Reads `plan.history/` — the prompt is a field of the plan, so its history is
+    the plan's history, and nothing extra had to be recorded to get it. Only the
+    revisions where the wording actually *changed* are returned: a plan is saved
+    on every node drag, and a list of forty identical prompts tells a reader
+    nothing.
+
+    Returns:
+        ``[{"revision": int, "updated_at": str, "problem": str,
+        "current": bool}]``, newest first. Empty when the analysis has no plan.
+    """
+    root = Path(analysis_root)
+    try:
+        current = store.load_plan(root)
+    except (store.PlanNotFoundError, store.PlanFormatError):
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for revision in store.list_revisions(root):
+        try:
+            archived = store.load_revision(root, revision)
+        except (store.PlanNotFoundError, store.PlanFormatError):
+            continue
+        entries.append(
+            {
+                "revision": archived.revision,
+                "updated_at": archived.updated_at,
+                "problem": archived.problem,
+                "current": False,
+            }
+        )
+    entries.append(
+        {
+            "revision": current.revision,
+            "updated_at": current.updated_at,
+            "problem": current.problem,
+            "current": True,
+        }
+    )
+
+    changed: list[dict[str, Any]] = []
+    for entry in entries:
+        if changed and changed[-1]["problem"].strip() == entry["problem"].strip():
+            # Same wording, newer revision: keep the entry that introduced it,
+            # but let the reader see it is still what the plan says today.
+            changed[-1]["current"] = changed[-1]["current"] or entry["current"]
+            continue
+        changed.append(entry)
+    return list(reversed(changed))
+
+
+def record_problem(analysis_root: Path | str, plan: AnalysisPlan) -> bool:
+    """Write the plan's physics question into the provenance graph.
+
+    The graph is append-only, so re-adding the problem node with a new wording
+    keeps the superseded record: `graph/nodes.jsonl` ends up carrying every
+    question the analysis was ever asked, in order, and every artifact ingested
+    afterwards descends from the wording current at the time.
+
+    Only writes to a graph that already exists — an analysis that has never run
+    is seeded from the plan anyway, by `bootstrap_graph`.
+
+    Returns:
+        True when the graph was touched. Never raises: graph work must not be
+        able to stop a user saving their plan.
+    """
+    try:
+        from hepagent.graph.store import AnalysisGraph
+
+        graph_dir = Path(analysis_root) / "graph"
+        if not graph_dir.is_dir():
+            return False
+        graph = AnalysisGraph.load(analysis_root)
+        graph.add_node(compile_problem_node(plan))
+        return True
+    except Exception:  # noqa: BLE001 - provenance is a record, not a gate
+        return False
+
+
 def catalog_of(vocabulary: PlanVocabulary | None) -> dict[str, list[str]]:
     """The vocabulary as sorted JSON-ready lists, omitting the unknown catalogs.
 
@@ -234,6 +315,9 @@ def put_plan(
     """
     plan = store.plan_from_dict(payload, source="submitted plan")
     written = store.save_plan(analysis_root, plan)
+    # `save_plan` mirrored the question into `prompt.md`; this puts the same
+    # wording in the provenance graph, so an edited prompt is traceable there too.
+    record_problem(analysis_root, written)
     # Editing a plan withdraws any approval it already had: what the
     # orchestrator was released to run is no longer what is on disk.
     (gate or APPROVAL_GATE).revoke(analysis_root)

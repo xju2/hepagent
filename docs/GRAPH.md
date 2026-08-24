@@ -50,7 +50,7 @@ This is what makes ingestion idempotent — see [Invariants](#invariants).
 
 | Type | Meaning |
 |------|---------|
-| `problem` | The physics question, from `prompt.md` |
+| `problem` | The physics question, from `plan.problem` (which `prompt.md` mirrors). It is **editable**, so this node carries `plan_revision` and a `prompt_sha256` of the wording, and re-recording an edited prompt appends a new record rather than replacing the old one — the log holds every question the analysis was asked |
 | `analysis_root` | The analysis itself |
 | `commitment` | One `[D1]`-style row from `COMMITMENTS.md` |
 | `process` | One physics process the analysis models — the signal, or a background with its classification |

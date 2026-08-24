@@ -74,8 +74,9 @@ def start_analysis_run(
     if only_node is not None and only_node not in node_ids:
         raise ValueError(f"Plan '{plan.name}' has no node '{only_node}'.")
 
-    prompt_file = root / "prompt.md"
-    physics_prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.is_file() else plan.name
+    # The plan's own question, which `prompt.md` mirrors — so a prompt edited on
+    # the plan page is what the run is launched with, without a reload.
+    physics_prompt = plan.problem.strip() or store.read_prompt_file(root) or plan.name
 
     def runner(handle: RunHandle) -> str:
         from hepagent.agents.jfc.orchestrator import run_jfc_analysis

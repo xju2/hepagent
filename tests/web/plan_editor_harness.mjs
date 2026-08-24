@@ -189,6 +189,17 @@ const PREDEFINED = {
   ],
 };
 
+// What `GET /api/plan/{name}/problem` returns: the question as it stands, and
+// the one it superseded. The panel's history list is drawn from this alone.
+const PROBLEM = {
+  revisions: [
+    { revision: 4, updated_at: "2026-08-20T00:00:00+00:00", current: true,
+      problem: "Measure the Z->bb cross section." },
+    { revision: 1, updated_at: "2026-08-01T00:00:00+00:00", current: false,
+      problem: "Measure something with b jets." },
+  ],
+};
+
 function layoutResponse(request) {
   // A grid nothing else could have produced, so a position matching it proves
   // the page applied the server's answer rather than the layout that arrived
@@ -210,6 +221,7 @@ globalThis.fetch = async (url, init) => {
                  models: ["big-model", "small-model"] }
     : url.endsWith("/predefined") ? PREDEFINED
     : url.endsWith("/state") ? STATE
+    : url.endsWith("/problem") ? PROBLEM
     : url.endsWith("/run") && method === "POST" && runResponse ? runResponse
     : nextResponse;
   return {
@@ -225,6 +237,7 @@ const expose = `${source}
 return { addNode, addCondition, save, approve, relayout, position, select,
          onConnectClick, render, renderSide, renderFindings, overlaps,
          backBranches, applyRun, runNode, openLibrary, closeLibrary,
+         entryNodes, promptPosition, PROMPT_ID,
          plan: () => plan,
          dirty: () => dirty, connect: (v) => { connecting = v; } };`;
 const api = new Function(expose)();
@@ -242,7 +255,9 @@ const out = {
   edges: plan.edges.length,
   // defs + one path and one hit-target per edge + one group per node
   svg_children: byId.canvas.children.length,
-  svg_expected: 1 + plan.edges.length * 2 + plan.nodes.length,
+  // defs + one path per prompt-to-entry edge + the prompt's own group
+  // + one path and one hit-target per plan edge + one group per plan node
+  svg_expected: 1 + api.entryNodes().length + 1 + plan.edges.length * 2 + plan.nodes.length,
   findings_rows: byId.findings.children.length,
 };
 
@@ -267,8 +282,10 @@ out.drag = {
   position: api.position(dragged),
   transform: group.attrs.transform,
   group_survived_the_move: groupOf(dragged.id) === group,
-  // defs, then a path and a hit target per edge: the line for edge i is at 1+2i.
-  edge_path: edgeIndex < 0 ? null : byId.canvas.children[1 + 2 * edgeIndex].attrs.d,
+  // defs, the prompt's seed edges and the prompt group, then a path and a hit
+  // target per plan edge: the line for edge i is at `edgesAt + 2i`.
+  edge_path: edgeIndex < 0 ? null
+    : byId.canvas.children[1 + api.entryNodes().length + 1 + 2 * edgeIndex].attrs.d,
   canvas_width: Number(byId.canvas.attrs.width),
 };
 group.dispatch("pointerup", { pointerId: 1 });
@@ -276,14 +293,54 @@ out.drag.position_after_release = api.position(dragged);
 out.drag.rerendered_on_release = groupOf(dragged.id) !== group;
 out.drag.dirty_after_release = api.dirty();
 
-// The physics prompt fills the side panel whenever nothing is selected.
+// The physics prompt: drawn as the head of the graph, and edited in the panel.
 api.select("node", plan.nodes[1].id);
 out.side_heading_while_selecting = byId.side.children[0].textContent;
-byId["show-prompt"].dispatch("click");
-out.prompt_panel = {
-  heading: byId.side.children[0].textContent,
-  body: byId.side.children[1] ? byId.side.children[1].textContent : null,
+
+const promptGroup = groupOf(api.PROMPT_ID);
+out.prompt_node = {
+  drawn: Boolean(promptGroup),
+  position: api.promptPosition(),
+  // Every node with nothing blocking it hangs off the prompt.
+  seeds: api.entryNodes().map((n) => n.id),
+  label: promptGroup ? promptGroup.children[1].textContent : null,
 };
+
+// Clicking the drawn prompt opens the same panel the toolbar button does.
+promptGroup.dispatch("click", { stopPropagation() {} });
+out.prompt_panel_from_canvas = byId.side.children[0].textContent;
+
+byId["show-prompt"].dispatch("click");
+await tick();   // the panel fetches its history the first time it opens
+const promptFields = byId.side.children;
+const promptBox = promptFields.find((c) => c.tagName === "textarea");
+out.prompt_panel = {
+  heading: promptFields[0].textContent,
+  editable: Boolean(promptBox),
+  body: promptBox ? promptBox.value : null,
+  history: promptFields.filter((c) => c.className === "revision")
+    .map((c) => c.children[1].textContent),
+};
+
+// Typing in it rewrites the plan's own question and marks the page unsaved.
+promptBox.value = "Measure the Z->bb cross section at 91 GeV.";
+promptBox.dispatch("input");
+out.prompt_edit = { problem: plan.problem, dirty: api.dirty() };
+plan.problem = "Measure the Z->bb cross section.";
+
+// Dragging it moves the prompt, not a node: its position lives on the plan.
+promptGroup.dispatch("pointerdown", {
+  clientX: 60, clientY: 60, pointerId: 3, button: 0,
+  stopPropagation() {}, preventDefault() {},
+});
+promptGroup.dispatch("pointermove", { clientX: 260, clientY: 160, pointerId: 3 });
+promptGroup.dispatch("pointerup", { pointerId: 3 });
+out.prompt_drag = {
+  position: api.promptPosition(),
+  metadata: { x: plan.metadata.prompt_x, y: plan.metadata.prompt_y },
+};
+delete plan.metadata.prompt_x; delete plan.metadata.prompt_y;
+api.render();
 
 plan.nodes[0].metadata = { x: 500, y: 12 };
 out.dragged_position = api.position(plan.nodes[0]);

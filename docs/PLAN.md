@@ -28,6 +28,7 @@ edit becomes a change in execution order. Nothing goes the other way.
 ```
 <analysis_root>/
     plan.json           the current plan
+    prompt.md           the physics question, mirrored from `plan.problem`
     plan.history/
         plan.0001.json  a copy of every previous revision
         plan.0002.json
@@ -40,6 +41,26 @@ edited in place, so a bad edit is always one file copy away from being undone.
 
 `plan.json` is written before `git init` during scaffolding, so it lands in the
 first commit alongside the graph.
+
+### `prompt.md` is a mirror
+
+The physics question is a field of the plan — `plan.problem` — and `prompt.md`
+is written *from* it by `save_plan`, which is its only writer. The executors,
+the reviewers and the codesign gate all read the file, so it has to keep
+existing; making it derived is what lets the question be edited in the plan
+editor without the two copies drifting apart. Two consequences:
+
+- **Editing the prompt is an ordinary plan edit.** It bumps the revision,
+  archives the previous wording into `plan.history/`, and withdraws approval —
+  so the prompt's history is the plan's history, and
+  `service.problem_history(root)` reads it straight out of the archive, listing
+  only the revisions where the wording actually changed.
+- **Saving it also re-records the graph's problem node** (`service.record_problem`),
+  which carries `plan_revision` and a `prompt_sha256` of the question. The graph
+  store is append-only, so `graph/nodes.jsonl` ends up holding every question
+  the analysis was ever asked, in order, and every artifact ingested afterwards
+  descends from the wording current at the time. Failing to record it never
+  stops a save.
 
 ---
 
@@ -526,10 +547,18 @@ honour and reports it, rather than raising and losing the rest.
 `GET /plan/{name}` serves a self-contained page — inline CSS and JS, SVG,
 no external requests — that draws the plan from `plan/layout.py`'s
 server-computed layering and lets a physicist drag nodes, edit any node field,
-retype edges, and add or delete either. With nothing selected the side panel
-shows `plan.problem`, the physics prompt the plan was written for, read-only:
-it mirrors the analysis's `prompt.md`, and an editable copy would only let the
-two disagree.
+retype edges, and add or delete either.
+
+**The physics prompt is drawn as the head of the graph.** Column 0 of the canvas
+belongs to it — the plan's own first column is column 1 — and a faint dashed
+edge runs from it to every node with nothing blocking it, which is the same rule
+`plan/compile.py` uses to wire the graph's problem node. Clicking it (or the
+toolbar's **Prompt** button, or clicking empty canvas) opens the panel that
+edits `plan.problem`, with the earlier wordings listed underneath from
+`GET /api/plan/{name}/problem`. It is a *field* of the plan drawn as a node, not
+a node in it: nothing runs it, the validator never sees it, and connect mode
+refuses to wire it by hand. Its position lives on `plan.metadata`
+(`prompt_x`/`prompt_y`), because there is no node to hang it from.
 
 The transport lives in `web/plan_api.py` (the only FastAPI importer); every
 decision lives in `plan/service.py`, which is stdlib-only and fully CI-tested.
@@ -573,6 +602,11 @@ pins the two together.
 The page owns pixels; `plan/layout.py` owns layering, and it is the *only*
 implementation — the browser must never grow a second one. Three rules follow:
 
+- **Column 0 is the prompt's.** `layout.py` lays out plan nodes only, and the
+  page shifts every column right by one through `columnX()`. Anything that turns
+  a layout column into an x coordinate — the fallback position, auto-layout, the
+  free-cell search for a new node — goes through it, or a node lands on the
+  prompt.
 - **A node's position is `metadata.x`/`y` when it has one**, and the view's
   server-computed grid otherwise. That fallback is only sound for nodes the
   server has seen, so anything the page creates — a new node, an auto-layout —
@@ -725,7 +759,15 @@ Preserve these when changing plan code:
     once from the page. The one exception is `only_node`: a single-node run
     neither reads nor sets the latch, and is still refused by a blocking
     finding.
-15. **`plan/runs.py` stays domain-agnostic too, and stdlib-only.** It supervises
+15. **`prompt.md` is derived, and `save_plan` is its only writer.** The
+    question lives in `plan.problem`; anything that writes the file
+    independently reintroduces the drift the mirror exists to prevent, and
+    anything that reads the question should prefer the field.
+16. **The prompt is drawn as a node and is not one.** It has no entry in
+    `plan.nodes`, no id a user can reference, and no validation rule; connect
+    mode must keep refusing it. The moment it becomes a real node, every rule
+    that assumes a node runs something has to learn about an exception.
+17. **`plan/runs.py` stays domain-agnostic too, and stdlib-only.** It supervises
     *a* run and asks *a* human; what a JFC analysis is lives in
     `agents/jfc/launch.py`, which is injected. Same rule as `PlanVocabulary`:
     the moment `plan/` imports the orchestrator, the layer is gone.
