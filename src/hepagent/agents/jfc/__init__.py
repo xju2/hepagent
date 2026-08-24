@@ -40,6 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only, for type checkers
     from hepagent.agents.jfc.orchestrator import (
         JFCOrchestrationState,
         MaxIterationsExceeded,
+        NodeBudgetSpent,
         load_state,
         run_jfc_analysis,
         save_state,
@@ -70,6 +71,7 @@ _EXPORTS: dict[str, str] = {
     "rebuild": "graph_builder",
     "JFCOrchestrationState": "orchestrator",
     "MaxIterationsExceeded": "orchestrator",
+    "NodeBudgetSpent": "orchestrator",
     "load_state": "orchestrator",
     "run_jfc_analysis": "orchestrator",
     "save_state": "orchestrator",

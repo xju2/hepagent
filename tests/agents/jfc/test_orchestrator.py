@@ -1080,6 +1080,91 @@ async def test_only_node_refuses_a_node_the_plan_does_not_have(jfc_analysis, jfc
         await run_one(jfc_analysis, jfc_plan, "nonesuch")
 
 
+@pytest.mark.asyncio
+async def test_only_node_runs_again_after_the_node_already_passed(jfc_analysis, jfc_plan):
+    """Pressing Run twice runs the node twice.
+
+    Regression: `run_phase_with_review` iterates `range(spent, limit)`, and a
+    single-node run loads the state on disk, so the second press inherited the
+    iterations the first spent and had an empty loop - the button looked dead.
+    """
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    first, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+    second, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert first == ["strategy"]
+    assert second == ["strategy"]
+    assert load_state(jfc_analysis).phase_iterations["strategy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_only_node_runs_when_the_plan_lowered_max_iterations(jfc_analysis, jfc_plan):
+    """A budget the node already overspent must not block re-running it.
+
+    The counter is cumulative across runs while `max_iterations` is editable, so
+    lowering it on the plan page left the node permanently unrunnable.
+    """
+    from hepagent.agents.jfc.orchestrator import load_state, save_state
+
+    state = make_state(jfc_analysis, max_iterations_per_phase=1, phase_iterations={"strategy": 3})
+    save_state(state)
+
+    executed, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert executed == ["strategy"]
+    assert load_state(jfc_analysis).phase_iterations["strategy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_only_node_unskips_a_node_a_condition_routed_past(jfc_analysis, jfc_plan):
+    """Asking for a node by name overrides the branch that skipped it."""
+    from hepagent.agents.jfc.orchestrator import load_state, save_state
+
+    save_state(make_state(jfc_analysis, skipped_nodes=["strategy"]))
+
+    executed, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert executed == ["strategy"]
+    assert load_state(jfc_analysis).skipped_nodes == []
+
+
+@pytest.mark.asyncio
+async def test_only_node_still_leaves_other_nodes_alone(jfc_analysis, jfc_plan):
+    """Clearing is scoped to the node asked for; the rest of the state stands."""
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    await run_one(jfc_analysis, jfc_plan, "exploration")
+    await run_one(jfc_analysis, jfc_plan, "selection")
+    await run_one(jfc_analysis, jfc_plan, "selection")
+
+    completed = set(load_state(jfc_analysis).completed_nodes)
+    assert {"exploration", "selection"} <= completed
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_is_reported_as_spent_not_as_a_failed_review(state_dir, jfc_plan):
+    """An empty iteration loop must not blame a review that never ran."""
+    from hepagent.agents.jfc.orchestrator import (
+        NodeBudgetSpent,
+        run_phase_with_review,
+        save_state,
+    )
+
+    state = make_state(state_dir, max_iterations_per_phase=1, phase_iterations={"strategy": 3})
+    save_state(state)
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", new_callable=AsyncMock) as executor,
+        patch("hepagent.agents.jfc.orchestrator.run_review_gate", new_callable=AsyncMock) as gate,
+        pytest.raises(NodeBudgetSpent, match="already spent 3"),
+    ):
+        await run_phase_with_review(state, node_of(jfc_plan, "strategy"), jfc_plan)
+
+    executor.assert_not_called()
+    gate.assert_not_called()
+
+
 # ------------------------------------------------------------- the turn cap
 
 

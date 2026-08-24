@@ -657,9 +657,20 @@ an API caller must not be able to skip it any more than the button can.
 `POST /run` also takes **`only_node`**, which the side panel's per-node *Run*
 button sends: that node runs, and nothing else. It skips the planner rather than
 asking `next_phase` for a frontier of one — the point of the button is to re-run
-*this* node whatever the graph thinks is ready — and it is a resume rather than a
-fresh start, so `.orchestration_state.json` and everything already completed
-stand. It returns the node's primary artifact instead of the final PDF.
+*this* node whatever the graph thinks is ready. It returns the node's primary
+artifact instead of the final PDF.
+
+It is a resume for the *analysis* and a fresh start for the *node*.
+`.orchestration_state.json` is loaded rather than rebuilt, so what every other
+node completed stands; the node being asked for is cleared first
+(`_reset_node_progress`): its review-iteration counter, its completed and
+skipped entries, and — for a condition — its loop budget and metric history.
+Without that clearing the button was a trap. `run_phase_with_review` iterates
+`range(spent, limit)`, `spent` is cumulative across runs, and `max_iterations`
+is editable on the page, so any node that had already finished, or whose limit
+the user had just lowered, got an empty loop and an immediate raise: the button
+looked dead. What the node left on disk is *not* cleared — the executor is
+expected to read its own previous output and supersede it.
 
 Running a *condition* node this way evaluates it — including the rewind a back
 branch implies, which un-completes the loop body — but nothing follows it, so
@@ -758,7 +769,8 @@ Preserve these when changing plan code:
     --review-plan` run the same analysis twice — once from the CLI it released,
     once from the page. The one exception is `only_node`: a single-node run
     neither reads nor sets the latch, and is still refused by a blocking
-    finding.
+    finding. It also clears that one node's run bookkeeping, so pressing Run
+    twice runs the node twice.
 15. **`prompt.md` is derived, and `save_plan` is its only writer.** The
     question lives in `plan.problem`; anything that writes the file
     independently reintroduces the drift the mirror exists to prevent, and

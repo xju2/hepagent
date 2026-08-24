@@ -1679,7 +1679,11 @@ async function startRun(onlyNode) {
    running one node is a statement about that node, not about the pipeline. It
    still saves first, because what runs is the plan on disk. */
 async function runNode(id) {
-  if (runActive()) return;
+  // Silence here read as a dead button; the run in flight owns the analysis.
+  if (runActive()) {
+    toast("A run is already in progress \u2014 stop it before running a node.", true);
+    return;
+  }
   if (dirty && !(await save())) return;
   await startRun(id);
 }

@@ -127,7 +127,12 @@ after. It saves first (what runs is the plan on disk) but never approves:
 approval is a claim about the pipeline, and since saving withdraws approval,
 requiring it would make the button unusable for the one thing it is for —
 re-running the node you just edited. A blocking finding still refuses it, and a
-node the plan does not have is a 400.
+node the plan does not have is a 400. It re-runs the node from scratch: the
+orchestrator clears that node's review-iteration counter and completed/skipped
+entries first, because those are cumulative across runs and would otherwise
+leave a node that had already finished with nothing left to iterate. Its files
+on disk stay — the executor reads and supersedes them. The button is a no-op
+while a run is in flight, and now says so instead of doing nothing.
 
 ### The bottom dock: progress, then the run log
 

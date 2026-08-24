@@ -75,6 +75,30 @@ class MaxIterationsExceeded(Exception):
         )
 
 
+class NodeBudgetSpent(MaxIterationsExceeded):
+    """Raised when a node's review budget was spent *before* this run started.
+
+    `run_phase_with_review` iterates `range(spent, limit)`, so a node whose
+    counter already sits at or above its limit gets an empty loop: nothing runs
+    and the plain `MaxIterationsExceeded` at the bottom of the function would
+    blame a review that never happened. This says what actually happened
+    instead. It subclasses `MaxIterationsExceeded` so every existing handler
+    still catches it.
+    """
+
+    def __init__(self, phase: str, spent: int, limit: int):
+        self.phase = phase
+        self.iterations = limit
+        self.spent = spent
+        Exception.__init__(
+            self,
+            f"Node {phase} has already spent {spent} review iteration(s) and its "
+            f"plan allows {limit}, so nothing would run. Raise the node's "
+            f"max_iterations (or the run's), or run the node from scratch - the "
+            f"plan page's per-node Run button clears its counter.",
+        )
+
+
 @dataclass
 class JFCOrchestrationState:
     """Durable run state. Node ids throughout — the plan owns the structure."""
@@ -823,6 +847,12 @@ async def run_phase_with_review(
     iterations = state.phase_iterations.get(phase_key, 0)
     limit = max(node.max_iterations, state.max_iterations_per_phase)
 
+    if iterations >= limit:
+        # The loop below would not execute once. Reported here rather than by
+        # falling through to the raise at the bottom, which describes a review
+        # that failed - this one never ran.
+        raise NodeBudgetSpent(phase_key, iterations, limit)
+
     for iteration in range(iterations, limit):
         state.phase_iterations[phase_key] = iteration + 1
         save_state(state)
@@ -1095,6 +1125,7 @@ async def run_jfc_analysis(
         single = active_plan.node(only_node)
         if single is None:
             raise ValueError(f"Plan '{active_plan.name}' has no node '{only_node}'.")
+        _reset_node_progress(state, single)
         sequence = [single]
 
     for node in sequence:
@@ -1155,6 +1186,37 @@ async def run_jfc_analysis(
     if progress_callback:
         progress_callback("complete", f"Analysis complete: {final_pdf}")
     return final_pdf
+
+
+def _reset_node_progress(state: JFCOrchestrationState, node: PlanNode) -> None:
+    """Forget what earlier runs recorded about `node`, so it can run again.
+
+    A whole-run launch is `fresh`, so it builds a new state and its counters
+    start at zero. A single-node run loads the state on disk instead, and would
+    inherit the review iterations the node already spent: with the counter at or
+    above the node's `max_iterations` - which happens after any completed run,
+    and immediately if the plan has since *lowered* the limit -
+    `run_phase_with_review` has nothing left to iterate, so pressing Run raised
+    at once and looked to the physicist like a button that does nothing.
+
+    Pressing Run on a node says "do this node again", so this clears that node's
+    own bookkeeping and nothing else: what other nodes completed still stands,
+    and so does everything the node left on disk, which the executor is expected
+    to read and supersede.
+    """
+    state.phase_iterations.pop(node.id, None)
+    if node.id in state.completed_nodes:
+        state.completed_nodes.remove(node.id)
+    # A node a condition routed past is not "done", it is "decided against";
+    # asking for it by name overrides that decision for this run.
+    if node.id in state.skipped_nodes:
+        state.skipped_nodes.remove(node.id)
+    if node.kind == "condition":
+        # The loop budget too - re-evaluating a condition whose budget is spent
+        # would otherwise be refused by `_apply_budget` before it read anything.
+        state.condition_iterations.pop(node.id, None)
+        state.condition_history.pop(node.id, None)
+    save_state(state)
 
 
 def _final_pdf(analysis_root: Path, plan: AnalysisPlan) -> Path:
