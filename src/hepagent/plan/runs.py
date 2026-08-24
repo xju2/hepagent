@@ -23,6 +23,7 @@ Three constraints shape it.
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 import traceback
@@ -31,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hepagent.activity import ActivityEvent
 from hepagent.interaction import Approval
 
 #: A run that finished, failed or was cancelled is *terminal*: it can be
@@ -44,8 +46,11 @@ TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
 PROMPT_TIMEOUT_SECONDS = 60 * 60
 
 #: Kept per run so a long analysis cannot grow an unbounded log in memory. The
-#: page polls incrementally, so it only ever misses history it already saw.
-MAX_EVENTS = 2000
+#: page polls incrementally, so it only ever misses history it already saw. It
+#: has to be generous: since the run narrates every model turn and every tool
+#: call, a single node can be hundreds of events, and the page is where a
+#: physicist is meant to be able to follow the whole thing.
+MAX_EVENTS = 20000
 
 
 class RunAlreadyActive(RuntimeError):
@@ -65,8 +70,17 @@ class RunEvent:
         at: Unix timestamp.
         node: Plan node id the event belongs to, or a pseudo-node the
             orchestrator uses for whole-run steps ("scaffold", "graph", "plan").
-        message: Human-readable progress text, verbatim from the run.
+        message: Human-readable progress text, verbatim from the run. One line:
+            anything longer belongs in `detail`.
         level: "info", "warning" or "error".
+        kind: What the reader is looking at — "progress" for a node boundary the
+            orchestrator announced, or one of `activity.KINDS` for a step an
+            agent narrated. The page styles and filters on this, so a log of a
+            thousand tool calls can still be read as a handful of phases.
+        agent: The agent that produced it, for an activity event; "" for the
+            orchestrator's own progress.
+        detail: The full body — a command's output, a model's answer — shown
+            folded away until the reader opens it. May be empty.
     """
 
     seq: int
@@ -74,6 +88,9 @@ class RunEvent:
     node: str
     message: str
     level: str = "info"
+    kind: str = "progress"
+    agent: str = ""
+    detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +99,9 @@ class RunEvent:
             "node": self.node,
             "message": self.message,
             "level": self.level,
+            "kind": self.kind,
+            "agent": self.agent,
+            "detail": self.detail,
         }
 
 
@@ -158,8 +178,22 @@ class RunHandle:
         self._prompt_seq = 0
         self._resume_status = "running"
         self._cancel = threading.Event()
+        #: The plan node the run is inside, so narration that knows only what an
+        #: agent did can still say where it happened. Set by the launcher at
+        #: every node boundary; "" before the first one.
+        self._current_node = ""
 
     # ---- called from the run thread -------------------------------------
+
+    def _append(self, event: RunEvent) -> RunEvent:
+        with self._lock:
+            self._seq += 1
+            event = dataclasses.replace(event, seq=self._seq, at=time.time())
+            self._events.append(event)
+            if len(self._events) > MAX_EVENTS:
+                self._dropped += len(self._events) - MAX_EVENTS
+                del self._events[:-MAX_EVENTS]
+        return event
 
     def record(self, node: str, message: str, level: str = "info") -> RunEvent:
         """Append a progress event. Raises `RunCancelled` if a stop was asked for.
@@ -169,21 +203,47 @@ class RunHandle:
         safe way to interrupt a thread mid-tool, so a cancel takes effect at the
         next boundary rather than immediately.
         """
-        with self._lock:
-            self._seq += 1
-            event = RunEvent(seq=self._seq, at=time.time(), node=node, message=message, level=level)
-            self._events.append(event)
-            if len(self._events) > MAX_EVENTS:
-                self._dropped += len(self._events) - MAX_EVENTS
-                del self._events[:-MAX_EVENTS]
+        event = self._append(RunEvent(seq=0, at=0.0, node=node, message=message, level=level))
         if self._cancel.is_set():
             raise RunCancelled(f"Run for {self.name!r} was cancelled")
         return event
+
+    def note(self, event: ActivityEvent) -> RunEvent:
+        """Append one narrated step, attributed to the node the run is inside.
+
+        Deliberately *not* a cancellation point, unlike `record`. This is called
+        from inside a function tool, and the SDK turns an exception raised there
+        into an error message handed back to the model — so a `RunCancelled`
+        here would be swallowed into the conversation instead of unwinding the
+        run. Cancelling still lands at the next node boundary, where `record` is.
+        """
+        return self._append(
+            RunEvent(
+                seq=0,
+                at=0.0,
+                node=self.current_node or "agent",
+                message=event.message,
+                level=event.level,
+                kind=event.kind,
+                agent=event.agent,
+                detail=event.detail,
+            )
+        )
 
     def set_node_status(self, node: str, status: str) -> None:
         """Record what a plan node is doing, for the page's node colouring."""
         with self._lock:
             self._nodes[node] = status
+
+    def set_current_node(self, node: str) -> None:
+        """Say which plan node the run is inside, for attributing narration."""
+        with self._lock:
+            self._current_node = node
+
+    @property
+    def current_node(self) -> str:
+        with self._lock:
+            return self._current_node
 
     def request_approval(self, cmd: str, cwd: str = "", thought: str = "") -> Approval:
         """Block until a human approves or rejects `cmd`."""
@@ -409,6 +469,23 @@ class RunInteractionBackend:
 
     def ask(self, prompt: str, thought: str = "", choices: Sequence[str] = ()) -> str:
         return self._handle.ask(prompt, thought=thought, choices=choices)
+
+
+class RunActivitySink:
+    """Routes an agent's narration to a `RunHandle`.
+
+    The other half of `RunInteractionBackend`: that one carries the questions an
+    agent asks, this one carries what it is doing while it is not asking. Bound
+    on the run thread by the launcher, which is what makes the plan page — and
+    not the terminal that happens to be running the server — the place a run is
+    watched from.
+    """
+
+    def __init__(self, handle: RunHandle):
+        self._handle = handle
+
+    def activity(self, event: ActivityEvent) -> None:
+        self._handle.note(event)
 
 
 #: Process-wide registry. The plan editor and the run share one process, the

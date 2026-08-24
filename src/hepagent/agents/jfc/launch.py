@@ -22,7 +22,13 @@ import asyncio
 from pathlib import Path
 
 from hepagent.plan import store
-from hepagent.plan.runs import RUNS, RunHandle, RunInteractionBackend, RunRegistry
+from hepagent.plan.runs import (
+    RUNS,
+    RunActivitySink,
+    RunHandle,
+    RunInteractionBackend,
+    RunRegistry,
+)
 
 #: Progress messages that mean a node finished, rather than that it is working.
 #: The orchestrator reports free text; only these two words are load-bearing for
@@ -79,6 +85,7 @@ def start_analysis_run(
     physics_prompt = plan.problem.strip() or store.read_prompt_file(root) or plan.name
 
     def runner(handle: RunHandle) -> str:
+        from hepagent.activity import bound_sink
         from hepagent.agents.jfc.orchestrator import run_jfc_analysis
         from hepagent.interaction import bound_backend
         from hepagent.model_providers import parse_model_spec
@@ -90,6 +97,10 @@ def start_analysis_run(
             # what makes "cancel" take effect at the next node boundary.
             handle.record(node_id, message)
             if node_id in node_ids:
+                # Everything the agents narrate between here and the next
+                # boundary belongs to this node, which is how a tool call that
+                # knows only its own name ends up on the right node's log.
+                handle.set_current_node(node_id)
                 handle.set_node_status(node_id, _node_status(message))
 
         async def drive() -> str:
@@ -107,7 +118,10 @@ def start_analysis_run(
             )
             return str(pdf)
 
-        with bound_backend(RunInteractionBackend(handle)):
+        with (
+            bound_backend(RunInteractionBackend(handle)),
+            bound_sink(RunActivitySink(handle)),
+        ):
             return asyncio.run(drive())
 
     return (registry or RUNS).start(analysis_name, root, runner, unattended=unattended)

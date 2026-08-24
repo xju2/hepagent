@@ -539,6 +539,51 @@ def test_double_clicking_the_grip_restores_the_default_height(observations):
     assert observations["dock"]["height_after_reset"] == "240px"
 
 
+# ------------------------------------------------------------------- the run log
+
+
+def test_every_narrated_step_becomes_its_own_row(observations):
+    """The log is the main stage, so it shows what the terminal shows."""
+    log = observations["run_log"]
+    assert log["rows"] == 4
+    assert log["classes"] == [
+        "e info k-progress",
+        "e info k-tool",
+        "e warning k-result",
+        "e info k-message",
+    ]
+
+
+def test_a_step_with_a_body_folds_it_behind_the_line_that_names_it(observations):
+    """A command's output belongs one click away, not on the server's terminal."""
+    log = observations["run_log"]
+    assert log["tags"] == ["div", "details", "details", "details"]
+    assert log["tool_summary"] == ["selection", "Phase Executor", "root -l -q fit.C"]
+    assert "fit the mass peak" in log["tool_detail"]
+
+
+def test_a_failed_command_reads_as_a_warning(observations):
+    assert observations["run_log"]["warning_class"] == "e warning k-result"
+
+
+def test_narration_alone_does_not_re_read_the_analysis(observations):
+    """Only a node boundary changes what the Progress tab has to say."""
+    log = observations["run_log"]
+    assert log["state_calls_after_narration"] == 0
+    assert log["state_calls_after_boundary"] == 1
+
+
+def test_the_filter_hides_rows_without_dropping_them(observations):
+    """A class on the container, so a reader's scroll position survives it."""
+    log = observations["run_log"]
+    assert log["filter_visible"] is True
+    assert log["filter_class"] is True
+    # Nothing is removed: filtering is CSS, and re-rendering thousands of rows
+    # on a dropdown change would throw away where the reader was.
+    assert log["rows_after_filter"] == log["rows_before_filter"]
+    assert log["filter_class_after_all"] is False
+
+
 def test_a_selected_node_leads_with_run_delete_and_save(observations):
     """Three buttons at the top of the panel, in that order.
 

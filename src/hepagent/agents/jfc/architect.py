@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from agents import Agent, Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
@@ -288,7 +289,9 @@ async def propose_plan(
     )
 
     try:
-        result = await Runner.run(agent, task, context=context, max_turns=max_turns)
+        result = await Runner.run(
+            agent, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+        )
         proposal = result.final_output
     except Exception as exc:  # noqa: BLE001 - the template is always a usable answer
         notes.append(f"architect failed ({exc}); running the template unchanged")
@@ -351,6 +354,7 @@ async def _repair(
             "Correct your proposal so it validates. Return the full edit list.",
             context=context,
             max_turns=max_turns,
+            hooks=ACTIVITY_HOOKS,
         )
     except Exception:  # noqa: BLE001 - the caller falls back to the template
         return None

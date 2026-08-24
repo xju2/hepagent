@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents import Agent, Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
@@ -299,7 +300,9 @@ async def _ask_judge(
         )
     )
     try:
-        result = await Runner.run(agent, task, context=context, max_turns=max_turns)
+        result = await Runner.run(
+            agent, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+        )
     except Exception as exc:  # noqa: BLE001 - an unreachable model is an unevaluable condition
         return None, f"The condition judge could not be run: {exc}"
 

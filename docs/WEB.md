@@ -161,9 +161,48 @@ with no storage still resizes, it just forgets). The height lives in a
 that number in a variable rather than measuring an element back: a drag that
 re-read its own laid-out height would fight the flexbox.
 
-**Run log** is the existing event stream, unchanged. The state fetch is tied to
-run progress rather than to a second timer, so a finished analysis costs
-nothing and a busy one stays current.
+**Run log** answers *what is the analysis doing right now* — and it is meant to
+be the only place a physicist has to look. It used to show only what the
+orchestrator chose to announce, a handful of node boundaries, while the window
+that launched the server showed every command; a supervising page that shows
+less than the terminal nobody is watching is not supervising anything.
+
+So the agents narrate themselves, through
+[`hepagent/activity.py`](../src/hepagent/activity.py) — the mirror image of
+`interaction.py`: that one carries the questions an agent asks, this one carries
+what it is doing while it is not asking. Same thread-local binding, same rule
+that a CLI run with nothing bound behaves byte-for-byte as before.
+
+The narration comes from one `RunHooks` subclass,
+[`agents/activity_hooks.py`](../src/hepagent/agents/activity_hooks.py), passed
+to every `Runner.run` in a JFC analysis. Instrumenting tools one at a time would
+have touched every tool and still missed what the model *said* between them; the
+SDK's lifecycle callbacks see all of it from one place — which agent is working
+(`on_agent_start`/`_end`), what it answered and what it decided to call with
+which arguments (`on_llm_end`, because `on_tool_start` is handed the tool but
+not its arguments), and what the tool returned (`on_tool_end`).
+
+Four rules keep a firehose readable:
+
+- **A headline is one line; the body is folded behind it.** Each event carries a
+  `kind` and a `detail`; a step with a body renders as `<details>`, so a
+  command's output is one click away rather than a screenful in the way.
+- **Kind is what makes a wall of steps skimmable.** A command reads as a command
+  before you read the words, and the filter beside the tabs takes the whole log
+  back down to commands-and-results, or to phase boundaries alone. Filtering is
+  a class on the container, never a re-render — the rows are already in the DOM
+  and a reader's scroll position is worth more than the tidiness.
+- **Autoscroll only from the bottom.** Someone who has scrolled up is reading
+  something.
+- **Clip at the source.** `activity.py` bounds every headline and body before a
+  sink ever sees one: the log is a progress view held in memory, and the
+  artefact on disk is the archive.
+
+`RunEvent.kind` also separates the orchestrator's own progress from narration,
+which is what the state fetch keys off: it fires on a node boundary, not on
+every turn. Re-reading the graph and the process inventory once per poll for the
+length of a run is a cost the Progress tab does not earn — what the analysis has
+*established* changes when a node moves, not when a command runs.
 
 ### The plan page is where a running analysis talks to its human
 
@@ -183,6 +222,11 @@ blocks on a `threading.Event`, the HTTP handler sets it.
 
 `Stop` is cooperative: a thread cannot be interrupted safely, so a cancel takes
 effect at the next progress report, and `RunHandle.record` is what raises.
+Narration goes through `RunHandle.note` instead, which deliberately does *not*
+raise: it is called from inside a function tool, and the SDK turns an exception
+raised there into an error message handed back to the model — so a cancel
+noticed there would be swallowed into the conversation rather than unwinding the
+run.
 
 ## The plan editor
 
@@ -324,6 +368,15 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
     column capped at `86vh`, `#ask .cmd` scrolls inside it, and `#ask .actions` is
     `flex: 0 0 auto`. A dialog that grows with its content pushes Approve past the
     bottom of a fixed overlay, where nothing can scroll it back.
+17. **Narration must never be able to fail the run it is narrating.**
+    `activity.report` no-ops with no sink bound, swallows whatever a sink
+    raises, clips every headline and body before the sink sees them, and reaches
+    the handle through `note`, which does not raise on a cancelled run. A
+    progress view is a courtesy; the analysis is the work.
+18. **The activity hooks stay defensive about shapes they did not define.**
+    Output items arrive from whichever provider answered — CBORG, OpenAI,
+    Gemini — through the SDK's converters. A field that moves must degrade to a
+    duller log line, never raise inside a hook.
 
 ## Known limitations
 
@@ -343,6 +396,8 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
   that page shows its plan but no progress — watch the terminal instead.
 - Progress is polled every 1.5 s rather than streamed. It survives a reload,
   which a websocket bound to the page would not, and a JFC node takes minutes.
+- The run log lives in memory and is bounded (`runs.MAX_EVENTS`). A run long
+  enough to exceed it loses its oldest lines; `dropped_events` says how many.
 - Runs live in memory. Restarting the server loses the log of a run in flight,
   and the analysis itself keeps whatever `.orchestration_state.json` recorded —
   resume it with `hepagent jfc resume --name <analysis>`.

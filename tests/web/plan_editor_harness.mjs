@@ -39,9 +39,20 @@ function makeEl(tag) {
     clientHeight: 900,
     scrollLeft: 0,
     scrollTop: 0,
+    // The run log measures itself to decide whether to stay pinned to the
+    // bottom. A stub that is exactly scrolled to its end means "the reader is
+    // at the bottom", which is the state a live run starts in.
+    scrollHeight: 900,
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return this.attrs[k]; },
     appendChild(c) { this.children.push(c); return c; },
+    removeChild(c) {
+      const at = this.children.indexOf(c);
+      if (at >= 0) this.children.splice(at, 1);
+      return c;
+    },
+    get childElementCount() { return this.children.length; },
+    get firstElementChild() { return this.children[0] || null; },
     addEventListener(name, fn) { (this._listeners[name] ||= []).push(fn); },
     removeEventListener(name, fn) {
       const fns = this._listeners[name] || [];
@@ -59,8 +70,8 @@ function makeEl(tag) {
   };
   el.classList = {
     _s: new Set(),
-    add(c) { this._s.add(c); },
-    remove(c) { this._s.delete(c); },
+    add(...cs) { for (const c of cs) this._s.add(c); },
+    remove(...cs) { for (const c of cs) this._s.delete(c); },
     toggle(c, on) { on ? this._s.add(c) : this._s.delete(c); },
     contains(c) { return this._s.has(c); },
   };
@@ -80,7 +91,7 @@ const IDS = [
   "run-settings", "run-unattended", "run-model", "run-iterations", "run-turns",
   // The bottom dock: the run log is one tab, what the analysis has established
   // is the other.
-  "dock", "dock-grip", "tab-progress", "tab-log", "progress",
+  "dock", "dock-grip", "tab-progress", "tab-log", "progress", "log-filter",
   "ask", "ask-title", "ask-text", "ask-cmd", "ask-thought", "ask-input", "ask-actions",
 ];
 const byId = Object.fromEntries(IDS.map((id) => [id, makeEl("div")]));
@@ -721,6 +732,76 @@ out.progress = {
 byId["tab-log"].dispatch("click");
 out.progress.log_shown_after_click = !byId["run-log"].hidden;
 out.progress.progress_hidden_after_click = byId.progress.hidden;
+byId["tab-progress"].dispatch("click");
+
+// The run log is the main stage: everything the agents narrate lands here, one
+// scannable line each, with the body folded behind the line that names it.
+byId["run-log"].children.length = 0;
+api.applyRun({
+  name: "zbb", status: "running", active: true, unattended: false,
+  nodes: { selection: "running" }, latest_seq: 20, prompt: null,
+  events: [
+    { seq: 11, node: "selection", message: "executor starting", level: "info",
+      kind: "progress", agent: "", detail: "" },
+    { seq: 12, node: "selection", message: "root -l -q fit.C", level: "info",
+      kind: "tool", agent: "Phase Executor",
+      detail: "thought: fit the mass peak\n\n{\n  \"cmd\": \"root -l -q fit.C\"\n}" },
+    { seq: 13, node: "selection", message: "bash returned", level: "warning",
+      kind: "result", agent: "Phase Executor", detail: "segmentation violation" },
+    { seq: 14, node: "selection", message: "I will retry with a wider range",
+      level: "info", kind: "message", agent: "Phase Executor",
+      detail: "I will retry with a wider range" },
+  ],
+});
+const logRows = byId["run-log"].children;
+out.run_log = {
+  rows: logRows.length,
+  tags: logRows.map((r) => r.tagName),
+  classes: logRows.map((r) => r.className),
+  // A folded row is <details><summary>node · agent · headline</summary><pre>…</pre>.
+  tool_summary: logRows[1].children[0].children.map((c) => c.textContent),
+  tool_detail: logRows[1].children[1].textContent,
+  warning_class: logRows[2].className,
+};
+
+// Narration alone must not re-read the analysis: a run narrates every turn, and
+// re-fetching the graph and the process inventory once per poll for the length
+// of a run is a cost the Progress tab does not earn.
+requests.length = 0;
+api.applyRun({
+  name: "zbb", status: "running", active: true, unattended: false,
+  nodes: { selection: "running" }, latest_seq: 21, prompt: null,
+  events: [{ seq: 21, node: "selection", message: "ls -la", level: "info",
+             kind: "tool", agent: "Phase Executor", detail: "" }],
+});
+await tick();
+out.run_log.state_calls_after_narration = requests.filter(
+  (r) => r.url.endsWith("/state")).length;
+
+// A node boundary is a different matter: something the analysis knows may have
+// moved with it.
+requests.length = 0;
+api.applyRun({
+  name: "zbb", status: "running", active: true, unattended: false,
+  nodes: { selection: "running" }, latest_seq: 22, prompt: null,
+  events: [{ seq: 22, node: "selection", message: "PASS", level: "info",
+             kind: "progress", agent: "", detail: "" }],
+});
+await tick();
+out.run_log.state_calls_after_boundary = requests.filter(
+  (r) => r.url.endsWith("/state")).length;
+
+// Filtering is a class on the container, so thousands of rows stay put.
+byId["tab-log"].dispatch("click");
+out.run_log.filter_visible = !byId["log-filter"].hidden;
+out.run_log.rows_before_filter = byId["run-log"].children.length;
+byId["log-filter"].value = "only-phases";
+byId["log-filter"].dispatch("change");
+out.run_log.filter_class = byId["run-log"].classList.contains("only-phases");
+out.run_log.rows_after_filter = byId["run-log"].children.length;
+byId["log-filter"].value = "all";
+byId["log-filter"].dispatch("change");
+out.run_log.filter_class_after_all = byId["run-log"].classList.contains("only-phases");
 byId["tab-progress"].dispatch("click");
 
 // The dock is resizable: dragging its grip upward makes both tab bodies taller,

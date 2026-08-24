@@ -169,11 +169,62 @@ button.tab { border-color: transparent; background: none; color: var(--muted);
   padding: 3px 10px; }
 button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--line); }
 .dock-body { height: var(--dock-h); overflow-y: auto; padding: 4px 0; }
-#run-log .e { padding: 2px 16px; font-size: 12.5px; display: flex; gap: 8px; }
-#run-log .e code { color: var(--muted); font-family: ui-monospace, monospace;
-  font-size: 11.5px; flex: 0 0 130px; overflow: hidden; text-overflow: ellipsis; }
-#run-log .e.warning { color: var(--warn); }
-#run-log .e.error { color: var(--err); }
+/* The run log is the analysis's main stage: every model turn, every tool call
+   and every result, not just the node boundaries the orchestrator announces. It
+   is therefore long, so it is built to be skimmed — one line per step, the body
+   folded away behind it, and a filter that takes the whole thing back down to
+   phase boundaries when that is all a reader wants. */
+#run-log .e { padding: 2px 16px; font-size: 12.5px; display: flex; gap: 8px;
+  align-items: baseline; }
+/* Both row shapes lay out the same three columns, so a folded step and a plain
+   one line up: in a <details> the columns live one level down, inside <summary>.
+   The child combinator is what keeps these off the <pre> below. */
+#run-log .e > code, #run-log .e > summary > code { color: var(--muted);
+  font-family: ui-monospace, monospace; font-size: 11.5px; flex: 0 0 110px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#run-log .e .who { color: var(--muted); font-size: 11px; flex: 0 0 96px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#run-log .e .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A caret says which rows have something to open. Rows without a body carry an
+   empty one of the same width, so the columns do not jump between them. */
+#run-log div.e::before, #run-log details.e > summary::before {
+  content: ""; flex: 0 0 9px; color: var(--muted); font-size: 10px; }
+#run-log details.e > summary::before { content: "\25B8"; }
+#run-log details.e[open] > summary::before { content: "\25BE"; }
+
+/* Kind is what makes a wall of steps legible at a glance: a command reads as a
+   command whether or not you are reading the words. */
+#run-log .k-progress .msg { font-weight: 600; }
+#run-log .k-tool .msg { font-family: ui-monospace, monospace; font-size: 11.5px; }
+#run-log .k-tool .msg::before { content: "$ "; color: var(--accent); }
+#run-log .k-result .msg, #run-log .k-agent .msg { color: var(--muted); }
+#run-log .k-reasoning .msg { font-style: italic; color: var(--muted); }
+/* Level beats kind: a command that failed has to read as failed, and the kind
+   rules above colour `.msg` more specifically than a rule on the row would. */
+#run-log .e.warning, #run-log .e.warning .msg { color: var(--warn); }
+#run-log .e.error, #run-log .e.error .msg { color: var(--err); }
+/* A step that carries a body is a <details>: the summary is the same one-line
+   row, and opening it is how a reader reads a command's output without leaving
+   the page for the terminal. */
+#run-log details.e { display: block; padding: 0; }
+#run-log details.e > summary { padding: 2px 16px; display: flex; gap: 8px;
+  align-items: baseline; cursor: pointer; list-style: none; }
+#run-log details.e > summary::-webkit-details-marker { display: none; }
+#run-log details.e > summary:hover { background: var(--bg); }
+#run-log details.e[open] > summary { background: var(--bg); }
+#run-log details.e > pre { margin: 0 16px 8px 151px; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+  font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 40vh; overflow-y: auto; color: var(--ink); }
+/* Filtering is CSS rather than a re-render: the events are already in the DOM
+   and a run can have thousands of them. */
+#run-log.only-commands .k-message, #run-log.only-commands .k-reasoning,
+#run-log.only-commands .k-agent { display: none; }
+#run-log.only-phases .e:not(.k-progress) { display: none; }
+/* The dock head is a flex row and the page's form selects are full-width, so
+   this one has to opt out of both or it eats the tab bar. */
+#log-filter { font-size: 12px; padding: 2px 4px; width: auto; flex: 0 0 auto; }
+#dock .head .tab { white-space: nowrap; }
 /* Progress: the plan's steps as a strip, then the physics the analysis has
    settled on. Each later phase adds a block here; the strategy adds the first. */
 #progress { padding: 8px 16px 12px; }
@@ -307,6 +358,12 @@ button.tab.on { color: var(--ink); background: var(--bg); border-color: var(--li
   <div class="head">
     <button id="tab-progress" class="tab on">Progress</button>
     <button id="tab-log" class="tab">Run log</button>
+    <!-- Only meaningful on the log tab, so it appears with it. -->
+    <select id="log-filter" hidden title="How much of the run to show">
+      <option value="all">everything</option>
+      <option value="only-commands">commands &amp; results</option>
+      <option value="only-phases">phases only</option>
+    </select>
     <span class="spacer"></span>
     <span id="run" hidden>
       <span class="pill" id="run-state">idle</span>
@@ -1728,11 +1785,19 @@ function applyRun(snapshot) {
 
   const before = JSON.stringify(runNodes);
   runNodes = snapshot.nodes || {};
-  appendRunEvents(snapshot.events || []);
+  const events = snapshot.events || [];
+  appendRunEvents(events);
   // Something moved, so what the analysis knows may have moved with it. Tying
   // the refresh to progress rather than to a second timer means a finished run
   // stops costing anything, and a busy one keeps the panel current.
-  if ((snapshot.events || []).length || JSON.stringify(runNodes) !== before) loadState();
+  //
+  // A *node boundary* only. The agents now narrate every turn and every tool
+  // call, and re-reading the graph and the process inventory once per poll for
+  // the whole length of a run is a cost the Progress tab does not earn: what
+  // the analysis has established changes when a node moves, not when a command
+  // runs.
+  const moved = events.some((e) => (e.kind || "progress") === "progress");
+  if (moved || JSON.stringify(runNodes) !== before) loadState();
   renderRun();
   renderState();
   // The question comes first: the run is stopped until it is answered, so a
@@ -1749,18 +1814,53 @@ function applyRun(snapshot) {
   }
 }
 
-function appendRunEvents(events) {
-  const log = $("run-log");
-  for (const event of events) {
-    const row = document.createElement("div");
-    row.className = `e ${event.level || "info"}`;
-    const where = document.createElement("code");
-    where.textContent = event.node;
-    row.appendChild(where);
-    row.appendChild(document.createTextNode(event.message));
-    log.appendChild(row);
+/* How many rows the log keeps in the DOM. The run itself keeps far more (see
+   `plan/runs.py`), but a browser asked to lay out tens of thousands of rows
+   stops being a place anyone wants to watch a run from. */
+const LOG_MAX_ROWS = 4000;
+
+/* Autoscroll only when the reader is already at the bottom. Someone who has
+   scrolled up is reading something, and yanking them back down every two
+   seconds is how a live log becomes unusable. */
+const LOG_STICK_PX = 40;
+
+/* One row per step. Steps that carry a body are <details>, so the body is one
+   click away instead of on the terminal that launched the server. */
+function runEventRow(event) {
+  const kind = event.kind || "progress";
+  const hasDetail = Boolean((event.detail || "").trim());
+  const row = document.createElement(hasDetail ? "details" : "div");
+  row.className = `e ${event.level || "info"} k-${kind}`;
+
+  const head = hasDetail ? document.createElement("summary") : row;
+  const where = document.createElement("code");
+  where.textContent = event.node;
+  head.appendChild(where);
+  const who = document.createElement("span");
+  who.className = "who";
+  who.textContent = event.agent || "";
+  head.appendChild(who);
+  const msg = document.createElement("span");
+  msg.className = "msg";
+  msg.textContent = event.message;
+  head.appendChild(msg);
+
+  if (hasDetail) {
+    row.appendChild(head);
+    const body = document.createElement("pre");
+    body.textContent = event.detail;
+    row.appendChild(body);
   }
-  if (events.length) log.scrollTop = log.scrollHeight;
+  return row;
+}
+
+function appendRunEvents(events) {
+  if (!events.length) return;
+  const log = $("run-log");
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < LOG_STICK_PX;
+  for (const event of events) log.appendChild(runEventRow(event));
+  while (log.childElementCount > LOG_MAX_ROWS) log.removeChild(log.firstElementChild);
+  if (stick) log.scrollTop = log.scrollHeight;
 }
 
 function renderRun() {
@@ -2147,6 +2247,19 @@ function showTab(name) {
   $("tab-log").classList.toggle("on", name === "log");
   $("progress").hidden = name !== "progress";
   $("run-log").hidden = name !== "log";
+  $("log-filter").hidden = name !== "log";
+}
+
+/* The filter is a class on the container, not a re-render: every event is
+   already in the DOM and re-building thousands of rows on a dropdown change
+   would drop the reader's scroll position along with them. */
+function applyLogFilter() {
+  const log = $("run-log");
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < LOG_STICK_PX;
+  log.classList.remove("only-commands", "only-phases");
+  const mode = $("log-filter").value;
+  if (mode && mode !== "all") log.classList.add(mode);
+  if (stick) log.scrollTop = log.scrollHeight;
 }
 
 /* One pill per plan node. A node is "produced" when its artifact is on disk,
@@ -2245,6 +2358,7 @@ $("dock-grip").addEventListener("pointerdown", startDockResize);
 $("dock-grip").addEventListener("dblclick", () => setDockHeight(DOCK_DEFAULT, true));
 $("tab-progress").addEventListener("click", () => showTab("progress"));
 $("tab-log").addEventListener("click", () => showTab("log"));
+$("log-filter").addEventListener("change", applyLogFilter);
 $("add-node").addEventListener("click", addNode);
 $("add-condition").addEventListener("click", addCondition);
 $("add-predefined").addEventListener("click", openLibrary);

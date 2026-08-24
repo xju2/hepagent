@@ -220,3 +220,72 @@ def test_record_raises_only_after_cancelling(registry, tmp_path):
     handle.cancel()
     with pytest.raises(RunCancelled):
         handle.record("selection", "too late")
+
+
+# ------------------------------------------------------------- narrated activity
+
+
+def _activity(**kwargs):
+    from hepagent.activity import ActivityEvent
+
+    payload = {"kind": "tool", "agent": "Executor", "message": "ran something"}
+    payload.update(kwargs)
+    return ActivityEvent(**payload)
+
+
+def test_narration_lands_on_the_node_the_run_is_inside():
+    """A tool knows its own name and nothing about the plan; the handle supplies it."""
+    handle = runs.RunHandle("zbb", "/tmp")
+    handle.set_current_node("selection")
+    handle.note(_activity(message="python fit.py", detail="fitting"))
+
+    (event,) = handle.snapshot()["events"]
+    assert event["node"] == "selection"
+    assert event["kind"] == "tool"
+    assert event["agent"] == "Executor"
+    assert event["detail"] == "fitting"
+
+
+def test_narration_before_the_first_node_is_still_kept():
+    handle = runs.RunHandle("zbb", "/tmp")
+    handle.note(_activity())
+
+    assert handle.snapshot()["events"][0]["node"] == "agent"
+
+
+def test_orchestrator_progress_is_a_different_kind_from_narration():
+    """The page filters on this, so a thousand tool calls stay skimmable."""
+    handle = runs.RunHandle("zbb", "/tmp")
+    handle.record("selection", "executor starting")
+    handle.note(_activity())
+
+    kinds = [e["kind"] for e in handle.snapshot()["events"]]
+    assert kinds == ["progress", "tool"]
+
+
+def test_note_does_not_raise_on_a_cancelled_run():
+    """`note` is called from inside a function tool.
+
+    The SDK turns an exception raised there into an error message handed back to
+    the model, so a RunCancelled would be swallowed into the conversation rather
+    than unwinding the run. Cancelling lands at the next `record` instead.
+    """
+    handle = runs.RunHandle("zbb", "/tmp")
+    handle.cancel()
+
+    handle.note(_activity(message="still narrating"))
+
+    assert handle.snapshot()["events"][-1]["message"] == "still narrating"
+    with pytest.raises(RunCancelled):
+        handle.record("selection", "boundary")
+
+
+def test_the_sink_forwards_to_the_handle():
+    handle = runs.RunHandle("zbb", "/tmp")
+    handle.set_current_node("fit")
+    sink = runs.RunActivitySink(handle)
+
+    sink.activity(_activity(kind="result", message="tool returned", level="warning"))
+
+    (event,) = handle.snapshot()["events"]
+    assert (event["node"], event["kind"], event["level"]) == ("fit", "result", "warning")

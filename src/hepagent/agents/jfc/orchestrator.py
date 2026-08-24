@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents import Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc.capabilities import plan_vocabulary
 from hepagent.agents.jfc.codesign import run_codesign_gate
@@ -328,7 +329,7 @@ async def _run_executor(
         f"Read your system prompt for full instructions. "
         f"Produce the primary artifact to the outputs/ directory."
     )
-    await Runner.run(executor, task, context=context, max_turns=max_turns)
+    await Runner.run(executor, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS)
 
     if progress_callback:
         progress_callback(node.id, "executor complete")
@@ -358,7 +359,7 @@ async def _run_note_writer_and_typesetter(
         f"Write the analysis note for '{node.id}' to {an_path}. "
         f"Read all available artifacts from {state.root}."
     )
-    await Runner.run(note_writer, task, context=context, max_turns=max_turns)
+    await Runner.run(note_writer, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS)
 
     if progress_callback:
         progress_callback(node.id, "typesetting analysis note")
@@ -374,7 +375,9 @@ async def _run_note_writer_and_typesetter(
         f"Compile the analysis note at {an_path} to PDF at {pdf_path}. "
         f"Run pandoc → postprocess_tex.py → tectonic. Read and verify the PDF output."
     )
-    await Runner.run(typesetter, type_task, context=type_context, max_turns=max_turns)
+    await Runner.run(
+        typesetter, type_task, context=type_context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+    )
 
     return pdf_path if pdf_path.exists() else None
 
