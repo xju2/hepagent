@@ -275,6 +275,58 @@ const out = {
 // Position: the computed layout, then the stored one once a node is dragged.
 out.layout_position = api.position(plan.nodes[0]);
 
+// Edge routing. The template is a chain on one row carrying a dependency from
+// nearly every node to nearly every later one, so most of these edges skip at
+// least one box. Drawn as a straight run between node sides they would coincide
+// exactly with the short edges they overfly — six visible arrows standing for
+// fifteen dependencies. The page is asked for its drawing and the geometry is
+// re-derived here, independently of the page's own sampler, so this checks the
+// picture rather than the code that made it.
+const edgesAt = 1 + api.entryNodes().length + 1;
+const drawnPaths = plan.edges.map((_, i) => byId.canvas.children[edgesAt + 2 * i].attrs.d);
+
+/* An `M`/`C`/`L` path, flattened to points along it. Written here rather than
+   borrowed from the page so a routing bug cannot hide behind the page agreeing
+   with itself. */
+function curvePoints(d) {
+  const points = [];
+  let at = { x: 0, y: 0 };
+  for (const [, op, args] of d.matchAll(/([MCL])([^MCL]*)/g)) {
+    const n = (args.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    if (op === "M") { at = { x: n[0], y: n[1] }; points.push(at); continue; }
+    if (op === "L") { at = { x: n[0], y: n[1] }; points.push(at); continue; }
+    const p = [at, { x: n[0], y: n[1] }, { x: n[2], y: n[3] }, { x: n[4], y: n[5] }];
+    for (let i = 1; i <= 40; i++) {
+      const t = i / 40, u = 1 - t;
+      points.push({
+        x: u*u*u*p[0].x + 3*u*u*t*p[1].x + 3*u*t*t*p[2].x + t*t*t*p[3].x,
+        y: u*u*u*p[0].y + 3*u*u*t*p[1].y + 3*u*t*t*p[2].y + t*t*t*p[3].y,
+      });
+    }
+    at = p[3];
+  }
+  return points;
+}
+
+out.routing = {
+  edges: plan.edges.length,
+  distinct_paths: new Set(drawnPaths).size,
+  // Every node an edge is drawn over without being attached to it.
+  through_a_box: plan.edges.flatMap((edge, i) => {
+    const points = curvePoints(drawnPaths[i]);
+    return plan.nodes
+      .filter((n) => n.id !== edge.upstream && n.id !== edge.downstream)
+      .filter((n) => {
+        const p = api.position(n);
+        return points.some((q) => q.x > p.x && q.x < p.x + 210 && q.y > p.y && q.y < p.y + 62);
+      })
+      .map((n) => `${edge.upstream}->${edge.downstream} over ${n.id}`);
+  }),
+  // The drawing reaches below the boxes, so the canvas has to have grown for it.
+  lowest_point: Math.max(...drawnPaths.flatMap((d) => curvePoints(d).map((q) => q.y))),
+  canvas_height: Number(byId.canvas.attrs.height),
+};
+
 // Dragging. The node is grabbed at (100,100) — 60px right and below its own
 // corner — and the pointer is moved to (143,178); the node keeps the offset and
 // lands on the 10px grid. The group must survive the whole drag: re-rendering

@@ -715,8 +715,6 @@ function render() {
   const positions = {};
   for (const node of plan.nodes) positions[node.id] = position(node);
 
-  const extent = canvasExtent();
-  resizeCanvas(extent.width, extent.height);
   svg.textContent = "";
   drawn.nodes.clear();
   drawn.edges.length = 0;
@@ -728,49 +726,74 @@ function render() {
   defs.appendChild(arrowMarker("arrow-sel", "var(--sel)"));
   svg.appendChild(defs);
 
+  // Every edge is routed before any of them is drawn: a slot on a node's side
+  // depends on what else touches that node, so the whole set has to be in hand
+  // first. See "edge routing" below for why that is not optional.
+  const promptAt = promptPosition();
+  const back = backBranches();
+  const seeds = entryNodes().map((node) => ({
+    edge: { upstream: PROMPT_ID, downstream: node.id, kind: "seed" },
+    line: null, hit: null, label: null, looping: false,
+  }));
+  const wires = plan.edges
+    .map((edge, index) => ({
+      edge, index, line: null, hit: null, label: null, looping: back.has(edge),
+    }))
+    .filter((item) => positions[item.edge.upstream] && positions[item.edge.downstream]);
+  const routed = seeds.concat(wires);
+  assignPorts(routed);
+
+  // An edge that bows under the nodes it flies over can reach past the lowest
+  // box, so the canvas is sized around the drawing rather than around the boxes.
+  const geometry = new Map();
+  let deepest = 0;
+  for (const item of routed) {
+    const route = edgeGeometry(item);
+    if (!route) continue;   // an end that vanished under an edit; see invariant 14
+    geometry.set(item, route);
+    deepest = Math.max(deepest, route.bottom);
+  }
+  const extent = canvasExtent();
+  resizeCanvas(extent.width, Math.max(extent.height, deepest + PAD));
+
   // The prompt and the edges out of it are drawn first, under everything else:
   // they are the backdrop the plan hangs from, not part of its wiring.
-  const promptAt = promptPosition();
-  for (const node of entryNodes()) {
-    const d = edgePath(promptAt, positions[node.id], false);
-    const line = el("path", { class: "edge seed", d, "marker-end": "url(#arrow-informs)" });
-    svg.appendChild(line);
-    drawn.edges.push({
-      edge: { upstream: PROMPT_ID, downstream: node.id, kind: "seed" },
-      line, hit: null, label: null, looping: false,
+  for (const item of seeds) {
+    if (!geometry.has(item)) continue;
+    item.line = el("path", {
+      class: "edge seed", d: geometry.get(item).d, "marker-end": "url(#arrow-informs)",
     });
+    svg.appendChild(item.line);
+    drawn.edges.push(item);
   }
   svg.appendChild(promptGroup(promptAt));
 
-  const back = backBranches();
-  plan.edges.forEach((edge, index) => {
-    const a = positions[edge.upstream], b = positions[edge.downstream];
-    if (!a || !b) return;
+  for (const item of wires) {
+    if (!geometry.has(item)) continue;
+    const { edge, index, looping } = item;
+    const { d, mid } = geometry.get(item);
     const selected = sel && sel.type === "edge" && sel.id === index;
-    const looping = back.has(edge);
-    const d = edgePath(a, b, looping);
-    const hit = el("path", { class: "edge-hit", d });
-    hit.addEventListener("click", (ev) => { ev.stopPropagation(); select("edge", index); });
+    item.hit = el("path", { class: "edge-hit", d });
+    item.hit.addEventListener("click", (ev) => { ev.stopPropagation(); select("edge", index); });
     const marker = selected ? "arrow-sel"
       : isBranch(edge) ? "arrow-branch"
       : edge.kind === "informs" ? "arrow-informs" : "arrow";
-    const line = el("path", {
+    item.line = el("path", {
       class: `edge ${edge.kind === "informs" ? "informs" : ""} `
         + `${isBranch(edge) ? "branch" : ""} ${looping ? "loop" : ""} `
         + `${selected ? "selected" : ""}`,
       d,
       "marker-end": `url(#${marker})`,
     });
-    svg.appendChild(line);
-    svg.appendChild(hit);
-    let label = null;
+    svg.appendChild(item.line);
+    svg.appendChild(item.hit);
     if (isBranch(edge)) {
-      const mid = edgeMidpoint(a, b, looping);
-      label = text(edge.kind === "on_true" ? "yes" : "no", mid.x, mid.y, "edge-label", "middle");
-      svg.appendChild(label);
+      item.label = text(
+        edge.kind === "on_true" ? "yes" : "no", mid.x, mid.y, "edge-label", "middle");
+      svg.appendChild(item.label);
     }
-    drawn.edges.push({ edge, line, hit, label, looping });
-  });
+    drawn.edges.push(item);
+  }
 
   for (const node of plan.nodes) {
     const p = positions[node.id];
@@ -864,21 +887,24 @@ function moveDrawn(handle, x, y) {
   handle.place(x, y);
   const group = drawn.nodes.get(handle.id);
   if (group) group.setAttribute("transform", `translate(${x},${y})`);
+  // The slots stay as they were assigned for the duration of the drag: they
+  // depend on where every other end sits, and re-cutting them on every pointer
+  // move would make untouched edges twitch. The render on release settles them.
+  let deepest = 0;
   for (const item of drawn.edges) {
     if (item.edge.upstream !== handle.id && item.edge.downstream !== handle.id) continue;
-    const a = pointOf(item.edge.upstream), b = pointOf(item.edge.downstream);
-    if (!a || !b) continue;
-    const d = edgePath(a, b, item.looping);
-    item.line.setAttribute("d", d);
-    if (item.hit) item.hit.setAttribute("d", d);
+    const route = edgeGeometry(item);
+    if (!route) continue;
+    item.line.setAttribute("d", route.d);
+    if (item.hit) item.hit.setAttribute("d", route.d);
     if (item.label) {
-      const mid = edgeMidpoint(a, b, item.looping);
-      item.label.setAttribute("x", mid.x);
-      item.label.setAttribute("y", mid.y);
+      item.label.setAttribute("x", route.mid.x);
+      item.label.setAttribute("y", route.mid.y);
     }
+    deepest = Math.max(deepest, route.bottom);
   }
   const width = Math.max(canvasSize.width, x + NW + PAD);
-  const height = Math.max(canvasSize.height, y + NH + PAD);
+  const height = Math.max(canvasSize.height, y + NH + PAD, deepest + PAD);
   if (width !== canvasSize.width || height !== canvasSize.height) resizeCanvas(width, height);
 }
 
@@ -904,28 +930,203 @@ function arrowMarker(id, color) {
   return marker;
 }
 
-function edgePath(a, b, looping) {
-  // A loop runs right-to-left against every other edge in the picture, so it
-  // leaves and arrives on the same sides as the forward flow but bows below the
-  // row instead of cutting straight back through the nodes it re-runs.
-  if (looping) {
-    const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y + NH;
-    const drop = Math.max(NH, Math.abs(x1 - x2) / 6) + 30;
-    return `M ${x1} ${y1} C ${x1} ${y1 + drop}, ${x2} ${y2 + drop}, ${x2} ${y2}`;
+/* ------------------------------------------------------------ edge routing */
+
+/* Drawn naively — a curve from the middle of one node's right side to the
+   middle of the next one's left side — two different edges can end up as the
+   same picture, which is the one thing a dependency drawing must never do.
+   Every edge out of a node leaves from one point, and an edge spanning more
+   than one column runs straight through whatever sits between its ends: in a
+   chain of nodes on a single row, exactly along the short edges it overflies.
+   Six nodes carrying twelve dependencies then look like five arrows, and the
+   missing seven only appear once a node is dragged out of the way.
+
+   So an edge is routed in two steps:
+
+     1. each end takes its own slot on the node's side (`assignPorts`), ordered
+        by where the other end sits so the lines separate without braiding;
+     2. an edge whose run would still cut through a node bows *under* the boxes
+        it flies over (`detour`), one lane deeper per node, so nested skips nest
+        visually instead of landing on top of each other.
+
+   Under rather than over: the canvas has no coordinates above the origin to
+   expand into, while its height is elastic. None of this is written to the
+   plan — geometry is the page's business, the way `layer()` in
+   `plan/layout.py` hands over a grid of columns and rows and stops. */
+
+const PORT_BAND = 0.55;   // fraction of a node's side the slots spread across
+const CLEAR = 20;         // pixels an arc keeps clear of a box it passes
+const LANE = 16;          // extra depth per additional box under one arc
+const DETOUR_PASSES = 4;  // times an arc is deepened before it is accepted
+
+/* Give every edge its slot on both of the nodes it touches. Called with the
+   whole set — seed edges included, since they land on the same sides. */
+function assignPorts(items) {
+  const leaving = new Map(), arriving = new Map();
+  for (const item of items) {
+    item.ports = { out: NH / 2, in: NH / 2 };
+    // A loop leaves and arrives underneath, so it takes no slot on either side.
+    if (item.looping) continue;
+    bucket(leaving, item.edge.upstream).push(item);
+    bucket(arriving, item.edge.downstream).push(item);
   }
-  const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2;
-  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
-  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+  for (const group of leaving.values()) {
+    group.sort(byOtherEnd((item) => pointOf(item.edge.downstream)));
+    group.forEach((item, index) => { item.ports.out = slot(group.length, index); });
+  }
+  for (const group of arriving.values()) {
+    group.sort(byOtherEnd((item) => pointOf(item.edge.upstream)));
+    group.forEach((item, index) => { item.ports.in = slot(group.length, index); });
+  }
 }
 
-function edgeMidpoint(a, b, looping) {
-  if (looping) {
-    // The curve sits at three quarters of its drop at the midpoint; lift the
-    // label clear of it so the dashes do not run through the text.
-    const drop = Math.max(NH, Math.abs(a.x - b.x) / 6) + 30;
-    return { x: (a.x + b.x) / 2 + NW / 2, y: (a.y + b.y) / 2 + NH + drop * 0.75 - 6 };
+function bucket(map, key) {
+  if (!map.has(key)) map.set(key, []);
+  return map.get(key);
+}
+
+/* Order the edges meeting at one node by where their far ends sit, so the slots
+   run top to bottom in the same order the lines do and never cross each other
+   on the way out. */
+function byOtherEnd(far) {
+  return (p, q) => {
+    const a = far(p) || { x: 0, y: 0 }, b = far(q) || { x: 0, y: 0 };
+    return (a.y - b.y) || (a.x - b.x);
+  };
+}
+
+/* Slot `index` of `count`, as an offset down a node's side. One edge keeps the
+   middle — the common case must look exactly as it did. */
+function slot(count, index) {
+  if (count <= 1) return NH / 2;
+  return NH * (1 - PORT_BAND) / 2 + NH * PORT_BAND * index / (count - 1);
+}
+
+/* The path for one edge, where its label goes, and how far down it reaches —
+   the canvas is sized around the last of those. Reads live positions, so a
+   dragged node only needs its own edges recomputed. */
+function edgeGeometry(item) {
+  const a = pointOf(item.edge.upstream), b = pointOf(item.edge.downstream);
+  if (!a || !b) return null;
+  if (item.looping) {
+    // A loop runs right-to-left against every other edge in the picture, so it
+    // leaves and arrives on the same sides as the forward flow but bows below
+    // the row instead of cutting straight back through the nodes it re-runs.
+    const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y + NH;
+    const drop = Math.max(NH, Math.abs(x1 - x2) / 6) + 30;
+    return {
+      d: `M ${x1} ${y1} C ${x1} ${y1 + drop}, ${x2} ${y2 + drop}, ${x2} ${y2}`,
+      // The curve sits at three quarters of its drop at the midpoint; lift the
+      // label clear of it so the dashes do not run through the text.
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 + drop * 0.75 - 6 },
+      bottom: Math.max(y1, y2) + drop,
+    };
   }
-  return { x: (a.x + NW + b.x) / 2, y: (a.y + b.y) / 2 + NH / 2 - 6 };
+  const ports = item.ports || { out: NH / 2, in: NH / 2 };
+  const x1 = a.x + NW, y1 = a.y + ports.out;
+  const x2 = b.x, y2 = b.y + ports.in;
+  const floor = detour(item, x1, y1, x2, y2);
+  if (floor === null) {
+    const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+    return {
+      d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`,
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 6 },
+      bottom: Math.max(y1, y2),
+    };
+  }
+  return {
+    d: arc(x1, y1, x2, y2, floor).d,
+    mid: { x: (x1 + x2) / 2, y: floor + 14 },
+    bottom: floor,
+  };
+}
+
+/* A detoured edge dives clear of the row, runs flat under everything it passes,
+   and climbs back into the target's side. Flat rather than a single bow: a bow
+   is only deep at its middle, so the box nearest either end sits exactly where
+   the curve has already come back up — which is how five of these were still
+   drawn across a node after the first fix. The straight run makes the clearance
+   the same the whole way across, which also makes deepening actually converge.
+
+   Returned as the path and as a polyline of the same curve, so the collision
+   scan below tests what is drawn instead of its own idea of it. */
+function arc(x1, y1, x2, y2, floor) {
+  const reach = Math.min(110, Math.max(30, (x2 - x1) / 4));
+  const ax = x1 + reach, bx = Math.max(ax, x2 - reach);
+  const dive = [
+    { x: x1, y: y1 }, { x: x1 + reach * 0.6, y: y1 },
+    { x: ax - reach * 0.6, y: floor }, { x: ax, y: floor },
+  ];
+  const climb = [
+    { x: bx, y: floor }, { x: bx + reach * 0.6, y: floor },
+    { x: x2 - reach * 0.6, y: y2 }, { x: x2, y: y2 },
+  ];
+  const d = `M ${x1} ${y1} C ${dive[1].x} ${dive[1].y}, ${dive[2].x} ${dive[2].y}, ${ax} ${floor}`
+    + ` L ${bx} ${floor}`
+    + ` C ${climb[1].x} ${climb[1].y}, ${climb[2].x} ${climb[2].y}, ${x2} ${y2}`;
+  return { d, points: flatten(dive).concat(flatten(climb)) };
+}
+
+/* A cubic as points along it. Eight steps is well under a node's width at any
+   spacing the editor uses. */
+function flatten(p) {
+  const points = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8, u = 1 - t;
+    points.push({
+      x: u * u * u * p[0].x + 3 * u * u * t * p[1].x + 3 * u * t * t * p[2].x + t * t * t * p[3].x,
+      y: u * u * u * p[0].y + 3 * u * u * t * p[1].y + 3 * u * t * t * p[2].y + t * t * t * p[3].y,
+    });
+  }
+  return points;
+}
+
+/* How deep this edge has to bow to miss the boxes between its ends, or null if
+   its direct run is already clear. Deepening can uncover a box the previous
+   pass did not meet, so the scan repeats until it comes up clean or runs out of
+   passes — an arc that is a little too shallow still beats one drawn on top of
+   another edge. */
+function detour(item, x1, y1, x2, y2) {
+  // A backwards edge is already drawn as an S through open space; arcing it
+  // would say "loop", which is a different thing and coloured as one.
+  if (x2 - x1 < 1) return null;
+  const ends = new Set([item.edge.upstream, item.edge.downstream]);
+  const boxes = [];
+  for (const id of plan.nodes.map((n) => n.id).concat([PROMPT_ID])) {
+    if (ends.has(id)) continue;
+    const p = pointOf(id);
+    if (p) boxes.push(p);
+  }
+  let floor = null;
+  for (let pass = 0; pass < DETOUR_PASSES; pass++) {
+    const route = floor === null
+      ? [{ x: x1, y: y1 }, { x: x2, y: y2 }]
+      : arc(x1, y1, x2, y2, floor).points;
+    const hit = boxes.filter((p) => crosses(p, route));
+    if (!hit.length) return floor;
+    // One lane per extra box, so an edge flying over more of the plan runs
+    // under the ones flying over less of it instead of alongside them. A later
+    // pass only ever goes deeper: clearing the boxes it did meet can leave it
+    // clipping one it had not, and answering that with a shallower floor is
+    // what let an arc settle back on top of a node.
+    const under = Math.max(...hit.map((p) => p.y + NH)) + CLEAR + (hit.length - 1) * LANE;
+    floor = floor === null ? under : Math.max(under, floor + LANE);
+  }
+  return floor;
+}
+
+/* Whether a polyline comes within `CLEAR` of a node's box. */
+function crosses(p, route) {
+  for (let i = 0; i + 1 < route.length; i++) {
+    const a = route[i], b = route[i + 1];
+    const left = Math.max(Math.min(a.x, b.x), p.x - CLEAR);
+    const right = Math.min(Math.max(a.x, b.x), p.x + NW + CLEAR);
+    if (left >= right) continue;
+    const at = (x) => (b.x === a.x ? a.y : a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x));
+    const lo = Math.min(at(left), at(right)), hi = Math.max(at(left), at(right));
+    if (hi >= p.y - CLEAR && lo <= p.y + NH + CLEAR) return true;
+  }
+  return false;
 }
 
 function attachDrag(group, handle) {

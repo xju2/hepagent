@@ -134,8 +134,42 @@ def test_dragging_does_not_rebuild_the_element_it_is_dragging(observations):
 
 
 def test_edges_follow_the_node_while_it_is_dragged(observations):
-    """The node's right edge is at 380+210, its middle at 120+31."""
-    assert observations["drag"]["edge_path"].startswith("M 590 151")
+    """The node's right edge is at 380+210, and the dragged node's own slot on it.
+
+    Not its middle: the strategy node feeds five others, so each of those edges
+    leaves from its own slot down the side — see the routing tests below.
+    """
+    assert observations["drag"]["edge_path"].startswith("M 590 133.95")
+
+
+def test_no_two_edges_are_drawn_as_the_same_line(observations):
+    """The complaint this routing exists for.
+
+    The seven-phase template is a chain on one row where nearly every node feeds
+    nearly every later one. Drawn as a straight run between node sides, an edge
+    skipping a column landed exactly on top of the short edges it overflew: the
+    picture showed six arrows for fifteen dependencies, and the missing ones only
+    appeared once a node had been dragged out of the line.
+    """
+    routing = observations["routing"]
+    assert routing["distinct_paths"] == routing["edges"] == 15
+
+
+def test_no_edge_is_drawn_across_a_node_it_does_not_touch(observations):
+    """An edge that would cut through a box bows under it instead.
+
+    Checked against the path the page actually emitted, re-flattened in the
+    harness, so this fails if the routing is merely *meant* to clear the boxes.
+    """
+    assert observations["routing"]["through_a_box"] == []
+
+
+def test_the_canvas_grows_around_the_routed_edges(observations):
+    """Detoured edges run below the lowest node, so the boxes do not bound the
+    drawing any more — sizing to them alone would clip the arcs off the page."""
+    routing = observations["routing"]
+    assert routing["lowest_point"] > 40 + 62  # below the row of boxes
+    assert routing["canvas_height"] >= routing["lowest_point"] + 40
 
 
 def test_a_drag_can_leave_the_current_canvas_bounds(observations):

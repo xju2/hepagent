@@ -244,6 +244,42 @@ HTTP. The page is a single self-contained file: inline CSS and JS, SVG
 rendering, no external requests at all — the same discipline that keeps it
 auditable keeps it working offline on a cluster login node.
 
+### Edges are routed, not just drawn
+
+`plan/layout.py` answers *where a node goes* — a grid of columns and rows — and
+stops there; turning that into pixels, edges included, is the page's job. Doing
+the naive thing there is a correctness bug in the picture rather than a
+cosmetic one. The JFC templates are a chain in which nearly every node feeds
+nearly every later one, and every node sits on one row: an edge drawn as a
+straight run from one node's right side to the next one's left lands *exactly*
+on top of the short edges it skips over. Six nodes carrying twelve dependencies
+drew as five arrows, and the missing seven only appeared once a node had been
+dragged out of the line.
+
+So `render()` routes the whole set before drawing any of it (`assignPorts`,
+`edgeGeometry`, `detour` in [`plan.html`](../src/hepagent/web/static/plan.html)):
+
+- **Each end takes its own slot** down the node's side, ordered by where the
+  other end sits so the lines separate without braiding. A node with one edge
+  keeps the middle, so the simple case looks exactly as it did.
+- **An edge that would cut through a box detours under it** — diving clear of
+  the row, running *flat* beneath everything it passes, then climbing into the
+  target's slot. Flat rather than bowed: a bow is only deep at its middle, so
+  the box nearest either end sits precisely where the curve has come back up.
+  One extra lane per box crossed, so an edge flying over more of the plan runs
+  under one flying over less of it.
+- **Under, not over.** The canvas has no coordinates above the origin to grow
+  into; its height is elastic, so `render()` sizes it around the deepest routed
+  edge rather than around the boxes.
+
+The detour is settled by scanning the polyline of the curve *that will be
+drawn* against the node boxes and deepening until it comes up clean, so the
+clearance is a property of the picture rather than of the arithmetic that
+produced it. `tests/web/plan_editor_harness.mjs` re-flattens the emitted `d`
+attributes with its own parser and asserts both halves — every path distinct,
+no path across a box it does not touch — which is a check on the drawing, not
+on the page agreeing with itself.
+
 Approving a plan in the browser releases `PlanApprovalGate`, which
 `run_jfc_analysis(require_approval=True)` awaits before the first node. That only
 works because both share one process and one event loop, which is what
@@ -377,6 +413,14 @@ run into one route: `jfc run --review-plan` would then run the analysis twice.
     Output items arrive from whichever provider answered — CBORG, OpenAI,
     Gemini — through the SDK's converters. A field that moves must degrade to a
     duller log line, never raise inside a hook.
+
+19. **No two edges may draw as the same line.** The plan editor's whole job is
+    showing what depends on what; two dependencies rendered as one arrow is the
+    drawing lying about the plan. Edge geometry therefore stays routed rather
+    than direct — slots on the node's side, detours under the boxes in between —
+    and the harness asserts distinctness and box clearance against the paths the
+    page emits. If a change makes edges direct again, it has to keep those two
+    properties some other way.
 
 ## Known limitations
 
