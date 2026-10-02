@@ -283,29 +283,15 @@ def test_get_env_var_raises_value_error_for_invalid_conversion(monkeypatch):
         get_env_var("HEPAGENT_OUTPUT_WORD_LIMIT", dtype=int)
 
 
-def test_enable_mlflow_for_tracing_returns_false_without_mlflow():
-    """enable_mlflow_for_tracing returns False when mlflow is not installed."""
+def test_enable_mlflow_for_tracing_returns_false_without_tracking_uri(monkeypatch):
+    """enable_mlflow_for_tracing returns False when no tracking URI is configured."""
     from hepagent.helpers import enable_mlflow_for_tracing
 
-    with patch("builtins.__import__", side_effect=ImportError("no mlflow")):
-        # We can't easily block the already-imported mlflow; instead test the
-        # no-tracking-URI branch which also returns False.
-        pass
-
-    # Without MLFLOW_TRACKING_URI set, the function should return False
-    import os
-
-    orig = os.environ.pop("MLFLOW_TRACKING_URI", None)
-    try:
-        result = enable_mlflow_for_tracing()
-        # Should return False because tracking URI is not configured
-        assert result is False
-    except (ImportError, KeyError):
-        # mlflow is not installed in this environment - that's also acceptable
-        pass
-    finally:
-        if orig is not None:
-            os.environ["MLFLOW_TRACKING_URI"] = orig
+    # Blank out the TOML fallback too, so the user's ~/.hepagent config can't
+    # supply a URI and send the test to a live MLflow server.
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    with patch("hepagent.helpers.load_env_config", return_value={}):
+        assert enable_mlflow_for_tracing() is False
 
 
 def test_enable_mlflow_for_tracing_with_tracking_uri(monkeypatch):

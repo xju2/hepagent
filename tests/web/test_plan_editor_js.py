@@ -190,7 +190,7 @@ def test_a_wide_plan_is_shrunk_to_the_pane_rather_than_scrolled_sideways(observa
     scrollbar; the shrinking is a transform on the stage, so the plan's own
     coordinates — what gets saved — are untouched by it."""
     fit = observations["fit"]
-    assert fit["drawing_width"] > fit["pane_width"]      # it would have overflowed
+    assert fit["drawing_width"] > fit["pane_width"]  # it would have overflowed
     assert fit["svg_width"] <= fit["pane_width"]
     assert 0 < fit["scale"] < 1
     assert fit["stage_transform"] == f"scale({fit['scale']})"
