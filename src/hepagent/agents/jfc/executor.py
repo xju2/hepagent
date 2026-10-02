@@ -10,6 +10,7 @@ edges are compiled from — so the two still cannot drift.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from agents import Agent
@@ -21,13 +22,78 @@ from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
 from hepagent.plan.schema import AnalysisPlan, PlanNode
 from hepagent.plan.store import resolve_plan
-from hepagent.tools.common import ask_user_for_info, read_resource, web_search
+from hepagent.tools.common import ask_user_for_info, read_resource, render_skill, web_search
 from hepagent.tools.jfc import get_jfc_tools
+
+logger = logging.getLogger(__name__)
 
 _JFC_SRC = get_jfc_data_dir()
 
 #: How much of an upstream artifact an `inject="summary"` edge contributes.
 SUMMARY_CHARS = 1500
+
+
+def executor_tools() -> list:
+    """Every function tool a plan node's executor may be given.
+
+    The full set is the default; `PlanNode.tools` narrows it by name. This is
+    also the catalog the plan editor offers, via
+    `hepagent.agents.jfc.capabilities`, so the names a user can pick and the
+    tools that actually exist cannot drift apart.
+    """
+    return [
+        execute_bash_command_with_confirmation,
+        read_resource,
+        update_logbook,
+        ask_user_for_info,
+        web_search,
+        *get_jfc_tools(),
+    ]
+
+
+def _tools_for(node: PlanNode) -> list:
+    """Apply a node's tool allowlist.
+
+    An unknown name is logged and skipped rather than raised: `validate_plan` is
+    where a user hears about it, and a run must not die because a plan outlived
+    a tool rename. An empty allowlist really does mean no tools — that is a
+    different statement from `tools=None`, which means the default set.
+    """
+    available = executor_tools()
+    if node.tools is None:
+        return available
+    wanted = list(node.tools)
+    by_name = {tool.name: tool for tool in available}
+    unknown = [name for name in wanted if name not in by_name]
+    if unknown:
+        logger.warning(
+            "Plan node '%s' allowlists unknown tool(s): %s. Available: %s",
+            node.id,
+            ", ".join(unknown),
+            ", ".join(sorted(by_name)),
+        )
+    return [by_name[name] for name in wanted if name in by_name]
+
+
+def _skills_section(node: PlanNode) -> str:
+    """Render the skills a node declares, straight into its system prompt.
+
+    A plan node names its skills up front, so unlike the interactive agent it
+    has no reason to discover and activate one mid-run — the instructions are
+    simply present from the first turn.
+    """
+    blocks = []
+    for name in node.skills:
+        body = render_skill(name)
+        if body is None:
+            logger.warning("Plan node '%s' declares unknown skill '%s'.", node.id, name)
+            continue
+        blocks.append(body)
+    if not blocks:
+        return ""
+    return "# ACTIVE SKILLS\n\nFollow these standard operating procedures.\n\n" + "\n\n".join(
+        blocks
+    )
 
 
 def _read_jfc_file(relative: str) -> str:
@@ -139,6 +205,59 @@ def _graph_contract_section(node: PlanNode, analysis_root: Path) -> str:
     )
 
 
+def _process_inventory_section(node: PlanNode, plan: AnalysisPlan, analysis_root: Path) -> str:
+    """Tell a node either to record the process inventory, or what it says.
+
+    Which of the two a node gets is decided by its write-back contract, not by
+    its id: the node allowed to create `process` and `dataset` graph nodes is the
+    node that owns the inventory. Every other node is handed the inventory that
+    exists, so a downstream executor never re-derives the background list from
+    prose — that is the whole point of writing it down once.
+    """
+    from hepagent.agents.jfc.processes import (
+        BACKGROUND_CATEGORIES,
+        find_inventory,
+        inventory_owner,
+    )
+
+    try:
+        existing, owner = find_inventory(analysis_root, plan)
+    except Exception:  # noqa: BLE001 - a broken inventory must not block the run
+        existing, owner = None, None
+
+    if inventory_owner(plan) is node:
+        return (
+            "# PROCESS INVENTORY (REQUIRED)\n\n"
+            "Before you finish, record the processes this analysis models with\n"
+            '`record_process_inventory`, passing `node_id="' + node.id + '"`. This is '
+            "the machine-readable\ncounterpart of the sample inventory in your artifact, "
+            "and every later node reads\nit instead of re-reading your prose.\n\n"
+            "It must contain:\n"
+            "- the signal process(es);\n"
+            "- every background, each classified as "
+            + ", ".join(BACKGROUND_CATEGORIES)
+            + ",\n  with a one-line rationale for the classification and how you will "
+            "estimate it;\n"
+            "- the observed data as a `data` process;\n"
+            "- for each of them, the dataset(s) that carry it. Take the datasets from the\n"
+            '  physics prompt where it names them, recording `source: "prompt"` and the '
+            "path\n  exactly as given. Where the prompt does not name one, say so with\n"
+            '  `source: "inferred"` rather than inventing a path that looks official.\n\n'
+            "The tool validates the document and refuses an invalid one with the reasons;\n"
+            "fix them and call it again. Recording it is not optional — the progress panel\n"
+            "and the downstream nodes read this file, not the artifact."
+        )
+
+    if existing is None:
+        return ""
+    return (
+        "# PROCESS INVENTORY\n\n"
+        f"The strategy (node `{owner.id if owner else '?'}`) recorded these processes and "
+        "datasets.\nUse these ids, labels and paths as given rather than inventing your own; "
+        "call\n`read_process_inventory` for the full detail.\n\n" + existing.summary()
+    )
+
+
 def _assemble_executor_prompt(
     node: PlanNode,
     plan: AnalysisPlan,
@@ -167,6 +286,11 @@ def _assemble_executor_prompt(
     if upstream:
         parts.append(upstream)
 
+    # 4b. Skills the node declares
+    skills = _skills_section(node)
+    if skills:
+        parts.append(skills)
+
     # 5. Working directory instruction
     outputs_dir = analysis_root / node.outputs_dir
     src_dir = analysis_root / node.directory / "src"
@@ -182,6 +306,12 @@ def _assemble_executor_prompt(
 
     # 6. Graph write-back contract
     parts.append(_graph_contract_section(node, analysis_root))
+
+    # 6b. The process inventory: recorded by the node that owns it, injected
+    # into every other node that has to work per-process.
+    inventory = _process_inventory_section(node, plan, analysis_root)
+    if inventory:
+        parts.append(inventory)
 
     # 7. Codesign human feedback (only present on revision runs)
     if codesign_feedback:
@@ -218,7 +348,11 @@ def create_phase_executor(
     Return a role agent configured to execute one node of the analysis plan.
 
     Assembles the system prompt from executor.md, the node's own prompt, the
-    physics prompt, and the upstream artifacts the plan's edges declare.
+    physics prompt, the upstream artifacts the plan's edges declare, and the
+    skills it names. The tool set is `executor_tools()` narrowed by the node's
+    allowlist. `node.mcp_servers` is *not* read here: nothing in hepagent
+    connects to an MCP server yet, so the plan records the selection and the
+    runtime ignores it.
 
     Args:
         node: The plan node to execute.
@@ -242,14 +376,7 @@ def create_phase_executor(
         name=f"JFC Executor ({node.label})",
         instructions=instructions,
         model=get_model_provider(model_provider=provider, model_name=name),
-        tools=[
-            execute_bash_command_with_confirmation,
-            read_resource,
-            update_logbook,
-            ask_user_for_info,
-            web_search,
-            *get_jfc_tools(),
-        ],
+        tools=_tools_for(node),
     )
 
 
@@ -258,13 +385,24 @@ def _model_for(
     model_provider: str,
     model_name: str | None,
 ) -> tuple[str, str | None]:
-    """Apply a node's `"provider:model"` override, falling back to the run's model."""
+    """Apply a node's `"provider:model"` override, falling back to the run's model.
+
+    Three shapes, and the colon is what tells them apart — the same reading the
+    CLI's `parse_model_spec` uses, so a spec typed at a prompt and one picked in
+    the plan editor mean the same thing:
+
+    * ``"model"`` — that model on whatever platform the run chose.
+    * ``"provider:model"`` — both overridden.
+    * ``"provider:"`` — that platform, at its own default model. This is what the
+      editor writes when a user picks a platform and leaves the model alone, so
+      it must not be read as a model literally named ``"provider"``.
+    """
     if not node.model:
         return model_provider, model_name
-    provider, _, name = node.model.partition(":")
-    if not name:
+    provider, sep, name = node.model.partition(":")
+    if not sep:
         return model_provider, node.model
-    return provider, name
+    return provider, name or None
 
 
 def create_note_writer(

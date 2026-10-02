@@ -50,9 +50,10 @@ This is what makes ingestion idempotent — see [Invariants](#invariants).
 
 | Type | Meaning |
 |------|---------|
-| `problem` | The physics question, from `prompt.md` |
+| `problem` | The physics question, from `plan.problem` (which `prompt.md` mirrors). It is **editable**, so this node carries `plan_revision` and a `prompt_sha256` of the wording, and re-recording an edited prompt appends a new record rather than replacing the old one — the log holds every question the analysis was asked |
 | `analysis_root` | The analysis itself |
 | `commitment` | One `[D1]`-style row from `COMMITMENTS.md` |
+| `process` | One physics process the analysis models — the signal, or a background with its classification |
 | `dataset` | A data or MC sample, with AMI tag / campaign metadata |
 | `method` | A selection, calibration, unfolding or statistical method |
 | `artifact` | A phase's primary markdown output |
@@ -115,6 +116,8 @@ pipeline's own parsers so the graph cannot drift from what agents actually read:
 | the plan's `requires` edges | `plan/compile.py` | `requires` / `derives_from` edges |
 | `check_phase1_commitments` | `agents/jfc/commitment_checker.py` | `commitment` nodes + closing edges |
 | `parse_verdict_from_adjudication` | `agents/jfc/review_gate.py` | `decision` nodes + verdict edges |
+| `decisions/iteration_NN.md` | `agents/jfc/condition.py` | `decision` nodes + branch edges |
+| `outputs/processes.json` | `agents/jfc/processes.py` | `process` + `dataset` nodes, joined by `requires` |
 
 Ingestion runs *after* agent write-back and merges — it never clobbers.
 
@@ -133,7 +136,7 @@ The shipped JFC templates declare:
 
 | Plan node | Node types | Edge types |
 |-----------|-----------|-----------|
-| `strategy` | commitment, method, dataset | commits_to, requires |
+| `strategy` | commitment, method, process, dataset | commits_to, requires |
 | `exploration` | dataset, evidence, figure | derives_from, supports |
 | `selection` | method, evidence, figure | derives_from, supports, resolves |
 | `inference_*` | evidence, figure, method | derives_from, supports, resolves, downscopes |
@@ -142,6 +145,28 @@ The shipped JFC templates declare:
 A `downscopes` edge additionally requires a non-empty `evidence_ref`: a narrowed
 commitment must say why. That rule is in the tool, not the contract — widening a
 node's contract cannot switch it off.
+
+### Processes and datasets
+
+`process` nodes are not written one call at a time. The node that owns the
+**process inventory** records the whole thing in one bounded call —
+`record_process_inventory` — and the builder ingests the resulting
+`outputs/processes.json` into one `process` node per process, one `dataset` node
+per dataset, and a `requires` edge from each process to the datasets that carry
+it. A process's classification (`role`, `category`, `importance`, `rationale`,
+`estimation`) rides in its node metadata.
+
+Which node owns it is read off the contract, never off a node id: the first plan
+node allowed to create **both** `process` and `dataset` is the owner
+(`processes.inventory_owner`). That is what lets a plan rename `strategy`, or
+hand the job to a different node, without a code change — the same rule the rest
+of `plan/` follows.
+
+The file stays the source of truth and ingestion is derived from it, so
+re-ingesting an unchanged inventory appends nothing. An inventory that does not
+validate is **skipped with a note in the ingest report** rather than half
+recorded: a background with no classification is exactly the thing the graph
+must not assert. See [PLAN.md](PLAN.md) for the document itself.
 
 ---
 
@@ -175,6 +200,35 @@ order outright.
 reports through the progress callback, the same posture as `git_commit_phase`.
 Planning falls back to the plan's declaration order. Bookkeeping must not take
 down an analysis that is otherwise progressing.
+
+### Loops
+
+A plan may loop: a `condition` node routes back to earlier work until a stated
+criterion is met (see `docs/PLAN.md`). Two consequences for the graph.
+
+**Iterations supersede; the log keeps them.** A node re-run by a loop writes the
+same artifact path, so its graph node id is unchanged and the new record
+supersedes the old. Nothing is lost — the append-only log holds every revision,
+which is exactly the case it was designed for.
+
+**Each evaluation is its own decision.** `ingest_condition` folds every
+`<directory>/decisions/iteration_NN.md` into a separate `decision` node. Per
+iteration, not per node, because the third pass of a loop is a different decision
+from the first — and because a real file per evaluation keeps ids
+content-addressed and re-ingestion idempotent.
+
+The edge each decision writes is what makes the record useful:
+
+- routing **forward** → `approved_by` from the released target's artifact, so the
+  graph shows which branch was taken;
+- routing **back** → `invalidates` on the loop head's artifact. That is also what
+  makes `is_consistent_checkpoint` refuse a superseded pass, so `jfc resume`
+  mid-loop lands in the right place with **no special casing** — the same
+  mechanism that already handles a regression.
+
+The loop's budget is run state, not graph state: `condition_iterations` lives in
+`.orchestration_state.json`. Control flow must not depend on a document that
+`update_graph` is allowed to fail to write.
 
 ### Resumption
 
@@ -314,7 +368,9 @@ Preserve these when changing graph code:
 5. **Appends stay atomic.** Reviewers run concurrently under `asyncio.gather`;
    `store.py` guards writes with a lock and one `write()` per record.
 6. **The derived order must reproduce the plan.** Changing `requires` edges
-   changes what runs when, and those edges now come from `plan/compile.py`.
+   changes what runs when, and those edges now come from `plan/compile.py`. A
+   plan's *back* branches are deliberately absent from the graph: a `requires`
+   edge closing a cycle would deadlock the planner rather than loop.
    `test_derived_order_reproduces_the_jfc_pipeline` pins the default template to
    `strategy → exploration → selection → inference_expected → inference_partial →
    inference_observed → documentation`; if it fails, the graph and the plan have

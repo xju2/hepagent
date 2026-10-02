@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from agents import Agent, Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
 from hepagent.helpers import read_md
@@ -63,10 +64,40 @@ class ProposedEdit(BaseModel):
     into: list[str] = Field(
         default_factory=list, description="New node ids, for split_node (at least two)"
     )
-    upstream: str | None = Field(default=None, description="Producing node, for edge ops")
-    downstream: str | None = Field(default=None, description="Consuming node, for edge ops")
-    kind: str | None = Field(default=None, description="requires (blocking) or informs")
+    upstream: str | None = Field(
+        default=None,
+        description="Producing node, for edge ops. For add_loop, the node whose output is tested",
+    )
+    downstream: str | None = Field(
+        default=None,
+        description="Consuming node, for edge ops. For add_loop, the node reached once it holds",
+    )
+    kind: str | None = Field(
+        default=None, description="requires (blocking), informs, on_true or on_false"
+    )
     inject: str | None = Field(default=None, description="full, summary or none")
+    loop_to: str | None = Field(
+        default=None, description="For add_loop, the node to re-run while the condition fails"
+    )
+    question: str | None = Field(
+        default=None, description="For add_loop, the break condition in words"
+    )
+    metric_source: str | None = Field(
+        default=None, description="For add_loop, an analysis-root-relative results JSON"
+    )
+    metric_key: str | None = Field(
+        default=None, description="For add_loop, a dotted path into that JSON"
+    )
+    metric_compare: str | None = Field(
+        default=None,
+        description="For add_loop: above, below, improvement_above or improvement_below",
+    )
+    metric_value: float | None = Field(
+        default=None, description="For add_loop, the threshold to compare against"
+    )
+    max_iterations: int | None = Field(
+        default=None, description="For add_loop, how many times the loop body may run"
+    )
 
 
 class ArchitectProposal(BaseModel):
@@ -112,6 +143,13 @@ def _to_edit(proposed: ProposedEdit) -> PlanEdit:
         downstream=proposed.downstream,
         kind=proposed.kind,
         inject=proposed.inject,
+        loop_to=proposed.loop_to,
+        question=proposed.question,
+        metric_source=proposed.metric_source,
+        metric_key=proposed.metric_key,
+        metric_compare=proposed.metric_compare,
+        metric_value=proposed.metric_value,
+        max_iterations=proposed.max_iterations,
     )
 
 
@@ -130,6 +168,39 @@ def describe_plan(plan: AnalysisPlan) -> str:
     return "\n".join(lines)
 
 
+#: Loops are the one edit whose cost is unbounded if got wrong, so the architect
+#: is told when they are worth proposing and what a good one looks like.
+_LOOP_GUIDANCE = """\
+# OPTIMIZATION LOOPS
+
+`add_loop` inserts a condition node that re-runs earlier work until a stated
+criterion is met — use it where the physics prompt asks for something to be
+*optimized* or *tuned* rather than simply produced, and where a later node
+measures whether it worked.
+
+    op: add_loop
+    upstream: the node whose output is tested (its results feed the condition)
+    loop_to: the node to re-run while the condition does not hold
+    downstream: the node the analysis continues to once it does
+    metric_source / metric_key: an analysis-root-relative results JSON and a
+        dotted path into it — checked without a model call, so prefer it
+    metric_compare: improvement_below is the convergence test ("the gain since
+        the last pass fell under the threshold")
+    max_iterations: how many times the loop body may run
+
+Two rules:
+
+- **Prefer a metric.** A number the upstream node already writes is a fact; a
+  question is judged by a model. Give a question only when no number expresses
+  the criterion, and give both when the number may be missing on early passes.
+- **Bound it deliberately.** Each pass re-runs every node between `loop_to` and
+  the condition against a model. Three to five passes is usually right; more
+  needs a reason.
+
+Do not propose a loop just because one is possible. A pipeline that produces a
+result once is the normal case."""
+
+
 def _instructions(plan: AnalysisPlan, physics_prompt: str, repair: str = "") -> str:
     role = read_md(_JFC_SRC / "agents" / "architect.md") or (
         "# ARCHITECT ROLE\n\n"
@@ -143,6 +214,7 @@ def _instructions(plan: AnalysisPlan, physics_prompt: str, repair: str = "") -> 
         f"# ARCHITECT ROLE\n\n{role}",
         f"# PHYSICS PROMPT\n\n{physics_prompt}",
         f"# TEMPLATE PLAN\n\n{describe_plan(plan)}",
+        _LOOP_GUIDANCE,
     ]
     if methodology:
         sections.append(f"# MULTI-CHANNEL METHODOLOGY\n\n{methodology}")
@@ -217,7 +289,9 @@ async def propose_plan(
     )
 
     try:
-        result = await Runner.run(agent, task, context=context, max_turns=max_turns)
+        result = await Runner.run(
+            agent, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+        )
         proposal = result.final_output
     except Exception as exc:  # noqa: BLE001 - the template is always a usable answer
         notes.append(f"architect failed ({exc}); running the template unchanged")
@@ -280,6 +354,7 @@ async def _repair(
             "Correct your proposal so it validates. Return the full edit list.",
             context=context,
             max_turns=max_turns,
+            hooks=ACTIVITY_HOOKS,
         )
     except Exception:  # noqa: BLE001 - the caller falls back to the template
         return None

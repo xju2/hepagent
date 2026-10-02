@@ -1,6 +1,7 @@
 """Tests for JFC executor agent factories."""
 
 import dataclasses
+from unittest.mock import patch
 
 import pytest
 
@@ -203,6 +204,34 @@ def test_a_node_model_override_wins_over_the_run_wide_model(minimal_analysis_roo
     assert "gpt-5-mini" in str(agent.model.model)
 
 
+@pytest.mark.parametrize(
+    ("spec", "expected_provider", "expected_model"),
+    [
+        # Both halves overridden.
+        ("openai:gpt-5-mini", "openai", "gpt-5-mini"),
+        # Platform only — what the editor writes when a user picks a platform
+        # and leaves the model alone. The provider's default model, *not* a
+        # model named "openai".
+        ("openai:", "openai", None),
+        # A bare name is a model on whatever platform the run chose.
+        ("gpt-5-mini", "cborg", "gpt-5-mini"),
+    ],
+)
+def test_a_model_override_is_read_the_same_way_the_cli_reads_one(
+    jfc_plan, spec, expected_provider, expected_model
+):
+    from hepagent.agents.jfc.executor import _model_for
+
+    pinned = dataclasses.replace(node(jfc_plan, "strategy"), model=spec)
+    assert _model_for(pinned, "cborg", "run-model") == (expected_provider, expected_model)
+
+
+def test_a_node_with_no_override_runs_on_the_run_wide_model(jfc_plan):
+    from hepagent.agents.jfc.executor import _model_for
+
+    assert _model_for(node(jfc_plan, "strategy"), "cborg", "run-model") == ("cborg", "run-model")
+
+
 # ------------------------------------------- note generation from the graph
 
 
@@ -297,3 +326,71 @@ def test_note_writer_prompt_omits_the_graph_section_when_there_is_none(
         node(jfc_plan, "inference_expected"), minimal_analysis_root
     ).instructions
     assert "WRITE FROM THE ANALYSIS GRAPH" not in instructions
+
+
+# ------------------------------------------------------------- capabilities
+
+
+def test_a_node_without_an_allowlist_gets_the_full_tool_set(minimal_analysis_root, jfc_plan):
+    from hepagent.agents.jfc.executor import create_phase_executor, executor_tools
+
+    strategy = node(jfc_plan, "strategy")
+    assert strategy.tools is None
+    agent = create_phase_executor(strategy, minimal_analysis_root)
+    assert {tool.name for tool in agent.tools} == {tool.name for tool in executor_tools()}
+
+
+def test_an_allowlist_narrows_the_tool_set(minimal_analysis_root, jfc_plan):
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    restricted = dataclasses.replace(
+        node(jfc_plan, "strategy"), tools=("read_phase_artifact", "graph_query")
+    )
+    agent = create_phase_executor(restricted, minimal_analysis_root)
+    assert [tool.name for tool in agent.tools] == ["read_phase_artifact", "graph_query"]
+
+
+def test_an_empty_allowlist_means_no_tools(minimal_analysis_root, jfc_plan):
+    """`()` is a real choice, distinct from `None`; a condition-like node may want it."""
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    stripped = dataclasses.replace(node(jfc_plan, "strategy"), tools=())
+    assert create_phase_executor(stripped, minimal_analysis_root).tools == []
+
+
+def test_an_unknown_tool_name_is_skipped_rather_than_raised(minimal_analysis_root, jfc_plan):
+    """A plan that outlived a tool rename must not take the run down with it."""
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    stale = dataclasses.replace(node(jfc_plan, "strategy"), tools=("graph_query", "long_gone"))
+    agent = create_phase_executor(stale, minimal_analysis_root)
+    assert [tool.name for tool in agent.tools] == ["graph_query"]
+
+
+def test_a_declared_skill_is_loaded_into_the_prompt(minimal_analysis_root, jfc_plan, tmp_path):
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    skill_dir = tmp_path / "agents" / "skills" / "widget"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: widget\ndescription: Widgets\n---\n\nAlways calibrate the widget first.\n"
+    )
+    # `_get_skill_dir` imports the resolver at call time, so the patch has to
+    # land on its home module rather than on `tools.common`.
+    with patch("hepagent.helpers.get_agent_dir", return_value=tmp_path / "agents"):
+        instructions = create_phase_executor(
+            dataclasses.replace(node(jfc_plan, "strategy"), skills=("widget",)),
+            minimal_analysis_root,
+        ).instructions
+    assert "ACTIVE SKILLS" in instructions
+    assert "calibrate the widget first" in instructions
+
+
+def test_an_unknown_skill_is_skipped_rather_than_raised(minimal_analysis_root, jfc_plan):
+    from hepagent.agents.jfc.executor import create_phase_executor
+
+    instructions = create_phase_executor(
+        dataclasses.replace(node(jfc_plan, "strategy"), skills=("no-such-skill",)),
+        minimal_analysis_root,
+    ).instructions
+    assert "ACTIVE SKILLS" not in instructions

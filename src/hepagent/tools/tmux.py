@@ -13,9 +13,7 @@ import time
 
 from agents import function_tool
 
-_SLURM_INTERACTIVE_READY_PATTERN = (
-    r"salloc:\s+Nodes\s+.+\s+are\s+ready\s+for\s+job|[$#>❯➜]\s*$"
-)
+_SLURM_INTERACTIVE_READY_PATTERN = r"salloc:\s+Nodes\s+.+\s+are\s+ready\s+for\s+job|[$#>❯➜]\s*$"
 
 
 def _run(args: list[str]) -> tuple[str, int]:

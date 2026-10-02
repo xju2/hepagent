@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from agents import Agent, function_tool
 from hepagent.config.env import env_config
+from hepagent.interaction import current_backend
 from hepagent.model_providers import get_model_provider
 
 
@@ -68,6 +69,19 @@ def execute_bash_command_with_confirmation(cmd: str, cwd: str = "", thought: str
     print(f"About to execute command:\n\tcmd={cmd}\n\tcwd={cwd}", flush=True)
 
     if env_config.yolo_mode:
+        return execute_bash_command(cmd, cwd=cwd)
+
+    # A run launched from the browser has no terminal to prompt on, so the
+    # thread it runs on carries a backend that asks the page instead. With no
+    # backend bound — every CLI path — nothing below changes.
+    backend = current_backend()
+    if backend is not None:
+        decision = backend.approve(cmd=cmd, cwd=cwd, thought=thought)
+        if not decision.approved:
+            return {
+                "output": TOOL_CANCEL_MESSAGE.format(reason=decision.reason),
+                "returncode": 1,
+            }
         return execute_bash_command(cmd, cwd=cwd)
 
     prompt = (

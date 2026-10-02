@@ -421,3 +421,79 @@ def test_edges_survive_a_split_of_both_endpoints(jfc):
     ]
     assert len(crossings) == 4
     assert PlanEdge(upstream="exploration_ee", downstream="selection_ee") in report.plan.edges
+
+
+# ------------------------------------------------------------------- add_loop
+
+
+def loop_edit(**overrides):
+    payload = {
+        "op": "add_loop",
+        "upstream": "selection",
+        "loop_to": "selection",
+        "downstream": "inference_expected",
+        "metric_source": "phase3_selection/outputs/results/optimization.json",
+        "metric_key": "significance",
+        "max_iterations": 5,
+    }
+    payload.update(overrides)
+    return PlanEdit(**payload)
+
+
+def test_add_loop_inserts_a_condition_and_both_branches_at_once(jfc):
+    """One reviewable edit: a loop is a condition plus two branches or nothing."""
+    report = apply_edits(jfc, [loop_edit()])
+    assert not report.skipped
+
+    condition = report.plan.node("selection_converged")
+    assert condition.kind == "condition"
+    assert condition.condition.max_iterations == 5
+    assert {e.kind for e in report.plan.branch_edges(condition.id)} == {"on_true", "on_false"}
+
+
+def test_the_loop_it_builds_validates_clean(jfc):
+    report = apply_edits(jfc, [loop_edit()])
+    assert validate_plan(report.plan).findings == []
+
+
+def test_the_back_branch_is_classified_as_one(jfc):
+    report = apply_edits(jfc, [loop_edit()])
+    assert ("selection_converged", "selection", "on_false") in report.plan.back_branch_keys()
+
+
+def test_the_exit_node_waits_for_the_loop_rather_than_the_node_it_wraps(jfc):
+    """Left alone it would run before the first pass, and the loop would be pointless."""
+    report = apply_edits(jfc, [loop_edit()])
+    prerequisites = report.plan.prerequisites("inference_expected")
+    assert "selection_converged" in prerequisites
+    assert "selection" not in prerequisites
+
+
+def test_a_loop_is_bounded_even_when_the_proposal_forgets_to_say_so(jfc):
+    """An unbounded loop is the one thing a condition node exists to rule out."""
+    report = apply_edits(jfc, [loop_edit(max_iterations=None)])
+    assert report.plan.node("selection_converged").condition.max_iterations >= 1
+
+    report = apply_edits(jfc, [loop_edit(max_iterations=0)])
+    assert report.plan.node("selection_converged").condition.max_iterations >= 1
+
+
+def test_a_loop_with_nothing_to_break_on_is_skipped(jfc):
+    report = apply_edits(jfc, [loop_edit(metric_source=None, metric_key=None)])
+    assert report.plan == jfc
+    assert "metric or a question" in report.skipped[0]
+
+
+def test_a_question_only_loop_is_accepted(jfc):
+    edit = loop_edit(
+        metric_source=None, metric_key=None, question="Has the significance stopped improving?"
+    )
+    report = apply_edits(jfc, [edit])
+    assert not report.skipped
+    assert report.plan.node("selection_converged").condition.question
+
+
+def test_a_loop_naming_a_node_that_is_not_there_is_skipped(jfc):
+    report = apply_edits(jfc, [loop_edit(loop_to="nonexistent")])
+    assert report.plan == jfc
+    assert report.skipped

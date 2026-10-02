@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from hepagent.plan.schema import PlanNode
 from hepagent.plan.templates import (
     DEFAULT_TEMPLATE,
     TemplateNotFoundError,
@@ -11,6 +12,7 @@ from hepagent.plan.templates import (
     instantiate,
     list_templates,
     load_template,
+    predefined_nodes,
 )
 from hepagent.plan.templates.registry import CONVENTIONS_FOR_TYPE, substitute
 
@@ -217,3 +219,47 @@ def test_the_role_catalogue_lists_every_reviewer_the_template_uses():
     for node in build().nodes:
         for reviewer in node.reviewers:
             assert reviewer in catalogue.lower(), f"{node.id} uses '{reviewer}'"
+
+
+# ------------------------------------------------------- predefined nodes
+
+
+def test_the_predefined_library_offers_every_template_node():
+    library = predefined_nodes(analysis_name="zbb")
+    assert {entry["key"] for entry in library} == {
+        f"{template}:{node.id}"
+        for template in list_templates()
+        for node in build(template, "measurement").nodes
+    }
+
+
+def test_a_predefined_node_arrives_ready_to_insert():
+    """Prompt inlined, placeholders gone, schema-valid — an editor drops it in as-is."""
+    entry = next(e for e in predefined_nodes(analysis_name="zbb") if e["key"].endswith(":strategy"))
+    node = PlanNode.from_dict(entry["node"])
+    assert node.id == "strategy"
+    assert node.prompt and "{{" not in node.prompt
+    assert entry["summary"]
+    assert entry["source"] in list_templates()
+
+
+def test_a_predefined_node_keeps_the_conventions_its_template_was_written_for():
+    """A node lifted out of the search pipeline is a *search* node, wherever it lands."""
+    library = predefined_nodes(analysis_name="zbb")
+    by_key = {entry["key"]: entry["node"]["prompt"] for entry in library}
+    assert "conventions/search.md" in by_key["jfc-search:strategy"]
+    assert "conventions/unfolding.md" in by_key["jfc-measurement:strategy"]
+
+
+def test_no_placeholder_survives_into_a_predefined_node():
+    """The library is inserted verbatim, so a `{{...}}` left in it reaches an executor."""
+    joined = "\n".join(e["node"]["prompt"] for e in predefined_nodes(analysis_name="hbb"))
+    assert "{{" not in joined
+
+
+def test_a_prompt_summary_is_its_first_line_of_prose():
+    from hepagent.plan.templates.registry import summarize_prompt
+
+    assert summarize_prompt("---\n\n# Phase 1: Strategy\n\nDo the thing.\n") == "Phase 1: Strategy"
+    assert summarize_prompt("") == ""
+    assert summarize_prompt("x" * 200).endswith("…")

@@ -17,6 +17,7 @@ overwriting a node that already exists.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import PurePosixPath
 
 from hepagent.graph.schema import Edge, Node, make_id
@@ -24,6 +25,37 @@ from hepagent.plan.schema import AnalysisPlan, PlanNode
 
 #: `created_by` stamped on everything derived from the plan.
 COMPILER = "plan"
+
+
+def prompt_digest(problem: str) -> str:
+    """Short content hash of a physics prompt.
+
+    Stamped on the graph's problem node so a reader can tell *which* wording of
+    the question an artifact descends from. The plan's revision alone cannot say
+    that: most revisions change something else entirely.
+    """
+    return hashlib.sha256(problem.strip().encode("utf-8")).hexdigest()[:12]
+
+
+def problem_node(plan: AnalysisPlan) -> Node:
+    """The graph node standing for the analysis's physics question.
+
+    Its own function because the prompt is editable: saving an edited prompt
+    re-adds this node, and the graph's append-only store keeps the superseded
+    record — which is how a changed question stays traceable.
+    """
+    return Node(
+        id=problem_id(plan),
+        type="problem",
+        label=_first_line(plan.problem) or f"{plan.name} physics question",
+        content_ref="prompt.md",
+        metadata={
+            "analysis_type": plan.analysis_type,
+            "plan_revision": plan.revision,
+            "prompt_sha256": prompt_digest(plan.problem),
+        },
+        created_by=COMPILER,
+    )
 
 
 def problem_id(plan: AnalysisPlan) -> str:
@@ -64,16 +96,7 @@ def plan_to_graph(plan: AnalysisPlan) -> tuple[list[Node], list[Edge]]:
     edges: list[Edge] = []
 
     problem = problem_id(plan)
-    nodes.append(
-        Node(
-            id=problem,
-            type="problem",
-            label=_first_line(plan.problem) or f"{plan.name} physics question",
-            content_ref="prompt.md",
-            metadata={"analysis_type": plan.analysis_type},
-            created_by=COMPILER,
-        )
-    )
+    nodes.append(problem_node(plan))
 
     root = root_id(plan)
     nodes.append(

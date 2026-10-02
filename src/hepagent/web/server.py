@@ -38,6 +38,27 @@ latex = true
 generated_by = "hepagent"
 """
 
+#: Rendered by `ChainlitBridge.open_plan` when the chat creates an analysis: the
+#: handover from "we agreed what to analyse" to "here is the graph to shape".
+#: The click target is the contract — `window.open` on mount is a convenience a
+#: popup blocker is allowed to refuse, and the button still works when it does.
+PLAN_LINK_ELEMENT = """\
+import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+
+export default function PlanLink() {
+  const url = props.url;
+  useEffect(() => {
+    try { window.open(url, "_blank", "noopener"); } catch (err) { /* blocked: use the button */ }
+  }, [url]);
+  return (
+    <Button onClick={() => window.open(url, "_blank", "noopener")}>
+      Open the plan for {props.analysis} ↗
+    </Button>
+  );
+}
+"""
+
 
 def get_web_root() -> Path:
     """Return the directory Chainlit uses for its working files."""
@@ -45,12 +66,17 @@ def get_web_root() -> Path:
 
 
 def ensure_web_root() -> Path:
-    """Create the Chainlit working directory and seed its config once."""
+    """Create the Chainlit working directory and seed its config and elements."""
     root = get_web_root()
     (root / ".chainlit").mkdir(parents=True, exist_ok=True)
     config_file = root / ".chainlit" / "config.toml"
     if not config_file.exists():
         config_file.write_text(CHAINLIT_CONFIG, encoding="utf-8")
+    elements = root / "public" / "elements"
+    elements.mkdir(parents=True, exist_ok=True)
+    # Rewritten every start, unlike the config: this one is code we ship, and a
+    # user has no reason to have edited it.
+    (elements / "PlanLink.jsx").write_text(PLAN_LINK_ELEMENT, encoding="utf-8")
     return root
 
 

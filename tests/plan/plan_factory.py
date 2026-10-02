@@ -9,7 +9,13 @@ rather than depend on a default chosen here.
 
 from __future__ import annotations
 
-from hepagent.plan.schema import AnalysisPlan, PlanEdge, PlanNode
+from hepagent.plan.schema import (
+    AnalysisPlan,
+    ConditionMetric,
+    PlanCondition,
+    PlanEdge,
+    PlanNode,
+)
 
 
 def make_node(node_id: str, **overrides) -> PlanNode:
@@ -43,3 +49,47 @@ def make_plan(node_ids=("a", "b"), edges=(("a", "b"),), **overrides) -> Analysis
     }
     payload.update(overrides)
     return AnalysisPlan(**payload)
+
+
+def make_condition(node_id: str = "converged", **condition_fields) -> PlanNode:
+    """A condition node with a bounded, metric-based test."""
+    fields = {
+        "metric": ConditionMetric(
+            source="evaluate_dir/outputs/results/optimization.json",
+            key="significance",
+            compare="improvement_below",
+            value=0.02,
+        ),
+        "max_iterations": 3,
+    }
+    fields.update(condition_fields)
+    return make_node(
+        node_id,
+        kind="condition",
+        artifact="CONDITION.md",
+        reviewers=(),
+        condition=PlanCondition(**fields),
+    )
+
+
+def make_loop_plan(**condition_fields) -> AnalysisPlan:
+    """The canonical optimization loop: propose → evaluate → converged? ↺.
+
+    ``on_false`` points back at ``propose`` (the loop) and ``on_true`` forward at
+    ``inference`` (the exit), which is the shape every loop test wants.
+    """
+    return make_plan(
+        node_ids=("propose", "evaluate", "inference"),
+        edges=(
+            ("propose", "evaluate"),
+            ("evaluate", "converged"),
+            PlanEdge(upstream="converged", downstream="propose", kind="on_false"),
+            PlanEdge(upstream="converged", downstream="inference", kind="on_true"),
+        ),
+        nodes=(
+            make_node("propose"),
+            make_node("evaluate"),
+            make_condition(**condition_fields),
+            make_node("inference"),
+        ),
+    )

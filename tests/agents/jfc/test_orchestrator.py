@@ -645,3 +645,540 @@ async def test_an_escaping_plan_never_reaches_the_scaffolder(tmp_path, jfc_plan)
             )
     scaffold.assert_not_awaited()
     assert not (tmp_path / "elsewhere").exists()
+
+
+# ------------------------------------------------------------ condition nodes
+
+
+@pytest.fixture
+def loop_analysis(tmp_path):
+    """An analysis whose plan loops: propose → evaluate → converged? ↺ propose."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_loop_plan
+
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+
+    plan = make_loop_plan()
+    root = tmp_path / "loopdemo"
+    root.mkdir()
+    for node in plan.nodes:
+        (root / node.directory / "outputs").mkdir(parents=True)
+        (root / node.directory / "review").mkdir(parents=True)
+    (root / "prompt.md").write_text(plan.problem)
+    save_plan(root, plan)
+    bootstrap_graph(root, plan)
+    return root, plan
+
+
+def write_metric(root, value):
+    """Write the number the loop's condition reads."""
+    path = root / "evaluate_dir/outputs/results/optimization.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"significance": value}))
+
+
+async def run_loop(root, plan, values, **state_overrides):
+    """Drive a full run, feeding `values` to the metric one execution at a time.
+
+    Returns the order nodes were executed in, so a test can assert the loop body
+    actually ran more than once.
+    """
+    from hepagent.agents.jfc.orchestrator import run_jfc_analysis
+    from hepagent.agents.jfc.review_gate import ReviewGateResult
+
+    executed = []
+    feed = list(values)
+
+    async def fake_executor(state, node, *args, **kwargs):
+        executed.append(node.id)
+        (state.root / node.artifact_path).parent.mkdir(parents=True, exist_ok=True)
+        (state.root / node.artifact_path).write_text(f"# {node.label}\n")
+        if node.id == "evaluate" and feed:
+            write_metric(state.root, feed.pop(0))
+
+    async def always_pass(*args, **kwargs):
+        return ReviewGateResult(verdict="PASS")
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", side_effect=fake_executor),
+        patch("hepagent.agents.jfc.orchestrator.run_review_gate", side_effect=always_pass),
+        patch("hepagent.agents.jfc.orchestrator.run_fixer", new_callable=AsyncMock),
+    ):
+        await run_jfc_analysis(
+            analysis_name=root.name,
+            physics_prompt=plan.problem,
+            analysis_type="measurement",
+            base_dir=str(root.parent),
+            plan=plan,
+            **state_overrides,
+        )
+    return executed
+
+
+@pytest.mark.asyncio
+async def test_a_loop_re_runs_its_body_until_the_metric_converges(loop_analysis):
+    """The whole point: the optimizer keeps going while the metric improves."""
+    root, plan = loop_analysis
+    # 3.0 → 3.5 (still improving) → 3.51 (gain 0.01 < 0.02, converged)
+    executed = await run_loop(root, plan, [3.0, 3.5, 3.51])
+
+    assert executed.count("propose") == 3
+    assert executed.count("evaluate") == 3
+    assert executed[-1] == "inference"
+
+
+@pytest.mark.asyncio
+async def test_a_converged_loop_runs_its_body_once(loop_analysis):
+    """A first pass that already converges still has to run the body once."""
+    root, plan = loop_analysis
+    executed = await run_loop(root, plan, [3.0, 3.0])
+
+    assert executed.count("propose") == 2  # first pass has no previous value to compare
+    assert executed[-1] == "inference"
+
+
+@pytest.mark.asyncio
+async def test_a_loop_that_never_converges_stops_at_its_budget(loop_analysis):
+    """The iteration bound is the termination guarantee, not the metric."""
+    root, plan = loop_analysis
+    executed = await run_loop(root, plan, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+
+    condition = plan.node("converged")
+    assert executed.count("propose") == condition.condition.max_iterations
+    assert executed[-1] == "inference"
+
+
+@pytest.mark.asyncio
+async def test_an_exhausted_loop_can_be_made_to_escalate(loop_analysis):
+    """`on_exhaustion: escalate` stops the run for a human instead of continuing."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_loop_plan
+
+    from hepagent.agents.jfc.review_gate import PhaseEscalationError
+
+    root, _ = loop_analysis
+    plan = make_loop_plan(on_exhaustion="escalate")
+    save_plan(root, plan)
+
+    with pytest.raises(PhaseEscalationError):
+        await run_loop(root, plan, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+
+
+@pytest.mark.asyncio
+async def test_the_loop_budget_is_recorded_and_survives_a_restart(loop_analysis):
+    """A resume must not silently refill the budget."""
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    root, plan = loop_analysis
+    await run_loop(root, plan, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+
+    state = load_state(root)
+    assert state.condition_iterations["converged"] == 3
+    assert state.condition_history["converged"] == [1.0, 2.0, 3.0]
+
+
+@pytest.mark.asyncio
+async def test_every_evaluation_leaves_a_decision_record(loop_analysis):
+    root, plan = loop_analysis
+    await run_loop(root, plan, [3.0, 3.5, 3.51])
+
+    decisions = sorted((root / "converged_dir" / "decisions").glob("*.md"))
+    assert [p.name for p in decisions] == [
+        "iteration_01.md",
+        "iteration_02.md",
+        "iteration_03.md",
+    ]
+    assert "propose" in decisions[0].read_text()
+    assert "inference" in decisions[-1].read_text()
+
+
+@pytest.mark.asyncio
+async def test_a_loop_decision_lands_in_the_provenance_graph(loop_analysis):
+    from hepagent.graph.store import AnalysisGraph
+
+    root, plan = loop_analysis
+    await run_loop(root, plan, [3.0, 3.5, 3.51])
+
+    graph = AnalysisGraph.load(root)
+    decisions = [n for n in graph.nodes(type="decision") if n.phase == "converged"]
+    assert len(decisions) == 3
+
+    # The back branch invalidates the loop head; the forward one approves its target.
+    head = "artifact:propose_dir/outputs/PROPOSE.md"
+    exits = "artifact:inference_dir/outputs/INFERENCE.md"
+    assert any(e.dst == head and e.type == "invalidates" for e in graph.edges())
+    assert any(e.src == exits and e.type == "approved_by" for e in graph.edges())
+
+
+@pytest.mark.asyncio
+async def test_progress_reports_each_pass_of_the_loop(loop_analysis):
+    """A loop that spends model budget silently is the failure mode to avoid."""
+    from hepagent.agents.jfc.orchestrator import run_condition_node, save_state
+
+    root, plan = loop_analysis
+    state = make_state(root, analysis_root=str(root))
+    save_state(state)
+    write_metric(root, 3.0)
+
+    messages = []
+    await run_condition_node(
+        state,
+        plan.node("converged"),
+        plan,
+        set(),
+        progress_callback=lambda node, msg: messages.append((node, msg)),
+    )
+
+    joined = " ".join(m for _node, m in messages)
+    assert "iteration 1/3" in joined
+    assert "condition false" in joined
+
+
+# ------------------------------------------------------------------- forks
+
+
+@pytest.fixture
+def fork_analysis(tmp_path):
+    """A plan that forks and re-joins: check → (true) fast / (false) slow → combine."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_condition, make_node, make_plan
+
+    from hepagent.agents.jfc.graph_builder import bootstrap_graph
+    from hepagent.plan.schema import ConditionMetric, PlanEdge
+
+    plan = make_plan(
+        node_ids=("start", "fast", "slow", "combine"),
+        edges=(
+            ("start", "check"),
+            PlanEdge(upstream="check", downstream="fast", kind="on_true"),
+            PlanEdge(upstream="check", downstream="slow", kind="on_false"),
+            ("fast", "combine"),
+            ("slow", "combine"),
+        ),
+        nodes=(
+            make_node("start"),
+            make_condition(
+                "check",
+                metric=ConditionMetric(
+                    source="start_dir/outputs/results/quality.json",
+                    key="clean",
+                    compare="above",
+                    value=0.5,
+                ),
+            ),
+            make_node("fast"),
+            make_node("slow"),
+            make_node("combine"),
+        ),
+    )
+    root = tmp_path / "forkdemo"
+    root.mkdir()
+    for node in plan.nodes:
+        (root / node.directory / "outputs").mkdir(parents=True)
+        (root / node.directory / "review").mkdir(parents=True)
+    (root / "prompt.md").write_text(plan.problem)
+    save_plan(root, plan)
+    bootstrap_graph(root, plan)
+    return root, plan
+
+
+async def run_fork(root, plan, quality):
+    from hepagent.agents.jfc.orchestrator import run_jfc_analysis
+    from hepagent.agents.jfc.review_gate import ReviewGateResult
+
+    executed = []
+
+    async def fake_executor(state, node, *args, **kwargs):
+        executed.append(node.id)
+        (state.root / node.artifact_path).parent.mkdir(parents=True, exist_ok=True)
+        (state.root / node.artifact_path).write_text(f"# {node.label}\n")
+        if node.id == "start":
+            path = state.root / "start_dir/outputs/results/quality.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"clean": quality}))
+
+    async def always_pass(*args, **kwargs):
+        return ReviewGateResult(verdict="PASS")
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", side_effect=fake_executor),
+        patch("hepagent.agents.jfc.orchestrator.run_review_gate", side_effect=always_pass),
+        patch("hepagent.agents.jfc.orchestrator.run_fixer", new_callable=AsyncMock),
+    ):
+        await run_jfc_analysis(
+            analysis_name=root.name,
+            physics_prompt=plan.problem,
+            analysis_type="measurement",
+            base_dir=str(root.parent),
+            plan=plan,
+        )
+    return executed
+
+
+@pytest.mark.asyncio
+async def test_a_fork_runs_only_the_branch_it_took(fork_analysis):
+    root, plan = fork_analysis
+    executed = await run_fork(root, plan, quality=0.9)
+
+    assert "fast" in executed
+    assert "slow" not in executed
+
+
+@pytest.mark.asyncio
+async def test_the_node_after_a_fork_still_runs(fork_analysis):
+    """It is downstream of both branches; waiting on the untaken one would stall."""
+    root, plan = fork_analysis
+    executed = await run_fork(root, plan, quality=0.9)
+
+    assert executed[-1] == "combine"
+
+
+@pytest.mark.asyncio
+async def test_the_other_branch_runs_when_the_condition_goes_the_other_way(fork_analysis):
+    root, plan = fork_analysis
+    executed = await run_fork(root, plan, quality=0.1)
+
+    assert "slow" in executed
+    assert "fast" not in executed
+    assert executed[-1] == "combine"
+
+
+@pytest.mark.asyncio
+async def test_the_skipped_branch_is_recorded_in_the_run_state(fork_analysis):
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    root, plan = fork_analysis
+    await run_fork(root, plan, quality=0.9)
+
+    assert load_state(root).skipped_nodes == ["slow"]
+
+
+@pytest.mark.asyncio
+async def test_a_plan_whose_exhaustion_branch_also_loops_stops_anyway(loop_analysis):
+    """The budget exists to rule out running forever; a bad plan cannot undo that.
+
+    `on_exhaustion: "false"` names the branch that loops back, so honouring it
+    would rewind again on every pass.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_loop_plan
+
+    root, _ = loop_analysis
+    plan = make_loop_plan(on_exhaustion="false")
+    save_plan(root, plan)
+
+    executed = await run_loop(root, plan, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    assert executed.count("propose") == 3
+
+
+@pytest.mark.asyncio
+async def test_the_budget_bounds_body_executions_not_evaluations(loop_analysis):
+    """`max_iterations: N` is a cost the author is choosing: N runs of the body."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_loop_plan
+
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    root, _ = loop_analysis
+    plan = make_loop_plan(max_iterations=2)
+    save_plan(root, plan)
+
+    executed = await run_loop(root, plan, [1.0, 2.0, 3.0, 4.0])
+    assert executed.count("propose") == 2
+    assert load_state(root).condition_iterations["converged"] == 2
+
+
+# --------------------------------------------------- running a single node
+
+
+async def run_one(root, plan, node_id):
+    """Run `node_id` alone, and report which nodes actually executed."""
+    from hepagent.agents.jfc.orchestrator import run_jfc_analysis
+    from hepagent.agents.jfc.review_gate import ReviewGateResult
+
+    executed: list[str] = []
+
+    async def fake_executor(state, node, *args, **kwargs):
+        executed.append(node.id)
+        (state.root / node.artifact_path).parent.mkdir(parents=True, exist_ok=True)
+        (state.root / node.artifact_path).write_text(f"# {node.label}\n")
+
+    async def always_pass(*args, **kwargs):
+        return ReviewGateResult(verdict="PASS")
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", side_effect=fake_executor),
+        patch("hepagent.agents.jfc.orchestrator.run_review_gate", side_effect=always_pass),
+        patch(
+            "hepagent.agents.jfc.orchestrator._run_note_writer_and_typesetter",
+            new_callable=AsyncMock,
+        ),
+        patch("hepagent.agents.jfc.orchestrator.run_fixer", new_callable=AsyncMock),
+    ):
+        result = await run_jfc_analysis(
+            analysis_name=root.name,
+            physics_prompt=plan.problem,
+            analysis_type="measurement",
+            base_dir=str(root.parent),
+            only_node=node_id,
+        )
+    return executed, result
+
+
+@pytest.mark.asyncio
+async def test_only_node_runs_that_node_and_stops(jfc_analysis, jfc_plan):
+    """The plan page's per-node Run button: this node, nothing upstream, nothing after."""
+    executed, result = await run_one(jfc_analysis, jfc_plan, "selection")
+
+    assert executed == ["selection"]
+    assert result == jfc_analysis / jfc_plan.require_node("selection").artifact_path
+
+
+@pytest.mark.asyncio
+async def test_only_node_ignores_the_frontier_the_planner_would_offer(jfc_analysis, jfc_plan):
+    """Nothing upstream of `selection` has run, and the button still runs it.
+
+    Going through `next_phase` would refuse — which is exactly why a single-node
+    run does not go through it.
+    """
+    executed, _ = await run_one(jfc_analysis, jfc_plan, "selection")
+
+    assert "strategy" not in executed
+    assert "exploration" not in executed
+
+
+@pytest.mark.asyncio
+async def test_only_node_leaves_the_run_state_alone(jfc_analysis, jfc_plan):
+    """A single-node run is a resume, not a fresh start: earlier progress stands."""
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    await run_one(jfc_analysis, jfc_plan, "exploration")
+    await run_one(jfc_analysis, jfc_plan, "selection")
+
+    completed = set(load_state(jfc_analysis).completed_nodes)
+    assert {"exploration", "selection"} <= completed
+
+
+@pytest.mark.asyncio
+async def test_only_node_refuses_a_node_the_plan_does_not_have(jfc_analysis, jfc_plan):
+    with pytest.raises(ValueError, match="nonesuch"):
+        await run_one(jfc_analysis, jfc_plan, "nonesuch")
+
+
+@pytest.mark.asyncio
+async def test_only_node_runs_again_after_the_node_already_passed(jfc_analysis, jfc_plan):
+    """Pressing Run twice runs the node twice.
+
+    Regression: `run_phase_with_review` iterates `range(spent, limit)`, and a
+    single-node run loads the state on disk, so the second press inherited the
+    iterations the first spent and had an empty loop - the button looked dead.
+    """
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    first, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+    second, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert first == ["strategy"]
+    assert second == ["strategy"]
+    assert load_state(jfc_analysis).phase_iterations["strategy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_only_node_runs_when_the_plan_lowered_max_iterations(jfc_analysis, jfc_plan):
+    """A budget the node already overspent must not block re-running it.
+
+    The counter is cumulative across runs while `max_iterations` is editable, so
+    lowering it on the plan page left the node permanently unrunnable.
+    """
+    from hepagent.agents.jfc.orchestrator import load_state, save_state
+
+    state = make_state(jfc_analysis, max_iterations_per_phase=1, phase_iterations={"strategy": 3})
+    save_state(state)
+
+    executed, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert executed == ["strategy"]
+    assert load_state(jfc_analysis).phase_iterations["strategy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_only_node_unskips_a_node_a_condition_routed_past(jfc_analysis, jfc_plan):
+    """Asking for a node by name overrides the branch that skipped it."""
+    from hepagent.agents.jfc.orchestrator import load_state, save_state
+
+    save_state(make_state(jfc_analysis, skipped_nodes=["strategy"]))
+
+    executed, _ = await run_one(jfc_analysis, jfc_plan, "strategy")
+
+    assert executed == ["strategy"]
+    assert load_state(jfc_analysis).skipped_nodes == []
+
+
+@pytest.mark.asyncio
+async def test_only_node_still_leaves_other_nodes_alone(jfc_analysis, jfc_plan):
+    """Clearing is scoped to the node asked for; the rest of the state stands."""
+    from hepagent.agents.jfc.orchestrator import load_state
+
+    await run_one(jfc_analysis, jfc_plan, "exploration")
+    await run_one(jfc_analysis, jfc_plan, "selection")
+    await run_one(jfc_analysis, jfc_plan, "selection")
+
+    completed = set(load_state(jfc_analysis).completed_nodes)
+    assert {"exploration", "selection"} <= completed
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_is_reported_as_spent_not_as_a_failed_review(state_dir, jfc_plan):
+    """An empty iteration loop must not blame a review that never ran."""
+    from hepagent.agents.jfc.orchestrator import (
+        NodeBudgetSpent,
+        run_phase_with_review,
+        save_state,
+    )
+
+    state = make_state(state_dir, max_iterations_per_phase=1, phase_iterations={"strategy": 3})
+    save_state(state)
+
+    with (
+        patch("hepagent.agents.jfc.orchestrator._run_executor", new_callable=AsyncMock) as executor,
+        patch("hepagent.agents.jfc.orchestrator.run_review_gate", new_callable=AsyncMock) as gate,
+        pytest.raises(NodeBudgetSpent, match="already spent 3"),
+    ):
+        await run_phase_with_review(state, node_of(jfc_plan, "strategy"), jfc_plan)
+
+    executor.assert_not_called()
+    gate.assert_not_called()
+
+
+# ------------------------------------------------------------- the turn cap
+
+
+def _node(**kwargs):
+    from hepagent.plan.schema import PlanNode
+
+    return PlanNode(id="n", label="N", directory="n", artifact="N.md", **kwargs)
+
+
+def test_turn_cap_precedence_is_node_then_run_then_role():
+    """Narrowest wins. A node that needs a long leash does not raise the ceiling
+    for the rest of the plan, and a run-wide cap still beats the role default."""
+    from hepagent.agents.jfc.orchestrator import _turns_for
+
+    assert _turns_for(_node(max_turns=120), 40, 50) == 120  # node over run
+    assert _turns_for(_node(), 40, 50) == 40  # run over role
+    assert _turns_for(_node(), None, 50) == 50  # role default

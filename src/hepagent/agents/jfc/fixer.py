@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agents import Agent, Runner
 from hepagent.agent_helpers import update_logbook
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
@@ -94,4 +95,4 @@ async def run_fixer(
         f"{findings_summary}\n\n"
         f"Read the adjudication file and current artifact, then make minimum effective changes."
     )
-    await Runner.run(agent, task, context=context, max_turns=max_turns)
+    await Runner.run(agent, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS)
