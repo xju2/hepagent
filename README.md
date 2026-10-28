@@ -282,3 +282,21 @@ Other related works:
 * Nemo Claw: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
 * Get Physics Done: https://github.com/psi-oss/get-physics-done
 * US ATLAS marketplace: https://github.com/usatlas/marketplace/tree/main
+
+Agentic AI in HEP:
+
+*Physics Analysis & Discovery*
+* Automate physics analyses: LLM4HEP, [arXiv:2512.07785](https://arxiv.org/abs/2512.07785), [code](https://huggingface.co/HWresearch/LLM4HEP)
+* Perform end-to-end and novel measurements: JFC, [arXiv:2603.20179](https://arxiv.org/abs/2603.20179), [code](https://github.com/jfc-mit/jfc)
+* Reproduce experimental measurements: Dr.Sai, [arXiv:2604.22541](https://arxiv.org/abs/2604.22541)
+* Develop anomaly-detection methods autonomously: Agents of Discovery, [arXiv:2509.08535](https://arxiv.org/abs/2509.08535), [code](https://github.com/uhh-pd-ml/AgentsOfDiscovery)
+* End-to-end automation for close-ended scientific tasks: SciFi, [arXiv:2604.13180](https://arxiv.org/abs/2604.13180), [code](https://github.com/qibin2020/scifi)
+
+*Simulation & Phenomenology*
+* Automate collider phenomenology: ColliderAgent, [arXiv:2603.14553](https://arxiv.org/abs/2603.14553), [code](https://github.com/HET-AGI/ColliderAgent)
+* Generate Rivet routines from publications: AgentRivet, [arXiv:2606.13535](https://arxiv.org/abs/2606.13535), [code](https://gitlab.com/hepcedar/AgentRivet)
+* Automate MC event generation: MadAgents, [arXiv:2601.21015](https://arxiv.org/abs/2601.21015), [code](https://github.com/MadGraphTeam/MadAgents)
+
+*Detectors & Accelerators*
+* Explore and optimize detector designs in simulation: GRACE, [arXiv:2602.15039](https://arxiv.org/abs/2602.15039), [data](https://github.com/just5034/GRACE_whitepaper_data); VIBRATO, [arXiv:2604.21804](https://arxiv.org/abs/2604.21804), [code](https://github.com/wonyongc/bilevel_det_opt)
+* Conduct multistage accelerator experiments: [arXiv:2509.17255](https://arxiv.org/abs/2509.17255)
