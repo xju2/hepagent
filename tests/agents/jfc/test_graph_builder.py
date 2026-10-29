@@ -397,3 +397,118 @@ def test_rebuilt_graph_with_an_open_commitment_fails_validation(analysis_root):
     report = validate(AnalysisGraph.load(analysis_root))
     assert not report.ok
     assert any(f.node_id == "commitment:D2" for f in report.errors)
+
+
+# ------------------------------------------------------------------ conditions
+
+
+@pytest.fixture
+def loop_root(tmp_path):
+    """An analysis whose plan contains a loop, with its graph bootstrapped."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plan"))
+    from plan_factory import make_loop_plan
+
+    plan = make_loop_plan()
+    root = tmp_path / "loopdemo"
+    for node in plan.nodes:
+        (root / node.directory / "outputs").mkdir(parents=True, exist_ok=True)
+    (root / "prompt.md").write_text(plan.problem)
+    save_plan(root, plan)
+    bootstrap_graph(root, plan)
+    return root, plan
+
+
+def write_decision(root, plan, iteration, branch, target):
+    from hepagent.agents.jfc.condition import ConditionOutcome, record_evaluation
+
+    return record_evaluation(
+        root,
+        plan.node("converged"),
+        iteration,
+        ConditionOutcome(branch=branch, rationale="because", source="metric"),
+        target,
+    )
+
+
+def test_ingest_condition_records_one_decision_per_evaluation(loop_root):
+    """A loop's third pass is a different decision from its first."""
+    root, plan = loop_root
+    write_decision(root, plan, 1, "false", "propose")
+    write_decision(root, plan, 2, "true", "inference")
+
+    from hepagent.agents.jfc.graph_builder import ingest_condition
+
+    ingest_condition(root, "converged", plan)
+    graph = AnalysisGraph.load(root)
+    decisions = list(graph.nodes(type="decision"))
+    assert len(decisions) == 2
+    assert {n.metadata["branch"] for n in decisions} == {"true", "false"}
+
+
+def test_a_back_branch_invalidates_the_loop_head(loop_root):
+    """That is also what stops resume treating a superseded pass as a checkpoint."""
+    root, plan = loop_root
+    write_decision(root, plan, 1, "false", "propose")
+
+    from hepagent.agents.jfc.graph_builder import ingest_condition
+
+    ingest_condition(root, "converged", plan)
+    graph = AnalysisGraph.load(root)
+    head = "artifact:propose_dir/outputs/PROPOSE.md"
+    assert any(e.dst == head and e.type == "invalidates" for e in graph.edges())
+
+
+def test_a_forward_branch_approves_the_target_it_released(loop_root):
+    root, plan = loop_root
+    write_decision(root, plan, 1, "true", "inference")
+
+    from hepagent.agents.jfc.graph_builder import ingest_condition
+
+    ingest_condition(root, "converged", plan)
+    graph = AnalysisGraph.load(root)
+    target = "artifact:inference_dir/outputs/INFERENCE.md"
+    assert any(e.src == target and e.type == "approved_by" for e in graph.edges())
+
+
+def test_ingest_condition_is_idempotent(loop_root):
+    """Invariant 1: re-ingesting an unchanged directory appends nothing."""
+    root, plan = loop_root
+    write_decision(root, plan, 1, "false", "propose")
+    write_decision(root, plan, 2, "true", "inference")
+
+    from hepagent.agents.jfc.graph_builder import ingest_condition
+
+    ingest_condition(root, "converged", plan)
+    nodes = (root / "graph" / "nodes.jsonl").read_text()
+    edges = (root / "graph" / "edges.jsonl").read_text()
+
+    ingest_condition(root, "converged", plan)
+    assert (root / "graph" / "nodes.jsonl").read_text() == nodes
+    assert (root / "graph" / "edges.jsonl").read_text() == edges
+
+
+def test_rebuild_over_a_loop_is_idempotent(loop_root):
+    root, plan = loop_root
+    write_decision(root, plan, 1, "false", "propose")
+    (root / plan.node("propose").artifact_path).write_text("# Propose\n")
+
+    rebuild(root, plan)
+    nodes = (root / "graph" / "nodes.jsonl").read_text()
+    edges = (root / "graph" / "edges.jsonl").read_text()
+
+    rebuild(root, plan)
+    assert (root / "graph" / "nodes.jsonl").read_text() == nodes
+    assert (root / "graph" / "edges.jsonl").read_text() == edges
+
+
+def test_ingest_condition_ignores_a_node_that_is_not_a_condition(loop_root):
+    root, plan = loop_root
+
+    from hepagent.agents.jfc.graph_builder import ingest_condition
+
+    report = ingest_condition(root, "propose", plan)
+    assert report.nodes == []
+    assert report.skipped

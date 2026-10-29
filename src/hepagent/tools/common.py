@@ -10,6 +10,7 @@ from pathlib import Path
 from agents import RunContextWrapper, function_tool
 from hepagent.agents.common import AgentContext
 from hepagent.helpers import read_md
+from hepagent.interaction import current_backend
 
 
 def _get_skill_dir(skill_name: str) -> Path:
@@ -50,24 +51,22 @@ def update_memory(
     return "Memory successfully updated."
 
 
-@function_tool
-def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) -> str:
-    """Activates a specific skill and loads its SOP and Logbook.
+def render_skill(skill_name: str) -> str | None:
+    """The full instruction text for a skill, or None when it does not exist.
+
+    Split out of `load_skill_details` so a caller that wants a skill's text
+    *without* activating it — the plan executor, which puts the skills its node
+    declares straight into the system prompt — does not have to fake a context.
 
     Args:
         skill_name: The identifier of the skill (e.g., 'nyx').
     """
-
     skill_dir = _get_skill_dir(skill_name)
     skill_file = skill_dir / "SKILL.md"
     resource_dir = skill_dir / "resources"
 
     if not skill_file.exists():
-        ctx.context.active_skill = None  # Clear active skill if not found
-        return f"Error: Skill '{skill_name}' does not exist."
-
-    # Set the active skill in the context
-    ctx.context.active_skill = skill_name
+        return None
 
     # 1. Get the main instructions (stripping YAML)
     raw_content = read_md(skill_file)
@@ -94,6 +93,23 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
         {resource_list}
     """).strip()
 
+    return instruction_content
+
+
+@function_tool
+def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) -> str:
+    """Activates a specific skill and loads its SOP and Logbook.
+
+    Args:
+        skill_name: The identifier of the skill (e.g., 'nyx').
+    """
+    instruction_content = render_skill(skill_name)
+    if instruction_content is None:
+        ctx.context.active_skill = None  # Clear active skill if not found
+        return f"Error: Skill '{skill_name}' does not exist."
+
+    # Set the active skill in the context
+    ctx.context.active_skill = skill_name
     return f"Context updated: Now using the '{skill_name}' skill set.\n\n" + instruction_content
 
 
@@ -129,6 +145,12 @@ def ask_user_for_info(ctx: RunContextWrapper[AgentContext], prompt: str, thought
     Returns:
         str: The user's input as a string. If input cannot be read, returns an empty string.
     """
+    # A browser-launched run installs a backend on its thread; see
+    # `hepagent.interaction`. Without one, this stays a terminal prompt.
+    backend = current_backend()
+    if backend is not None:
+        return backend.ask(prompt, thought=thought).strip()
+
     try:
         if thought:
             print(f"THOUGHT: {thought}")

@@ -96,7 +96,12 @@ def read_md(path: pathlib.Path) -> str:
     return ""
 
 
-def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
+def _merge_toml_resource(filename: str, key: str) -> dict[str, Any]:
+    """Packaged defaults for ``[key]`` in `filename`, overlaid with the user's copy.
+
+    Returns an empty dict when the section is absent or empty;
+    :func:`_load_toml_resource` is the variant that treats that as an error.
+    """
     # Always start from the packaged defaults so new entries (e.g. a freshly
     # added provider) are visible to existing installs whose user file predates
     # the addition.
@@ -120,7 +125,13 @@ def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
             else:
                 result[section_key] = section_val
 
-    if not isinstance(result, dict) or not result:
+    return result
+
+
+def _load_toml_resource(filename: str, key: str) -> dict[str, Any]:
+    """As :func:`_merge_toml_resource`, but an empty section is a configuration error."""
+    result = _merge_toml_resource(filename, key)
+    if not result:
         raise ValueError(f"No {key} configured in {filename}")
     return result
 
@@ -138,7 +149,7 @@ def bootstrap_hepagent_home() -> None:
     # --- TOML config files from package resources ---
     config_dir = home / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("providers.toml", "env_vars.toml"):
+    for filename in ("providers.toml", "env_vars.toml", "mcp.toml"):
         dest = config_dir / filename
         if not dest.exists():
             src = resources.files("hepagent.config").joinpath(filename)
@@ -180,6 +191,17 @@ def load_env_config() -> dict[str, Any]:
 @lru_cache
 def load_providers_config() -> dict[str, dict[str, Any]]:
     return _load_toml_resource("providers.toml", "providers")
+
+
+@lru_cache
+def load_mcp_config() -> dict[str, dict[str, Any]]:
+    """MCP servers this installation declares, keyed by the name a plan refers to.
+
+    Tolerates an empty catalog — unlike providers, having no MCP server is the
+    normal state, and nothing in hepagent connects to one yet. See
+    `src/hepagent/config/mcp.toml`.
+    """
+    return _merge_toml_resource("mcp.toml", "servers")
 
 
 def get_env_var[T](  # type: ignore
@@ -277,6 +299,24 @@ def _enable_amsc_x_api_key() -> bool:
 
     rest_utils.http_request = patched
     return True
+
+
+def configure_openai_tracing() -> bool:
+    """Apply the OpenAI Agents SDK tracing setting.
+
+    The SDK uploads traces to the OpenAI platform by default, which is noisy
+    (and fails outright) for the providers HepAgent normally runs against, so
+    tracing is **disabled unless** ``HEPAGENT_OPENAI_TRACING`` is truthy.
+
+    Returns:
+        True if OpenAI tracing is left enabled, False if it was disabled.
+    """
+    from agents import set_tracing_disabled
+    from hepagent.config.env import env_config
+
+    enabled = env_config.openai_tracing
+    set_tracing_disabled(not enabled)
+    return enabled
 
 
 def enable_mlflow_for_tracing() -> bool:

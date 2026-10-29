@@ -5,6 +5,8 @@ You are performing a Higgs boson search in the τ+τ− decay channel using CMS 
 ## Data source
 NanoAOD files hosted on the CERN Open Data portal. They are available at Perlmutter:
 `/global/cfs/cdirs/m3443/data/cern-opendata/record_id_12350/CMS-Higgs2TauTau-OutReach/`.
+Otherwise, download it from the CERN Open Data portal: https://opendata.cern.ch/record/cms-12350,
+and save these files to the `data/` directory of your analysis repository.
 
 The datasets include:
 * GluGluToHToTauTau.root gg->H->tau-tau (mH=125 GeV) Signal

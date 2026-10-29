@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hepagent.plan.schema import AnalysisPlan
-from hepagent.plan.store import has_plan, save_plan
+from hepagent.plan.store import has_plan, read_prompt_file, save_plan
 from hepagent.plan.templates import DEFAULT_TEMPLATE, instantiate
 
 STATE_FILENAME = ".orchestration_state.json"
@@ -150,8 +150,9 @@ def migrate_analysis(
 
     state = _legacy_state(root)
     analysis_type = str(state.get("analysis_type") or "measurement")
-    prompt_file = root / "prompt.md"
-    prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.is_file() else ""
+    # Read through the store so a legacy `prompt.md` loses its heading here:
+    # from now on `plan.problem` is the question and the file is its mirror.
+    prompt = read_prompt_file(root)
 
     plan = instantiate(
         template,

@@ -8,6 +8,7 @@ nodes there are or what they are called.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -28,10 +29,14 @@ NODE_SUBDIRS = ["outputs", "outputs/figures", "outputs/results", "src", "review"
 def _write_root_files(
     analysis_root: Path,
     plan: AnalysisPlan,
-    physics_prompt: str,
     variables: dict[str, str],
 ) -> None:
-    """Write the analysis-level documents that are not owned by any node."""
+    """Write the analysis-level documents that are not owned by any node.
+
+    `prompt.md` is deliberately not among them: it mirrors `plan.problem` and
+    `save_plan` is its only writer, so the question a user later edits in the
+    plan editor cannot drift from the file the agents read.
+    """
     templates_dir = get_jfc_data_dir() / "templates"
 
     root_template = templates_dir / "root_claude.md"
@@ -40,11 +45,6 @@ def _write_root_files(
             substitute(root_template.read_text(encoding="utf-8"), variables),
             encoding="utf-8",
         )
-
-    (analysis_root / "prompt.md").write_text(
-        f"# Physics Prompt\n\n{physics_prompt}\n",
-        encoding="utf-8",
-    )
 
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     (analysis_root / "experiment_log.md").write_text(
@@ -198,11 +198,18 @@ async def _scaffold_impl(
         "conventions_files": CONVENTIONS_FOR_TYPE.get(plan.analysis_type, ""),
     }
 
-    # The plan lands first: everything below is derived from it, and writing it
-    # before `git init` puts it in the scaffold commit.
-    save_plan(analysis_root, plan)
+    # The question the caller asked is the analysis's question, whatever a
+    # supplied plan happens to carry: `plan.problem` is what `prompt.md` is
+    # written from, and the two must not be able to disagree.
+    if physics_prompt.strip() or not plan.problem.strip():
+        plan = dataclasses.replace(plan, problem=physics_prompt)
 
-    _write_root_files(analysis_root, plan, physics_prompt, variables)
+    # The plan lands first: everything below is derived from it — `prompt.md`
+    # included, which `save_plan` mirrors — and writing it before `git init`
+    # puts it in the scaffold commit.
+    plan = save_plan(analysis_root, plan)
+
+    _write_root_files(analysis_root, plan, variables)
     _write_node_tree(analysis_root, plan)
     _copy_reference_material(analysis_root)
 

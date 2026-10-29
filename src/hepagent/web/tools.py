@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from agents import function_tool
@@ -67,12 +68,15 @@ class WebToolWrapper:
     """Swap terminal-bound tools for browser-driven equivalents.
 
     Mirrors :class:`hepagent.agents.cli_repl.ReplToolWrapper`, including its
-    name-substring tool matching and its return contracts.
+    name-substring tool matching and its return contracts, and adds the one tool
+    that only makes sense in a browser: `create_analysis`, which turns a
+    conversation into a plan and hands the user its editor.
     """
 
-    def __init__(self, bridge: WebBridge, config: Any):
+    def __init__(self, bridge: WebBridge, config: Any, model: Any = None):
         self._bridge = bridge
         self._config = config
+        self._model = model
 
     def wrap_tools(self, tools: list[Any]) -> list[Any]:
         """Return ``tools`` with interactive and blocking tools replaced."""
@@ -87,6 +91,10 @@ class WebToolWrapper:
                 wrapped.append(offload_blocking_tool(tool))
             else:
                 wrapped.append(tool)
+        # Appended rather than swapped: nothing in the terminal tool sets
+        # corresponds to it, because there is no page to send anyone to there.
+        if not any(getattr(tool, "name", "") == "create_analysis" for tool in wrapped):
+            wrapped.append(self._create_analysis_tool())
         return wrapped
 
     async def approve(self, cmd: str, cwd: str = "") -> tuple[bool, str]:
@@ -138,6 +146,109 @@ class WebToolWrapper:
             return await wrapper.run_bash(cmd=cmd, cwd=cwd, thought=thought)
 
         return execute_bash_command_with_confirmation
+
+    async def create_analysis(
+        self,
+        name: str,
+        physics_prompt: str,
+        analysis_type: str = "measurement",
+        template: str | None = None,
+    ) -> str:
+        """Propose a plan for a new analysis, scaffold it, and open its editor.
+
+        The architect shapes the template to the physics prompt, the scaffolder
+        writes the directory tree and the provenance graph, and the user is sent
+        to the plan page — where they edit the graph and, when they are happy
+        with it, launch the run.
+
+        Returns a sentence for the agent to relay, or one starting with "Error:".
+        """
+        from hepagent.agents.jfc.architect import propose_plan
+        from hepagent.plan.service import analyses_dir
+        from hepagent.plan.templates import DEFAULT_TEMPLATE
+        from hepagent.tools.jfc.scaffold import _scaffold_impl
+        from hepagent.web.server import plan_editor_url
+
+        slug = name.strip().strip("/")
+        if not slug or slug != Path(slug).name or slug.startswith("."):
+            return f"Error: {name!r} is not a usable analysis name — use a short slug."
+        if analysis_type not in {"measurement", "search"}:
+            return f"Error: analysis_type must be 'measurement' or 'search', not {analysis_type!r}."
+        root = analyses_dir() / slug
+        if root.exists():
+            return f"Error: an analysis named {slug!r} already exists at {root}."
+
+        platform = getattr(self._model, "platform", None) or "cborg"
+        model_name = getattr(self._model, "name", None) or None
+        proposal = await propose_plan(
+            physics_prompt=physics_prompt,
+            analysis_name=slug,
+            analysis_type=analysis_type,
+            template=template or DEFAULT_TEMPLATE,
+            model_provider=platform,
+            model_name=model_name,
+        )
+        # The proposal is already validated or discarded by the architect, so
+        # what arrives here always scaffolds; the notes say which happened.
+        written = await _scaffold_impl(
+            slug,
+            physics_prompt,
+            analysis_type,
+            str(analyses_dir()),
+            proposal.plan.template or DEFAULT_TEMPLATE,
+            proposal.plan,
+        )
+        if written.startswith("Error"):
+            return written
+
+        url = plan_editor_url(slug)
+        try:
+            await self._bridge.open_plan(slug, url)
+        except Exception:  # noqa: BLE001 - the analysis exists either way
+            pass
+        shaping = (
+            "the architect adapted the template"
+            if proposal.accepted and proposal.rationale
+            else "the standard template fits as it is"
+        )
+        return (
+            f"Created analysis '{slug}' ({analysis_type}) at {written} with "
+            f"{len(proposal.plan.nodes)} nodes — {shaping}. Its plan editor is open at {url}; "
+            "tell the user to review the graph there and press “Approve & run” to start it."
+        )
+
+    def _create_analysis_tool(self):
+        wrapper = self
+
+        @function_tool
+        async def create_analysis(
+            name: str,
+            physics_prompt: str,
+            analysis_type: str = "measurement",
+            template: str = "",
+        ) -> str:
+            """Create a new physics analysis and open its plan editor for the user.
+
+            Call this only once the physics question is specific enough to work
+            from: what is being measured or searched for, in what data, and what
+            the final result should be. Ask the user for whatever is missing
+            first — the prompt you pass here becomes the analysis's brief and
+            every node's instructions are written from it.
+
+            Args:
+                name: Short slug for the analysis, e.g. "z_bb_xsec".
+                physics_prompt: The full physics brief, in the user's terms.
+                analysis_type: "measurement" or "search".
+                template: Plan template to start from. Leave empty for the default.
+            """
+            return await wrapper.create_analysis(
+                name=name,
+                physics_prompt=physics_prompt,
+                analysis_type=analysis_type,
+                template=template or None,
+            )
+
+        return create_analysis
 
     def _create_ask_user_tool(self):
         bridge = self._bridge

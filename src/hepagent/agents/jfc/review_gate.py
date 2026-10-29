@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents import Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc.reviewers import REVIEWER_FACTORIES
 from hepagent.graph.store import AnalysisGraph
@@ -109,7 +110,9 @@ async def _run_single_reviewer(
         f"Review the '{node.id}' artifact for this analysis. "
         f"Write your findings to the review/ directory as instructed in your system prompt."
     )
-    result = await Runner.run(agent, task_prompt, context=context, max_turns=max_turns)
+    result = await Runner.run(
+        agent, task_prompt, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+    )
     return result.final_output or ""
 
 
@@ -231,6 +234,7 @@ async def run_review_gate(
             f"Adjudicate the '{node.id}' review. Write ADJUDICATION.md to {review_dir}/.",
             context=arbiter_context,
             max_turns=max_turns,
+            hooks=ACTIVITY_HOOKS,
         )
         # Parse from the written file
         if adjudication_path.exists():

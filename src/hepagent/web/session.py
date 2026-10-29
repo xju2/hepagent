@@ -66,7 +66,7 @@ class WebSessionState:
 
     def __post_init__(self) -> None:
         self.session_base_id = self.session_base_id or self.session_id
-        self._tool_wrapper = WebToolWrapper(self.bridge, self.config)
+        self._tool_wrapper = WebToolWrapper(self.bridge, self.config, model=self.model)
 
     @property
     def tool_wrapper(self) -> WebToolWrapper:

@@ -61,11 +61,20 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      # 2. Create the GitHub Release
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      # Only this tag's section of CHANGELOG.md, not the whole file.
+      - name: Extract release notes
+        run: awk -v t="## [$TAG]" 'index($0,t)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > notes.md
+
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag }}
-          name: HepAgent ${{ github.event.inputs.tag }}
-          body_path: CHANGELOG.md
+          tag_name: ${{ env.TAG }}
+          name: HepAgent ${{ env.TAG }}
+          body_path: notes.md

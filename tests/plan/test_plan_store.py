@@ -154,3 +154,45 @@ def test_prompts_survive_the_round_trip_verbatim(tmp_path):
     )
     store.save_plan(tmp_path, plan)
     assert store.load_plan(tmp_path).require_node("a").prompt == prompt
+
+
+# ------------------------------------------------------- prompt.md mirroring
+
+
+def test_saving_a_plan_writes_the_physics_prompt_beside_it(tmp_path, plan):
+    """`prompt.md` is derived from `plan.problem`, so a save rewrites it."""
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem="Measure sigma(Zbb)."))
+    assert (tmp_path / "prompt.md").read_text(encoding="utf-8") == (
+        "# Physics Prompt\n\nMeasure sigma(Zbb).\n"
+    )
+
+
+def test_editing_the_question_rewrites_the_file(tmp_path, plan):
+    """The whole point of the mirror: the two copies cannot drift apart."""
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem="First question."))
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem="Second question."))
+    assert store.read_prompt_file(tmp_path) == "Second question."
+    assert store.load_plan(tmp_path).problem == "Second question."
+
+
+def test_an_empty_question_still_produces_the_file(tmp_path, plan):
+    """Every executor reads `prompt.md`; a missing file is worse than an empty one."""
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem=""))
+    assert store.prompt_path(tmp_path).is_file()
+    assert store.read_prompt_file(tmp_path) == ""
+
+
+def test_the_heading_is_presentation_and_is_stripped_on_read(tmp_path):
+    (tmp_path / "prompt.md").write_text("# Physics Prompt\n\nMeasure it.\n", encoding="utf-8")
+    assert store.read_prompt_file(tmp_path) == "Measure it."
+
+
+def test_reading_a_prompt_file_that_is_not_there(tmp_path):
+    assert store.read_prompt_file(tmp_path) == ""
+
+
+def test_the_superseded_question_stays_in_the_history(tmp_path, plan):
+    """Traceability: the prompt is a plan field, so `plan.history/` records it."""
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem="First question."))
+    store.save_plan(tmp_path, dataclasses.replace(plan, problem="Second question."))
+    assert store.load_revision(tmp_path, 1).problem == "First question."

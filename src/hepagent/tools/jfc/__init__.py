@@ -13,6 +13,7 @@ from hepagent.tools.jfc.figures import list_phase_figures, validate_figures
 from hepagent.tools.jfc.graph import graph_add_edge, graph_add_node, graph_query
 from hepagent.tools.jfc.pdf import compile_analysis_note
 from hepagent.tools.jfc.pixi import list_pixi_tasks, run_pixi_task
+from hepagent.tools.jfc.processes import read_process_inventory, record_process_inventory
 from hepagent.tools.jfc.scaffold import scaffold_jfc_analysis
 
 
@@ -33,4 +34,6 @@ def get_jfc_tools() -> list:
         graph_add_node,
         graph_add_edge,
         graph_query,
+        record_process_inventory,
+        read_process_inventory,
     ]

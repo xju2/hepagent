@@ -48,12 +48,71 @@ def client(analyses, gate):
 
 def test_get_plan_returns_the_view_the_editor_draws_from(client):
     body = client.get("/api/plan/zbb").json()
-    assert {"plan", "layout", "order", "findings", "blocking", "approved"} <= body.keys()
+    assert {
+        "plan",
+        "layout",
+        "order",
+        "findings",
+        "blocking",
+        "approved",
+        "catalog",
+    } <= body.keys()
     assert len(body["plan"]["nodes"]) == 7
     assert body["order"][0] == "strategy"
     assert body["layout"]["strategy"] == [0, 0]
     assert body["blocking"] is False
     assert body["approved"] is False
+
+
+def test_the_view_carries_the_catalog_the_dropdowns_offer(client):
+    """The editor must not invent names the validator would then reject."""
+    catalog = client.get("/api/plan/zbb").json()["catalog"]
+    assert {"reviewers", "tools", "skills", "mcp_servers", "platforms"} == catalog.keys()
+    assert "critical" in catalog["reviewers"]
+    # Platforms come from providers.toml, so the model dropdown cannot offer a
+    # provider this installation has no configuration for.
+    assert "cborg" in catalog["platforms"]
+    # The tool catalog is the executor's own set, so a rename cannot drift.
+    assert "graph_query" in catalog["tools"]
+    assert catalog["tools"] == sorted(catalog["tools"])
+
+
+def test_platform_models_are_listed_on_demand(client, monkeypatch):
+    """The model dropdown is filled by a call the plan view does not pay for."""
+    import hepagent.web.plan_api as plan_api
+
+    monkeypatch.setattr(
+        plan_api,
+        "_platform_models",
+        lambda platform: {"platform": platform, "default": "d", "models": ["a", "b"]},
+    )
+    body = client.get("/api/platforms/cborg/models").json()
+    assert body == {"platform": "cborg", "default": "d", "models": ["a", "b"]}
+
+
+def test_listing_models_reports_a_missing_platform_as_a_bad_request(client, monkeypatch):
+    import hepagent.web.plan_api as plan_api
+
+    def explode(platform: str) -> dict:
+        raise ValueError(f"Unsupported model provider: {platform}")
+
+    monkeypatch.setattr(plan_api, "_platform_models", explode)
+    response = client.get("/api/platforms/nowhere/models")
+    assert response.status_code == 400
+    assert "nowhere" in response.json()["detail"]
+
+
+def test_listing_models_reports_an_unreachable_provider_as_a_bad_gateway(client, monkeypatch):
+    """No network is a fact about the provider, not a bug in the editor."""
+    import hepagent.web.plan_api as plan_api
+
+    def explode(platform: str) -> dict:
+        raise ConnectionError("no route to host")
+
+    monkeypatch.setattr(plan_api, "_platform_models", explode)
+    response = client.get("/api/platforms/cborg/models")
+    assert response.status_code == 502
+    assert "no route to host" in response.json()["detail"]
 
 
 def test_get_plan_404s_for_an_unknown_analysis(client):
@@ -166,6 +225,34 @@ def test_errors_sort_before_warnings(client, jfc_plan):
     assert severities == sorted(severities, key=lambda s: s != "error")
 
 
+# -------------------------------------------------------------- auto-layout
+
+
+def test_layout_lays_out_the_submitted_plan_without_saving_it(client, analyses, jfc_plan):
+    """The editor posts what is on screen, which the server has not seen."""
+    document = jfc_plan.to_dict()
+    document["nodes"] = document["nodes"][:2]
+    document["edges"] = [
+        e
+        for e in document["edges"]
+        if {e["upstream"], e["downstream"]} <= {"strategy", "exploration"}
+    ]
+
+    body = client.post("/api/plan/zbb/layout", json={"plan": document}).json()
+
+    assert body["layout"] == {"strategy": [0, 0], "exploration": [1, 0]}
+    assert len(load_plan(analyses / "zbb").nodes) == 7  # nothing was written
+
+
+def test_layout_422s_on_a_payload_that_is_not_a_plan(client):
+    assert client.post("/api/plan/zbb/layout", json={"plan": {"nodes": 3}}).status_code == 422
+
+
+def test_layout_404s_for_an_unknown_analysis(client, jfc_plan):
+    response = client.post("/api/plan/ghost/layout", json={"plan": jfc_plan.to_dict()})
+    assert response.status_code == 404
+
+
 # ------------------------------------------------------------------ approve
 
 
@@ -241,3 +328,18 @@ def test_include_router_after_a_catch_all_would_not_have_worked(analyses):
 
     app.include_router(create_router(base_dir=analyses))
     assert TestClient(app).get("/api/plan/zbb").json() == {"spa": "api/plan/zbb"}
+
+
+# -------------------------------------------------------- predefined nodes
+
+
+def test_predefined_nodes_are_served_ready_to_insert(client):
+    body = client.get("/api/plan/zbb/predefined").json()
+    assert body["nodes"], "the built-in templates should offer nodes"
+    entry = body["nodes"][0]
+    assert {"key", "source", "summary", "node"} <= entry.keys()
+    assert entry["node"]["prompt"] and "{{" not in entry["node"]["prompt"]
+
+
+def test_predefined_nodes_refuse_an_unknown_analysis(client):
+    assert client.get("/api/plan/nope/predefined").status_code == 404

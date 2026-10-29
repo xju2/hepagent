@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plan_factory import make_plan
+from plan_factory import make_loop_plan, make_plan
 
 from hepagent.plan.layout import columns, height, layer, width
 from hepagent.plan.templates import instantiate
@@ -108,3 +108,10 @@ def test_a_channel_fan_out_keeps_the_shared_upstream_in_one_column():
     assert positions["exploration"] == (0, 0)
     assert positions["selection_ee"][0] == positions["selection_mumu"][0] == 1
     assert positions["inference"][0] == 2
+
+
+def test_a_loop_lays_out_left_to_right_along_its_blocking_edges():
+    """The back branch must not drag the loop head rightwards."""
+    positions = layer(make_loop_plan())
+    columns = {node_id: column for node_id, (column, _row) in positions.items()}
+    assert columns == {"propose": 0, "evaluate": 1, "converged": 2, "inference": 3}

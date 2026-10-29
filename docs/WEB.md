@@ -25,9 +25,17 @@ uv run hepagent web --port 8080 --headless
 uv run hepagent web --base-dir analyses     # where the plan editor looks
 ```
 
+The intended path through the UI is one conversation:
+
+> **you:** create a new analysis
+> **agent:** *asks what you want measured, in what data, with what result*
+> → the plan editor opens on the analysis it just created
+> → you shape the graph and press **Approve & run**
+> → the run reports on that page, and asks you there when it needs a decision
+
 The plan editor is served from the same port at `/plan/<analysis>`, and `/plan`
 in the chat lists the analyses and links to them. To open it without starting a
-chat server:
+chat server — `Approve & run` launches the analysis there too:
 
 ```bash
 uv run hepagent jfc plan edit --name <analysis>            # serves until Ctrl-C
@@ -52,8 +60,14 @@ hepagent repl --chat web-1a2b3c4d5e6f
 | Token-level streaming | yes |
 | Tool calls and outputs | collapsible steps |
 | Bash approval (`confirm`/`yolo`/`human`) | Approve/Reject buttons, rejection reason sent back to the agent |
+| Creating an analysis from the conversation | `create_analysis`, then the plan editor opens |
+| Editing the physics prompt | the prompt node at the head of the plan page's graph; see `docs/PLAN.md` |
+| Launching and supervising a JFC run | on the plan page: node status, log, questions |
 | `ask_user_for_info` | inline question in the transcript |
 | Agent / platform / model switching | ⚙ settings panel *and* slash commands |
+| Per-node platform and model (JFC) | node panel on the plan page; see `docs/PLAN.md` |
+| Per-node turn cap (JFC) | node panel; blank defers to the run, see `docs/PLAN.md` |
+| Run settings (model, review iterations, turn cap) | dock header on the plan page, applied at launch |
 | Skill loading, logbook, user profile | via the normal tool steps |
 | Cost and active-skill display | `/status` |
 | Recovery behaviours | shared with the REPL (see below) |
@@ -70,7 +84,7 @@ why the web logic is unit-tested in CI even though CI does not install the
 
 | File | Role |
 | --- | --- |
-| [`web/bridge.py`](../src/hepagent/web/bridge.py) | `WebBridge` (human-in-the-loop) and `TurnUI` (rendering) protocols |
+| [`web/bridge.py`](../src/hepagent/web/bridge.py) | `WebBridge` (human-in-the-loop, plus `open_plan`) and `TurnUI` (rendering) protocols |
 | [`web/tools.py`](../src/hepagent/web/tools.py) | `WebToolWrapper`: swaps terminal-bound tools, offloads blocking ones |
 | [`web/turn.py`](../src/hepagent/web/turn.py) | `run_turn`: the streaming loop, ported from the REPL |
 | [`web/session.py`](../src/hepagent/web/session.py) | `WebSessionState`: per-chat agent/model/mode/cost/history |
@@ -78,9 +92,141 @@ why the web logic is unit-tested in CI even though CI does not install the
 | [`web/server.py`](../src/hepagent/web/server.py) | `hepagent web` launcher, plan-editor launcher |
 | [`web/plan_api.py`](../src/hepagent/web/plan_api.py) | FastAPI routes for the plan editor |
 | [`web/static/plan.html`](../src/hepagent/web/static/plan.html) | The plan editor page (one file, no external requests) |
+| [`agents/jfc/state.py`](../src/hepagent/agents/jfc/state.py) | `analysis_state`: what the analysis has established, for the Progress tab |
+| [`plan/runs.py`](../src/hepagent/plan/runs.py) | `RunRegistry`: a run on a worker thread, as polled events and pending prompts |
+| [`agents/jfc/launch.py`](../src/hepagent/agents/jfc/launch.py) | Starts a JFC analysis into that registry |
 
 The agent itself is built with the same `build_runtime()` / `create_app_agent()`
 helpers in [`main.py`](../src/hepagent/main.py) that `run` and `repl` use.
+
+## Chat → plan → run
+
+The two surfaces are one workflow, not two apps:
+
+1. In the chat, the user says *"create a new analysis"*. The agent asks whatever
+   it needs to write a real physics brief, then calls **`create_analysis`** — a
+   tool that exists only in the browser frontend (`WebToolWrapper` appends it),
+   because it ends by putting a page in front of someone.
+2. That tool runs the architect over the template, scaffolds the analysis, and
+   calls `bridge.open_plan(...)`. Chainlit renders a link plus a `PlanLink`
+   custom element that opens `/plan/<name>` in a new tab. **The link is the
+   contract and the auto-open is a convenience** — a popup blocker may refuse
+   `window.open` outside a user gesture, and the button still works when it does.
+3. The user shapes the graph — the physics prompt included: it is drawn as the
+   head of the plan and edits `plan.problem`, which `prompt.md` mirrors, so the
+   question the agents read is the one on screen — and presses **Approve & run**. Approval and launch
+   are separate calls: `POST /approve` reports `awaited`, and only when nothing
+   was already waiting on the latch does the page `POST /run` itself.
+4. The run is supervised on the plan page: node colouring, a progress log, and a
+   modal for every question the agents ask.
+
+A selected node also has its own **Run**, beside Delete and Save at the top of
+the side panel. It posts `{"only_node": "<id>"}` to the same `POST /run` route
+and executes that node alone — no planner frontier, nothing upstream, nothing
+after. It saves first (what runs is the plan on disk) but never approves:
+approval is a claim about the pipeline, and since saving withdraws approval,
+requiring it would make the button unusable for the one thing it is for —
+re-running the node you just edited. A blocking finding still refuses it, and a
+node the plan does not have is a 400. It re-runs the node from scratch: the
+orchestrator clears that node's review-iteration counter and completed/skipped
+entries first, because those are cumulative across runs and would otherwise
+leave a node that had already finished with nothing left to iterate. Its files
+on disk stay — the executor reads and supersedes them. The button is a no-op
+while a run is in flight, and now says so instead of doing nothing.
+
+### The bottom dock: progress, then the run log
+
+The dock under the canvas has two tabs and they answer different questions.
+
+**Progress** answers *what does this analysis know*. It is served by `GET
+/api/plan/{name}/state` from `agents/jfc/state.analysis_state`, which derives
+everything from the analysis directory: one pill per plan node (green once its
+artifact is on disk, overridden by the live run status while a run is in
+flight), then the process inventory grouped as signal, irreducible, reducible,
+instrumental and observed data, with the datasets under each.
+
+Because it is derived rather than remembered, the panel is correct for a plan
+that has never run, after a page reload, after a server restart, and for a run
+this process never supervised — none of which is true of the run log. Empty
+categories are still drawn: "no reducible background" is a claim the strategy
+made, and hiding the heading would hide the claim.
+
+Each later phase extends the same panel by reading the artifact it already
+writes. Nothing is stored twice for the panel's benefit.
+
+The dock is **resizable**: drag its top edge, double-click it to go back to the
+default, and the height is remembered in `localStorage` (optional — a profile
+with no storage still resizes, it just forgets). The height lives in a
+`--dock-h` custom property so both tabs follow one number, and the page keeps
+that number in a variable rather than measuring an element back: a drag that
+re-read its own laid-out height would fight the flexbox.
+
+**Run log** answers *what is the analysis doing right now* — and it is meant to
+be the only place a physicist has to look. It used to show only what the
+orchestrator chose to announce, a handful of node boundaries, while the window
+that launched the server showed every command; a supervising page that shows
+less than the terminal nobody is watching is not supervising anything.
+
+So the agents narrate themselves, through
+[`hepagent/activity.py`](../src/hepagent/activity.py) — the mirror image of
+`interaction.py`: that one carries the questions an agent asks, this one carries
+what it is doing while it is not asking. Same thread-local binding, same rule
+that a CLI run with nothing bound behaves byte-for-byte as before.
+
+The narration comes from one `RunHooks` subclass,
+[`agents/activity_hooks.py`](../src/hepagent/agents/activity_hooks.py), passed
+to every `Runner.run` in a JFC analysis. Instrumenting tools one at a time would
+have touched every tool and still missed what the model *said* between them; the
+SDK's lifecycle callbacks see all of it from one place — which agent is working
+(`on_agent_start`/`_end`), what it answered and what it decided to call with
+which arguments (`on_llm_end`, because `on_tool_start` is handed the tool but
+not its arguments), and what the tool returned (`on_tool_end`).
+
+Four rules keep a firehose readable:
+
+- **A headline is one line; the body is folded behind it.** Each event carries a
+  `kind` and a `detail`; a step with a body renders as `<details>`, so a
+  command's output is one click away rather than a screenful in the way.
+- **Kind is what makes a wall of steps skimmable.** A command reads as a command
+  before you read the words, and the filter beside the tabs takes the whole log
+  back down to commands-and-results, or to phase boundaries alone. Filtering is
+  a class on the container, never a re-render — the rows are already in the DOM
+  and a reader's scroll position is worth more than the tidiness.
+- **Autoscroll only from the bottom.** Someone who has scrolled up is reading
+  something.
+- **Clip at the source.** `activity.py` bounds every headline and body before a
+  sink ever sees one: the log is a progress view held in memory, and the
+  artefact on disk is the archive.
+
+`RunEvent.kind` also separates the orchestrator's own progress from narration,
+which is what the state fetch keys off: it fires on a node boundary, not on
+every turn. Re-reading the graph and the process inventory once per poll for the
+length of a run is a cost the Progress tab does not earn — what the analysis has
+*established* changes when a node moves, not when a command runs.
+
+### The plan page is where a running analysis talks to its human
+
+A run started from the browser has no terminal, so the three call sites that
+block on a person are re-pointed at it:
+`execute_bash_command_with_confirmation`, `ask_user_for_info`, and the JFC human
+gate. None of them learn what a browser is — they consult
+[`hepagent/interaction.py`](../src/hepagent/interaction.py) for a backend bound
+to *the current thread*, and with none bound (every CLI path) their behaviour is
+byte-for-byte what it was.
+
+The run therefore owns a thread with its own event loop. That is not tidiness:
+the SDK calls synchronous function tools inline, so a bash approval waiting an
+hour for a human would otherwise hold the ASGI loop for that hour (invariant 5,
+seen from the other side). `RunHandle` is the thread-safe seam — the run thread
+blocks on a `threading.Event`, the HTTP handler sets it.
+
+`Stop` is cooperative: a thread cannot be interrupted safely, so a cancel takes
+effect at the next progress report, and `RunHandle.record` is what raises.
+Narration goes through `RunHandle.note` instead, which deliberately does *not*
+raise: it is called from inside a function tool, and the SDK turns an exception
+raised there into an error message handed back to the model — so a cancel
+noticed there would be swallowed into the conversation rather than unwinding the
+run.
 
 ## The plan editor
 
@@ -98,10 +244,52 @@ HTTP. The page is a single self-contained file: inline CSS and JS, SVG
 rendering, no external requests at all — the same discipline that keeps it
 auditable keeps it working offline on a cluster login node.
 
+### Edges are routed, not just drawn
+
+`plan/layout.py` answers *where a node goes* — a grid of columns and rows — and
+stops there; turning that into pixels, edges included, is the page's job. Doing
+the naive thing there is a correctness bug in the picture rather than a
+cosmetic one. The JFC templates are a chain in which nearly every node feeds
+nearly every later one, and every node sits on one row: an edge drawn as a
+straight run from one node's right side to the next one's left lands *exactly*
+on top of the short edges it skips over. Six nodes carrying twelve dependencies
+drew as five arrows, and the missing seven only appeared once a node had been
+dragged out of the line.
+
+So `render()` routes the whole set before drawing any of it (`assignPorts`,
+`edgeGeometry`, `detour` in [`plan.html`](../src/hepagent/web/static/plan.html)):
+
+- **Each end takes its own slot** down the node's side, ordered by where the
+  other end sits so the lines separate without braiding. A node with one edge
+  keeps the middle, so the simple case looks exactly as it did.
+- **An edge that would cut through a box detours under it** — diving clear of
+  the row, running *flat* beneath everything it passes, then climbing into the
+  target's slot. Flat rather than bowed: a bow is only deep at its middle, so
+  the box nearest either end sits precisely where the curve has come back up.
+  One extra lane per box crossed, so an edge flying over more of the plan runs
+  under one flying over less of it.
+- **Under, not over.** The canvas has no coordinates above the origin to grow
+  into; its height is elastic, so `render()` sizes it around the deepest routed
+  edge rather than around the boxes.
+
+The detour is settled by scanning the polyline of the curve *that will be
+drawn* against the node boxes and deepening until it comes up clean, so the
+clearance is a property of the picture rather than of the arithmetic that
+produced it. `tests/web/plan_editor_harness.mjs` re-flattens the emitted `d`
+attributes with its own parser and asserts both halves — every path distinct,
+no path across a box it does not touch — which is a check on the drawing, not
+on the page agreeing with itself.
+
 Approving a plan in the browser releases `PlanApprovalGate`, which
 `run_jfc_analysis(require_approval=True)` awaits before the first node. That only
 works because both share one process and one event loop, which is what
 `jfc run --review-plan` arranges via `server.plan_editor_running`.
+
+When *nothing* is waiting on that latch — the ordinary case, a plan page opened
+from the chat or from `jfc plan edit` — approving used to be a no-op, so the page
+starts the run itself. `PlanApprovalGate.waiting()` is how the two cases are told
+apart, and `POST /approve` reports it as `awaited`. Do not collapse approve and
+run into one route: `jfc run --review-plan` would then run the analysis twice.
 
 ## Invariants — do not break these
 
@@ -172,6 +360,68 @@ works because both share one process and one event loop, which is what
    the server user can touch. `service.resolve_analysis` refuses anything that
    escapes the base directory; the route only turns that into a 400.
 
+10. **A run started from the browser runs on its own thread, never on the ASGI
+    loop.** Its function tools are synchronous and some of them wait for a human;
+    driving `run_jfc_analysis` with `await` from a route would hang the server
+    for exactly as long as the physicist takes to answer. `RunRegistry.start`
+    owns that thread and `asyncio.run` gives it a private loop.
+
+11. **A run must never take the server down with it.** `RunRegistry` catches
+    `BaseException` from the runner and records it on the handle. The page shows
+    a failed run; the process keeps serving. This is the same rule graph
+    ingestion follows in the orchestrator.
+
+12. **The interaction backend is thread-local, and a bare call site must keep its
+    terminal behaviour.** `hepagent/interaction.py` is consulted by the bash
+    confirmation tool, `ask_user_for_info` and the JFC human gate. A `ContextVar`
+    is wrong here — the run's thread would not see it — and defaulting to
+    anything other than "no backend" would change what `hepagent run` does in a
+    terminal. Pinned by `tests/test_interaction.py`.
+
+13. **An answer names the prompt it answers.** `RunHandle.answer` refuses an id
+    that is not the one pending, so a second tab, a slow click, or a reconnect
+    cannot approve a command the run has since moved on to.
+
+14. **A pending question survives a rendering failure.** `plan.html` boots
+    `load()`, `loadState()` and `pollRun()` without awaiting each other, so a run
+    snapshot can arrive before the plan does — `render()` therefore returns early
+    when `plan` is still null, `applyRun` calls `renderAsk` *before* redrawing the
+    canvas, and `pollRun` restarts polling in a `finally`. A throw anywhere in the
+    drawing path must never swallow the question or end the poll loop: the run is
+    stopped until it is answered, and the page would sit on a stale `blocked` pill
+    with no way to release it.
+
+15. **Run settings are visible before there is a run.** They are launch
+    arguments — `model`, `max_iterations`, `max_turns` and `unattended` are read
+    once, when `/run` is posted — so the header keeps them in `#run-settings`,
+    which is always shown, rather than in `#run`, which appears only once a run
+    exists. They disable while one is in flight and re-enable when it ends: the
+    row describes the *next* launch, and a control that could be changed
+    mid-run would claim an effect it does not have.
+
+16. **The approve control stays reachable whatever the command's length.** An
+    agent's command can be a hundred lines of heredoc. `#ask .dialog` is a flex
+    column capped at `86vh`, `#ask .cmd` scrolls inside it, and `#ask .actions` is
+    `flex: 0 0 auto`. A dialog that grows with its content pushes Approve past the
+    bottom of a fixed overlay, where nothing can scroll it back.
+17. **Narration must never be able to fail the run it is narrating.**
+    `activity.report` no-ops with no sink bound, swallows whatever a sink
+    raises, clips every headline and body before the sink sees them, and reaches
+    the handle through `note`, which does not raise on a cancelled run. A
+    progress view is a courtesy; the analysis is the work.
+18. **The activity hooks stay defensive about shapes they did not define.**
+    Output items arrive from whichever provider answered — CBORG, OpenAI,
+    Gemini — through the SDK's converters. A field that moves must degrade to a
+    duller log line, never raise inside a hook.
+
+19. **No two edges may draw as the same line.** The plan editor's whole job is
+    showing what depends on what; two dependencies rendered as one arrow is the
+    drawing lying about the plan. Edge geometry therefore stays routed rather
+    than direct — slots on the node's side, detours under the boxes in between —
+    and the harness asserts distinctness and box clearance against the paths the
+    page emits. If a change makes edges direct again, it has to keep those two
+    properties some other way.
+
 ## Known limitations
 
 - No chat history browser. Chainlit's thread history needs a data layer; today
@@ -180,7 +430,24 @@ works because both share one process and one event loop, which is what
   tool runs commands as the server user, and the plan editor writes `plan.json`
   under the analyses directory, so do not expose this port.
 - `hepagent web --yolo` sets the *initial* mode only; it is per-chat state
-  afterwards, changed via `/mode` or the ⚙ panel.
+  afterwards, changed via `/mode` or the ⚙ panel. It does **not** set
+  `HEPAGENT_YOLO`, so a run launched from the plan page still asks there; tick
+  "auto-approve commands" in the dock header before launching to run unattended.
+  The chat's ⚙ "Max turns" slider is likewise per-chat: a plan run takes its cap
+  from the dock header's `turns` box, or from each node's own `max_turns`.
+- A run launched from the *page* is supervised on the page. A run launched by
+  `jfc run --review-plan` is driven by the CLI and is not in the registry, so
+  that page shows its plan but no progress — watch the terminal instead.
+- Progress is polled every 1.5 s rather than streamed. It survives a reload,
+  which a websocket bound to the page would not, and a JFC node takes minutes.
+- The run log lives in memory and is bounded (`runs.MAX_EVENTS`). A run long
+  enough to exceed it loses its oldest lines; `dropped_events` says how many.
+- Runs live in memory. Restarting the server loses the log of a run in flight,
+  and the analysis itself keeps whatever `.orchestration_state.json` recorded —
+  resume it with `hepagent jfc resume --name <analysis>`.
+- Closing the page does not stop a run; it keeps going and the next page to open
+  re-attaches to it. Use **Stop** to end one, which takes effect at the next node
+  boundary.
 
 ## Testing
 
@@ -198,8 +465,19 @@ uv run --extra web pytest tests/web/
 ```
 
 `tests/web/test_plan_editor_js.py` runs the page's own JavaScript in Node against
-a stub DOM (`plan_editor_harness.mjs`), so drag, add-node, connect and save are
-exercised rather than assumed. It skips when Node is unavailable.
+a stub DOM (`plan_editor_harness.mjs`), so drag, add-node, connect, save, the run
+panel and the question dialog are exercised rather than assumed. It skips when
+Node is unavailable.
+
+The run machinery is tested with real threads — `tests/plan/test_plan_runs.py`
+for the handoff itself and `tests/web/test_plan_run_api.py` for the routes,
+which inject a launcher that finishes immediately instead of running an
+analysis:
+
+```bash
+uv run pytest tests/plan/test_plan_runs.py tests/test_interaction.py
+uv run --extra web pytest tests/web/test_plan_run_api.py tests/web/test_plan_state_api.py
+```
 
 Manual end-to-end check:
 

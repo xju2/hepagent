@@ -38,7 +38,6 @@ cd hepagent
 uv python install 3.12
 make sync
 source .venv/bin/activate
-export OPENAI_AGENTS_DISABLE_TRACING=1  # Optional: disable tracing logs if you don't have OPENAI_API_KEY
 hepagent list-platforms
 hepagent list-models --platform cborg
 ```
@@ -48,8 +47,11 @@ After the installation, you can find default configurations at `$HOME/.hepagent`
 The environment variables are stored in `$HOME/.hepagent/config/env_vars.toml`.
 
 To use a LLM provider, set the corresponding API keys as environment variables.
-You may also want to set `OPENAI_AGENTS_DISABLE_TRACING=1` to disable the tracing logs,
-especially if you do not have an OPENAI_API_KEY.
+
+OpenAI Agents SDK tracing (which uploads traces to the OpenAI platform) is
+**disabled by default**, since HepAgent usually runs against other providers.
+Set `HEPAGENT_OPENAI_TRACING=1` (or the key of the same name in
+`env_vars.toml`) to opt back in; it needs a valid `OPENAI_API_KEY`.
 
 If you don't want to store API keys in the TOML file,
 you can set them to environment variables directly.
@@ -280,3 +282,21 @@ Other related works:
 * Nemo Claw: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
 * Get Physics Done: https://github.com/psi-oss/get-physics-done
 * US ATLAS marketplace: https://github.com/usatlas/marketplace/tree/main
+
+Agentic AI in HEP:
+
+*Physics Analysis & Discovery*
+* Automate physics analyses: LLM4HEP, [arXiv:2512.07785](https://arxiv.org/abs/2512.07785), [code](https://huggingface.co/HWresearch/LLM4HEP)
+* Perform end-to-end and novel measurements: JFC, [arXiv:2603.20179](https://arxiv.org/abs/2603.20179), [code](https://github.com/jfc-mit/jfc)
+* Reproduce experimental measurements: Dr.Sai, [arXiv:2604.22541](https://arxiv.org/abs/2604.22541)
+* Develop anomaly-detection methods autonomously: Agents of Discovery, [arXiv:2509.08535](https://arxiv.org/abs/2509.08535), [code](https://github.com/uhh-pd-ml/AgentsOfDiscovery)
+* End-to-end automation for close-ended scientific tasks: SciFi, [arXiv:2604.13180](https://arxiv.org/abs/2604.13180), [code](https://github.com/qibin2020/scifi)
+
+*Simulation & Phenomenology*
+* Automate collider phenomenology: ColliderAgent, [arXiv:2603.14553](https://arxiv.org/abs/2603.14553), [code](https://github.com/HET-AGI/ColliderAgent)
+* Generate Rivet routines from publications: AgentRivet, [arXiv:2606.13535](https://arxiv.org/abs/2606.13535), [code](https://gitlab.com/hepcedar/AgentRivet)
+* Automate MC event generation: MadAgents, [arXiv:2601.21015](https://arxiv.org/abs/2601.21015), [code](https://github.com/MadGraphTeam/MadAgents)
+
+*Detectors & Accelerators*
+* Explore and optimize detector designs in simulation: GRACE, [arXiv:2602.15039](https://arxiv.org/abs/2602.15039), [data](https://github.com/just5034/GRACE_whitepaper_data); VIBRATO, [arXiv:2604.21804](https://arxiv.org/abs/2604.21804), [code](https://github.com/wonyongc/bilevel_det_opt)
+* Conduct multistage accelerator experiments: [arXiv:2509.17255](https://arxiv.org/abs/2509.17255)

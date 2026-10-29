@@ -31,6 +31,7 @@
         "node_types": [
           "commitment",
           "method",
+          "process",
           "dataset"
         ],
         "edge_types": [
@@ -85,7 +86,7 @@
     },
     {
       "id": "inference_expected",
-      "label": "Inference — expected",
+      "label": "Inference \u2014 expected",
       "directory": "phase4a_inference_expected",
       "artifact": "INFERENCE_EXPECTED.md",
       "prompt_ref": "templates/phase4_claude.md",
@@ -125,7 +126,7 @@
     },
     {
       "id": "inference_partial",
-      "label": "Inference — partial unblinding",
+      "label": "Inference \u2014 partial unblinding",
       "directory": "phase4b_inference_partial",
       "artifact": "INFERENCE_PARTIAL.md",
       "prompt_ref": "templates/phase4_claude.md",
@@ -165,7 +166,7 @@
     },
     {
       "id": "inference_observed",
-      "label": "Inference — observed",
+      "label": "Inference \u2014 observed",
       "directory": "phase4c_inference_observed",
       "artifact": "INFERENCE_OBSERVED.md",
       "prompt_ref": "templates/phase4_claude.md",

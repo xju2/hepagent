@@ -121,6 +121,55 @@ def list_available_models(
     return tuple(sorted(model.id for model in models.data))
 
 
+def list_model_costs(
+    model_provider: str,
+    *,
+    settings: ModelProviderSettings | None = None,
+) -> dict[str, dict[str, float]]:
+    """Per-model price in dollars per million tokens, for the providers that say.
+
+    Pricing is not part of the OpenAI model API: ``/v1/models`` returns ids and
+    nothing else. A LiteLLM gateway — CBORG is one — also serves ``/model/info``,
+    which carries `input_cost_per_token`/`output_cost_per_token`, so that is what
+    this reads.
+
+    Returns:
+        ``{model_id: {"input": $/M, "output": $/M}}``, restricted to models that
+        quote a price. **Empty for any provider that does not expose one**: a
+        missing price is a fact about the gateway, never an error, so a caller
+        renders what it has rather than failing.
+    """
+    import httpx
+
+    resolved = settings or get_model_provider_settings(model_provider)
+    url = resolved.base_url.rstrip("/") + "/model/info"
+    headers = {"Authorization": f"Bearer {resolved.api_key}"} if resolved.api_key else {}
+    try:
+        response = httpx.get(url, headers=headers, timeout=20.0)
+        response.raise_for_status()
+        entries = response.json().get("data") or []
+    except Exception:
+        return {}
+
+    costs: dict[str, dict[str, float]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        info = entry.get("model_info") or {}
+        model_id = entry.get("model_name") or info.get("key")
+        prompt_cost, completion_cost = (
+            info.get("input_cost_per_token"),
+            info.get("output_cost_per_token"),
+        )
+        if not model_id or prompt_cost is None:
+            continue
+        costs[str(model_id)] = {
+            "input": float(prompt_cost) * 1e6,
+            "output": float(completion_cost or 0.0) * 1e6,
+        }
+    return costs
+
+
 def get_cborg_model_provider(
     model_name: str | None = None,
 ) -> OpenAIChatCompletionsModel:

@@ -39,6 +39,16 @@ class WebBridge(Protocol):
         """Ask the human a free-form question and return their answer."""
         ...
 
+    async def open_plan(self, name: str, url: str) -> None:
+        """Hand the user the plan editor for an analysis the chat just created.
+
+        The chat is where an analysis is *specified*; the plan page is where it
+        is shaped and launched. This is the handover, and the reason it is on the
+        bridge rather than inside the tool: only the frontend knows how to put a
+        page in front of someone.
+        """
+        ...
+
 
 class TurnUI(Protocol):
     """Rendering callbacks driven by :func:`hepagent.web.turn.run_turn`."""

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agents import Agent, Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.bash import execute_bash_command_with_confirmation
 from hepagent.agents.common import AgentContext
 from hepagent.agents.jfc._data import get_jfc_data_dir
@@ -151,7 +152,9 @@ async def run_investigator(
         f"Trace through the artifacts to confirm the origin and identify all affected "
         f"downstream nodes. Write REGRESSION_TICKET.md to {ticket_path}."
     )
-    result = await Runner.run(agent, task, context=context, max_turns=max_turns)
+    result = await Runner.run(
+        agent, task, context=context, max_turns=max_turns, hooks=ACTIVITY_HOOKS
+    )
 
     # Parse the written ticket for structured data
     parsed_origin, affected_phases = (

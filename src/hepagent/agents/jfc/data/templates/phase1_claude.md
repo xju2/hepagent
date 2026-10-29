@@ -32,7 +32,7 @@ Cite all retrieved sources in the artifact (paper ID + section).
 ## Required deliverables
 
 - Physics motivation and observable definition
-- Sample inventory (data + MC)
+- Sample inventory (data + MC), recorded with `record_process_inventory`
 - Selection approach with justification (see "≥2 approaches" below)
 - Systematic uncertainty plan
 - Literature review from RAG corpus
@@ -56,6 +56,13 @@ These are the critical actionable items for Phase 1. See
   analyses. Cite all retrieved sources.
 - **Enumerate backgrounds.** Classify each as irreducible, reducible, or
   instrumental. Estimate relative importance (order of magnitude is fine).
+- **Record the process inventory.** Call `record_process_inventory` with the
+  signal, every background with its classification and rationale, the observed
+  data, and the dataset(s) carrying each one. Take dataset names and paths from
+  the physics prompt where it gives them (`source: "prompt"`); mark anything you
+  worked out yourself as `source: "inferred"` rather than inventing a path.
+  This is the machine-readable form of the sample inventory: later phases and
+  the progress panel read it instead of re-reading this artifact's prose.
 - **Define discriminating variables.** Identify the variable(s) for final
   statistical interpretation (invariant mass, BDT score, event shape, etc.).
 - **≥2 selection approaches must be qualitatively different.** Two
@@ -94,6 +101,8 @@ Before submitting for review, verify:
 
 - [ ] Corpus queries executed — at least 3 searches, all results cited
 - [ ] Backgrounds classified (irreducible, reducible, instrumental)
+- [ ] Process inventory recorded with `record_process_inventory`, with a
+      dataset for every process
 - [ ] >=2 qualitatively different selection approaches identified (not
       parametric variants of same method). At least one MVA-based, or
       MVA infeasibility documented with [D] label

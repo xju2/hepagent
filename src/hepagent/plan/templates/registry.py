@@ -103,6 +103,68 @@ def instantiate(
     return AnalysisPlan.from_dict(data)
 
 
+def predefined_nodes(*, analysis_name: str = "analysis") -> list[dict[str, Any]]:
+    """Every built-in template's nodes, as nodes ready to drop into a plan.
+
+    The editor offers these so a user building a plan by hand does not have to
+    retype a phase the shipped pipeline already spells out — "predefined node"
+    is a *starting point copied into the plan*, not a link back to the template:
+    once inserted it is an ordinary node like any other.
+
+    Each entry is ``{"key", "source", "source_description", "analysis_type",
+    "summary", "node"}``, where `node` is a complete plan node with its prompt
+    inlined, exactly as :func:`instantiate` would have produced it. Prompts are
+    resolved against the **template's own** analysis type — a node lifted out of
+    the search pipeline keeps the search conventions it was written for — while
+    ``{{name}}`` follows the analysis it is being offered to.
+
+    A template whose node cannot be resolved (a missing prompt file, a node the
+    schema refuses) is skipped rather than failing the catalog: one broken
+    entry must not cost the user the rest of the library.
+
+    Args:
+        analysis_name: Substituted for ``{{name}}`` in the prompts.
+    """
+    library: list[dict[str, Any]] = []
+    for template_name in list_templates():
+        try:
+            data = _read(template_name)
+        except TemplateNotFoundError:  # pragma: no cover - glob just found it
+            continue
+        template_type = str(data.get("analysis_type") or "")
+        variables = {
+            "name": analysis_name,
+            "analysis_type": template_type,
+            "conventions_files": CONVENTIONS_FOR_TYPE.get(template_type, ""),
+        }
+        for raw in data.get("nodes") or ():
+            try:
+                node = PlanNode.from_dict(_resolve_node(dict(raw), variables))
+            except Exception:  # noqa: BLE001 - a broken entry is skipped, not fatal
+                continue
+            library.append(
+                {
+                    "key": f"{template_name}:{node.id}",
+                    "source": template_name,
+                    "source_description": str(data.get("description", "")),
+                    "analysis_type": template_type,
+                    "summary": summarize_prompt(node.prompt),
+                    "node": node.to_dict(),
+                }
+            )
+    return library
+
+
+def summarize_prompt(prompt: str, limit: int = 160) -> str:
+    """One line describing what a prompt asks for, for a picker's second line."""
+    for line in prompt.splitlines():
+        text = line.strip().lstrip("#").strip()
+        if not text or text.startswith(("---", "```")):
+            continue
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return ""
+
+
 def substitute(template: str, variables: dict[str, str]) -> str:
     """Replace ``{{key}}`` placeholders in `template`."""
     for key, value in variables.items():

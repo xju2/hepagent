@@ -133,3 +133,21 @@ def test_get_instructions_skips_user_profile_on_permission_error(mock_agent_env,
 
     assert "# IDENTITY" in instructions
     assert "# USER PROFILE" not in instructions
+
+
+def test_list_skills_returns_the_data_behind_the_catalog(mock_agent_env):
+    """The plan editor needs names, not the markdown bullets an agent is shown."""
+    from hepagent.agent_helpers import list_skills
+
+    skills = dict(list_skills())
+    assert "nyx" in skills
+    assert skills["nyx"].startswith("Test Nyx simulation skill")
+
+
+def test_list_skills_is_empty_when_there_are_none(tmp_path):
+    from unittest.mock import patch
+
+    from hepagent.agent_helpers import list_skills
+
+    with patch("hepagent.helpers.get_agent_dir", return_value=tmp_path):
+        assert list_skills() == []

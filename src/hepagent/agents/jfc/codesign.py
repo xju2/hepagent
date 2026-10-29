@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents import Agent, Runner
+from hepagent.agents.activity_hooks import ACTIVITY_HOOKS
 from hepagent.agents.common import AgentContext
 from hepagent.helpers import read_md
 from hepagent.model_providers import get_model_provider
@@ -208,6 +209,7 @@ async def run_codesign_gate(
         ),
         context=context,
         max_turns=agent_turns,
+        hooks=ACTIVITY_HOOKS,
     )
 
     # Step 2: Codesign arbiter — review strategy + human feedback
@@ -223,6 +225,7 @@ async def run_codesign_gate(
         f"Adjudicate the codesign review for the analysis at {analysis_root}.",
         context=arbiter_context,
         max_turns=arbiter_turns,
+        hooks=ACTIVITY_HOOKS,
     )
 
     adjudication_path = codesign_dir / "CODESIGN_ADJUDICATION.md"

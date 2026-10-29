@@ -24,19 +24,39 @@ def to_mermaid(plan: AnalysisPlan) -> str:
     """Render the plan as a Mermaid `graph LR` block.
 
     Blocking `requires` edges are solid; advisory `informs` edges are dotted, so
-    the picture shows at a glance what actually constrains the order.
+    the picture shows at a glance what actually constrains the order. A condition
+    node is drawn as a diamond, and the branch that loops back is dotted and
+    labelled with its iteration budget — a loop should be visible as a loop.
     """
+    back = plan.back_branch_keys()
     lines = ["graph LR"]
     for node in plan.nodes:
         label = f"{node.label}".replace('"', "'")
         gates = "".join(f" ⛋{gate.name}" for gate in node.gates if gate.enabled)
-        lines.append(f'    {_mermaid_id(node.id)}["{label}{gates}"]')
+        if node.kind == "condition":
+            lines.append(f'    {_mermaid_id(node.id)}{{"{label}{gates}"}}')
+        else:
+            lines.append(f'    {_mermaid_id(node.id)}["{label}{gates}"]')
     for edge in plan.edges:
-        arrow = "-->" if edge.kind == "requires" else "-.->"
+        looping = edge.key in back
+        arrow = "-->" if edge.kind == "requires" and not looping else "-.->"
         lines.append(
-            f"    {_mermaid_id(edge.upstream)} {arrow}|{edge.kind}| {_mermaid_id(edge.downstream)}"
+            f"    {_mermaid_id(edge.upstream)} {arrow}|{_edge_label(plan, edge, looping)}| "
+            f"{_mermaid_id(edge.downstream)}"
         )
     return "\n".join(lines)
+
+
+def _edge_label(plan: AnalysisPlan, edge, looping: bool) -> str:
+    """What an edge says about itself in the diagram."""
+    if edge.kind not in ("on_true", "on_false"):
+        return edge.kind
+    answer = "yes" if edge.kind == "on_true" else "no"
+    if not looping:
+        return answer
+    condition = plan.node(edge.upstream)
+    budget = condition.condition.max_iterations if condition and condition.condition else 0
+    return f"{answer} — loop, max {budget}"
 
 
 def _reviewers(node: PlanNode) -> str:
