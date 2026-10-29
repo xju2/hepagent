@@ -1,5 +1,39 @@
 # Changelog
 
+## [v0.5.0] – 2026-10-29
+
+### Overview
+
+This release turns the JFC analysis layout into a user-authored plan with an append-only provenance graph, adds a browser chat UI (`hepagent web`), and makes `hepagent run` usable for fully automated (terminal-bench / Harbor style) evaluation. The Textual UI is removed in favour of the CLI REPL.
+
+---
+
+### What's Changed since v0.4.0
+
+#### New Features
+
+- **User-authored analysis plans** (`hepagent jfc`) — The seven-phase JFC layout is now one built-in template of a first-class analysis plan. An architect agent proposes structural edits to a template, you edit and approve the plan in a browser editor (`/plan`) before any agent starts, and `plan show` / `validate` / `migrate` manage it from the CLI. Multi-channel fan-out and shared calibration sub-analyses can now be expressed.
+- **Analysis provenance graph** — Every analysis keeps an append-only graph recording what produced what, with validation and reporting.
+- **Web UI** (`hepagent web`, optional `web` extra) — Browser chat with token streaming, collapsible tool steps and click-to-approve command execution, sharing sessions with the terminal frontends.
+- **Non-interactive runs** — `hepagent run --non-interactive` auto-approves bash and returns empty input for `ask_user_for_info`, for fully automated evaluation. `--max-command-proposals` limits emitted bash-block continuations separately from `--max-turn`.
+- **Fundra workflows skill** — New `fundra-workflows` skill.
+
+#### Improvements
+
+- **Globus token helper** reworked.
+- **CLI runtime streamlined** — CLI REPL and `hepagent run` refactored after the Textual removal.
+
+#### Breaking Changes
+
+- **Textual UI removed** — `hepagent`'s Textual frontend and its `textual` dependency are gone; use `hepagent repl` or `hepagent web`.
+
+#### Fixes
+
+- `hepagent run --max-turn` no longer doubles as the limit on bash-block continuations; that is now `--max-command-proposals` (default 1).
+- `distro` is declared as a direct dependency, so a fresh `uv tool install hepagent` no longer fails with `ModuleNotFoundError: No module named 'distro'`.
+
+---
+
 ## [v0.4.0] – 2026-06-16
 
 ### Overview
@@ -189,6 +223,7 @@ uv run hepagent --agent "scientist" \
 uv run hepagent list-models --platform cborg
 ```
 
+[v0.5.0]: https://github.com/xju2/hepagent/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/xju2/hepagent/releases/tag/v0.4.0
 [v0.3.2]: https://github.com/xju2/hepagent/releases/tag/v0.3.2
 [v0.3.0]: https://github.com/xju2/hepagent/releases/tag/v0.3.0
