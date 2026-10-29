@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1283,7 +1283,7 @@ resolution-markers = [
     "python_full_version >= '3.14'",
 ]
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version >= '3.14'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b6/e0/318c1ce3ae5a17894d5791e87aea147587c9e702f24122cc7a5c8bbaeeb1/grpcio-1.76.0.tar.gz", hash = "sha256:7be78388d6da1a25c0d5ec506523db58b18be22d9c37d8d3a32c08be4987bd73", size = 12785182, upload-time = "2025-10-21T16:23:12.106Z" }
 wheels = [
@@ -1347,6 +1347,7 @@ source = { editable = "." }
 dependencies = [
     { name = "camb" },
     { name = "cernopendata-client" },
+    { name = "distro" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "openai-agents", extra = ["litellm"] },
@@ -1382,6 +1383,7 @@ requires-dist = [
     { name = "camb", specifier = ">=1.6.5" },
     { name = "cernopendata-client", specifier = ">=1.0.2" },
     { name = "chainlit", marker = "extra == 'web'", specifier = ">=2.11.1" },
+    { name = "distro", specifier = ">=1.9.0" },
     { name = "globus-sdk", marker = "extra == 'iri'", specifier = ">=4.4.1" },
     { name = "iri-client", marker = "extra == 'iri'", specifier = ">=0.1.4" },
     { name = "matplotlib", specifier = ">=3.10.8" },
