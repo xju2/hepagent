@@ -33,11 +33,6 @@ def test_truncate_output_exact_limit():
 def test_execute_bash_command_success(monkeypatch):
     """execute_bash_command returns output and zero returncode on success."""
 
-    class DummyResult:
-        stdout = "hello world\n"
-        returncode = 0
-
-    monkeypatch.setattr(bash_module.subprocess, "run", lambda *a, **kw: DummyResult())
     result = bash_module.execute_bash_command("echo hello world")
     assert result["returncode"] == 0
     assert "hello" in result["output"]
@@ -46,11 +41,6 @@ def test_execute_bash_command_success(monkeypatch):
 def test_execute_bash_command_failure(monkeypatch):
     """execute_bash_command returns non-zero returncode on failure."""
 
-    class DummyResult:
-        stdout = "error message"
-        returncode = 1
-
-    monkeypatch.setattr(bash_module.subprocess, "run", lambda *a, **kw: DummyResult())
     result = bash_module.execute_bash_command("false")
     assert result["returncode"] == 1
 

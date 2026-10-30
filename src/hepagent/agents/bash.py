@@ -6,6 +6,7 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -30,26 +31,42 @@ def _truncate_output(output: str, limit: int) -> str:
     return " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
 
 
-def execute_bash_command(cmd: str, cwd: str = "") -> dict:
-    """Execute a bash command and return output + return code."""
+def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) -> dict:
+    """Execute a bash command and return output + return code.
+
+    On timeout the whole process group is killed (so a pipe held open by a child
+    cannot hang the tool) and the partial output is returned with code 124.
+    """
     config = LocalEnvironmentConfig()
     cwd = cwd or config.cwd or str(Path.cwd())
+    timeout = timeout or config.timeout
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         shell=True,
         text=True,
         cwd=cwd,
         env=os.environ | config.env,
-        timeout=config.timeout,
         encoding="utf-8",
         errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        output, _ = proc.communicate()
+        returncode = 124
+        output += (
+            f"\n[command killed after {timeout:g} s timeout. Run long jobs in the background "
+            "(`setsid nohup CMD > LOG 2>&1 &`) and poll LOG instead.]"
+        )
     return {
-        "output": _truncate_output(result.stdout, env_config.output_word_limit),
-        "returncode": result.returncode,
+        "output": _truncate_output(output, env_config.output_word_limit),
+        "returncode": returncode,
     }
 
 

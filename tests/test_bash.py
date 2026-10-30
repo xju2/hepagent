@@ -28,14 +28,16 @@ def test_create_uses_expected_tools_and_instructions(monkeypatch):
 
 
 def test_execute_bash_command_truncates_output(monkeypatch):
-    class DummyProc:
-        def __init__(self):
-            self.stdout = "words " * 50
-            self.returncode = 0
+    monkeypatch.setattr(bash, "env_config", type("Cfg", (), {"output_word_limit": 20})())
 
-    monkeypatch.setenv("HEPAGENT_OUTPUT_WORD_LIMIT", "20")
-    monkeypatch.setattr(bash.subprocess, "run", lambda *args, **kwargs: DummyProc())
-
-    result = bash.execute_bash_command("echo hi", cwd="")
+    result = bash.execute_bash_command("for i in $(seq 50); do echo words; done", cwd="")
     assert result["returncode"] == 0
     assert "output truncated" in result["output"]
+
+
+def test_execute_bash_command_timeout_kills_process_group():
+    # The background child holds stdout open; without killpg this would hang.
+    result = bash.execute_bash_command("echo start; sleep 30 & sleep 30", timeout=1)
+    assert result["returncode"] == 124
+    assert "start" in result["output"]
+    assert "timeout" in result["output"]

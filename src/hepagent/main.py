@@ -17,6 +17,7 @@ from hepagent.agents.cli_repl import (
 )
 from hepagent.agents.common import AgentContext
 from hepagent.agents.explorer import create as create_explorer_agent
+from hepagent.agents.physicist import create as create_physicist_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.config.env import env_config
@@ -33,6 +34,7 @@ from hepagent.model_providers import (
     parse_model_spec,
 )
 from hepagent.plan.templates import DEFAULT_TEMPLATE
+from hepagent.trajectory import TrajectoryRecorder
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -80,6 +82,7 @@ def get_available_agents() -> dict[str, str]:
     agents = {
         "explorer": "Research-direction explorer with parallel specialist sub-agents.",
         "scientist": "Skilled Agent",
+        "physicist": "Skilled Agent with a budgeted computational-research playbook.",
     }
     for role_name, role_cfg in _available_role_agents().items():
         agents[role_name] = role_cfg.description
@@ -96,6 +99,8 @@ def create_app_agent(
     normalized = agent_name.lower()
     if normalized == "explorer":
         return create_explorer_agent(model_provider=model_provider, model_name=model_name)
+    if normalized == "physicist":
+        return create_physicist_agent(model_provider=model_provider, model_name=model_name)
     if normalized in _available_role_agents():
         return create_role_agent(
             role_name=normalized,
@@ -134,9 +139,16 @@ def build_runtime(
 class TerminalRunToolWrapper:
     """Wrap interactive tools for the headless `hepagent run` command."""
 
-    def __init__(self, *, yolo: bool = False, non_interactive: bool = False):
+    def __init__(
+        self,
+        *,
+        yolo: bool = False,
+        non_interactive: bool = False,
+        command_timeout: float | None = None,
+    ):
         self.yolo = yolo
         self.non_interactive = non_interactive
+        self.command_timeout = command_timeout
         self.last_rejection_reason: str | None = None
 
     def wrap_tools(self, tools: list[object]) -> list[object]:
@@ -205,7 +217,9 @@ class TerminalRunToolWrapper:
             reason = self.last_rejection_reason or "No reason provided"
             return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
 
-        result = await asyncio.to_thread(execute_bash_command, cmd, cwd=cwd)
+        result = await asyncio.to_thread(
+            execute_bash_command, cmd, cwd=cwd, timeout=self.command_timeout
+        )
         self.render_tool_result(result)
         return result
 
@@ -244,11 +258,17 @@ async def run_agent_task(
     yolo: bool,
     non_interactive: bool = False,
     max_command_proposals: int = DEFAULT_MAX_COMMAND_PROPOSALS,
+    recorder: TrajectoryRecorder | None = None,
+    command_timeout: float | None = None,
 ) -> str:
     """Run one task in plain terminal mode and return the final agent output."""
-    tool_wrapper = TerminalRunToolWrapper(yolo=yolo, non_interactive=non_interactive)
+    tool_wrapper = TerminalRunToolWrapper(
+        yolo=yolo, non_interactive=non_interactive, command_timeout=command_timeout
+    )
     current_agent = tool_wrapper.wrap_agent(agent)
     turn_input: object = task_prompt
+    if recorder:
+        recorder.write("user", content=task_prompt)
 
     for _ in range(max_command_proposals):
         result = await Runner.run(
@@ -257,16 +277,21 @@ async def run_agent_task(
             context=context,
             max_turns=max_turns,
             session=session,
+            hooks=recorder,
         )
         final_output = "" if result.final_output is None else str(result.final_output)
         bash_proposal = _extract_single_bash_command(final_output)
         if bash_proposal is None:
+            if recorder:
+                recorder.write("final_output", content=final_output)
             return final_output
 
         command_result = await tool_wrapper.execute_bash(
             cmd=bash_proposal.cmd,
             thought=bash_proposal.thought,
         )
+        if recorder:
+            recorder.write("tool_result", tool="text_bash_proposal", output=str(command_result))
         feedback = _build_command_feedback(bash_proposal.cmd, command_result)
         if session is not None:
             turn_input = feedback
@@ -401,6 +426,16 @@ def run_task(
         "--chat",
         help="Conversation id for persistent SQLite chat history.",
     ),
+    trajectory: str | None = typer.Option(
+        None,
+        "--trajectory",
+        help="Append every LLM response, tool result and its token cost to this JSONL file.",
+    ),
+    command_timeout: float | None = typer.Option(
+        None,
+        "--command-timeout",
+        help="Kill any single bash command after this many seconds (default: no limit).",
+    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
@@ -421,18 +456,25 @@ def run_task(
         mlflow.openai.autolog()
 
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
-    result = asyncio.run(
-        run_agent_task(
-            agent=runtime["agent"],
-            task_prompt=task_prompt,
-            context=runtime["context"],
-            max_turns=max_turns,
-            max_command_proposals=max_command_proposals,
-            session=runtime["session"],
-            yolo=yolo,
-            non_interactive=non_interactive,
+    recorder = TrajectoryRecorder(trajectory, runtime["display_model"]) if trajectory else None
+    try:
+        result = asyncio.run(
+            run_agent_task(
+                agent=runtime["agent"],
+                task_prompt=task_prompt,
+                context=runtime["context"],
+                max_turns=max_turns,
+                max_command_proposals=max_command_proposals,
+                session=runtime["session"],
+                yolo=yolo,
+                non_interactive=non_interactive,
+                recorder=recorder,
+                command_timeout=command_timeout,
+            )
         )
-    )
+    finally:
+        if recorder:
+            recorder.close()
     if result:
         typer.echo(result)
 
@@ -580,6 +622,7 @@ def list_agents() -> None:
     """List available run modes and role agents."""
     typer.echo("Built-in run modes:")
     typer.echo("\tscientist -> skilled research agent")
+    typer.echo("\tphysicist -> scientist + budgeted computational-research playbook")
     typer.echo("\texplorer -> research-direction explorer")
     typer.echo("\tshell -> --shell/-s")
     typer.echo("\tshell_describer -> --describe/-d")

@@ -237,7 +237,7 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None):
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
             calls.append(
                 {
                     "input": input,
@@ -250,7 +250,7 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
                 return FakeResult("THOUGHT: inspect\n```bash\necho hi\n```")
             return FakeResult("Done.")
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         executed.append({"cmd": cmd, "cwd": cwd})
         return {"output": "hi\n", "returncode": 0}
 
@@ -279,9 +279,10 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
         "max_turns": 3,
         "session": None,
     }
-    assert "The bash command proposed in your previous response has completed." in calls[1][
-        "input"
-    ][-1]["content"]
+    assert (
+        "The bash command proposed in your previous response has completed."
+        in calls[1]["input"][-1]["content"]
+    )
 
 
 def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
@@ -297,11 +298,11 @@ def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None):
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
             calls.append(max_turns)
             return FakeResult()
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         executed.append(cmd)
         return {"output": "again\n", "returncode": 0}
 
