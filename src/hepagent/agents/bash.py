@@ -6,6 +6,7 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -44,6 +45,7 @@ def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) 
     proc = subprocess.Popen(
         cmd,
         shell=True,
+        executable=shutil.which("bash") or None,  # the tool promises bash; /bin/sh may be dash
         text=True,
         cwd=cwd,
         env=os.environ | config.env,

@@ -41,3 +41,8 @@ def test_execute_bash_command_timeout_kills_process_group():
     assert result["returncode"] == 124
     assert "start" in result["output"]
     assert "timeout" in result["output"]
+
+
+def test_execute_bash_command_runs_bash_not_sh():
+    result = bash.execute_bash_command("echo {0..2}")
+    assert result["output"].strip() == "0 1 2"
