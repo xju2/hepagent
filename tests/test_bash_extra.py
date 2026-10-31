@@ -106,3 +106,9 @@ def test_create_uses_bash_tool(monkeypatch):
     bash_module.create()
     tool_names = [getattr(t, "name", "") for t in captured["tools"]]
     assert any("execute_bash_command" in n for n in tool_names)
+
+
+def test_truncate_output_caps_single_long_line():
+    """One long line is one word; the character cap must still apply."""
+    result = bash_module._truncate_output("x" * 5000, limit=20)
+    assert len(result) < 300 and "omitted 4800 characters" in result

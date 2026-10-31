@@ -6,6 +6,8 @@
 - **`hepagent run --trajectory PATH`** — Appends every LLM response (with token counts and cost), tool result and the final output to a JSONL file, flushed per event so a run killed by an external timeout keeps its record.
 - **`hepagent run --command-timeout SEC`** — Kills a bash command after SEC seconds and returns the partial output with exit code 124. Only processes still attached to the command's output are killed; jobs it backgrounded with redirected output keep running.
 - **`hepagent run --time-budget SEC`** — A final answer given while more than 10% of the budget (and at least 10 minutes) remains is sent back to the agent with the time left.
+- **Context trimming in `hepagent run`** — Each request keeps only the last 10 tool outputs verbatim (older ones become a one-line placeholder) and, if still over `--max-context-tokens` (default 90000), drops the oldest turns after the task prompt. The run's history and trajectory stay complete.
+- **Bash output capped by characters** — The word limit let a single long line (e.g. minified JSON) through whole; output is now also capped at 10 characters per allowed word.
 - **Bash tool runs bash** — Commands ran under `/bin/sh` (dash on Debian/Ubuntu), so bash syntax such as `{0..5}` silently misbehaved.
 
 ## [v0.5.0] – 2026-10-29

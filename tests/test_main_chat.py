@@ -237,7 +237,7 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
             calls.append(
                 {
                     "input": input,
@@ -298,7 +298,7 @@ def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
             calls.append(max_turns)
             return FakeResult()
 
@@ -446,7 +446,7 @@ def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monke
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
             inputs.append(input)
             return FakeResult()
 

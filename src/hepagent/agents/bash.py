@@ -26,10 +26,15 @@ class LocalEnvironmentConfig(BaseModel):
 
 def _truncate_output(output: str, limit: int) -> str:
     words = output.split()
-    if len(words) <= limit:
-        return output
-    omitted = len(words) - limit
-    return " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
+    if len(words) > limit:
+        omitted = len(words) - limit
+        output = " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
+    # A single long line (e.g. minified JSON) is one "word"; cap characters too.
+    max_chars = limit * 10
+    if len(output) > max_chars:
+        omitted = len(output) - max_chars
+        output = output[:max_chars] + f"\n\n[output truncated: omitted {omitted} characters]"
+    return output
 
 
 def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) -> dict:

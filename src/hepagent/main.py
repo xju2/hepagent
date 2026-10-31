@@ -8,7 +8,7 @@ import click
 import typer
 from typer.core import TyperGroup
 
-from agents import Agent, Runner, SQLiteSession, function_tool
+from agents import Agent, RunConfig, Runner, SQLiteSession, function_tool
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
 from hepagent.agents.cli_repl import (
@@ -22,6 +22,7 @@ from hepagent.agents.physicist import create as create_physicist_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.config.env import env_config
+from hepagent.context import input_filter
 from hepagent.helpers import (
     bootstrap_hepagent_home,
     enable_mlflow_for_tracing,
@@ -262,6 +263,7 @@ async def run_agent_task(
     recorder: TrajectoryRecorder | None = None,
     command_timeout: float | None = None,
     time_budget: float | None = None,
+    max_context_tokens: int = 90_000,
 ) -> str:
     """Run one task in plain terminal mode and return the final agent output.
 
@@ -278,6 +280,7 @@ async def run_agent_task(
     if recorder:
         recorder.write("user", content=task_prompt)
 
+    run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens))
     proposals = 0
     while True:
         result = await Runner.run(
@@ -287,6 +290,7 @@ async def run_agent_task(
             max_turns=max_turns,
             session=session,
             hooks=recorder,
+            run_config=run_config,
         )
         final_output = "" if result.final_output is None else str(result.final_output)
         bash_proposal = _extract_single_bash_command(final_output)
@@ -465,6 +469,11 @@ def run_task(
         "--time-budget",
         help="Wall-clock budget in seconds; an early final answer is sent back with the time left.",
     ),
+    max_context_tokens: int = typer.Option(
+        90_000,
+        "--max-context-tokens",
+        help="Trim old tool outputs, then the oldest turns, so each request stays under this size.",
+    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
@@ -500,6 +509,7 @@ def run_task(
                 recorder=recorder,
                 command_timeout=command_timeout,
                 time_budget=time_budget,
+                max_context_tokens=max_context_tokens,
             )
         )
     finally:
