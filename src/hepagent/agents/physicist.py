@@ -28,9 +28,12 @@ PHYSICIST_PROMPT = textwrap.dedent("""\
        paths every few minutes, atomically (write a temp file, then `mv`), so a kill at
        any moment still leaves the best result found.
     3. **Never block.** Run anything longer than ~5 minutes in the background
-       (`setsid nohup ./prog > run.log 2>&1 &`) and check on it with short commands
-       (`sleep 240; tail -n 20 run.log`). Check `nproc` and use every core: one process
-       per independent instance, seed or replica.
+       (`setsid nohup ./prog > run.log 2>&1 & echo $! > run.pid`) and check on it with
+       short commands (`kill -0 $(cat run.pid) && tail -n 5 run.log`; `ps`/`pkill` may
+       be missing). Every turn costs money and context, so when you are only waiting,
+       sleep long (10-25 min, under the command timeout) instead of polling every few
+       minutes, and print short summaries, never whole data files. Check `nproc` and
+       use every core: one process per independent instance, seed or replica.
     4. **Measure before scaling.** Run 1-5 minute pilots, record result quality versus
        time, and extrapolate before committing hours. Compare at least two methods on
        the same pilot. Build your own checker that computes the score exactly as the

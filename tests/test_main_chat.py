@@ -237,7 +237,9 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
             calls.append(
                 {
                     "input": input,
@@ -298,7 +300,9 @@ def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
             calls.append(max_turns)
             return FakeResult()
 
@@ -446,7 +450,9 @@ def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monke
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None):
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
             inputs.append(input)
             return FakeResult()
 
@@ -469,3 +475,38 @@ def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monke
     assert output == "All done."
     assert len(inputs) == 2
     assert "You still have 3500 s of your 3600 s budget" in inputs[1][-1]["content"]
+
+
+def test_run_agent_task_idles_until_deadline_when_cost_limit_hit(monkeypatch):
+    sleeps = []
+    clock = iter([0.0, 1000.0])  # start, after the limit was hit
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, **kwargs):
+            raise main_module.CostLimitReached("$5.00 spent (limit $5.00)")
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(main_module.asyncio, "sleep", fake_sleep)
+
+    recorder = main_module.TrajectoryRecorder(None, "m", max_cost=5)
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            recorder=recorder,
+            time_budget=3600,
+        )
+    )
+
+    assert output.startswith("Cost limit reached")
+    assert sleeps == [3600 - 300 - 1000]

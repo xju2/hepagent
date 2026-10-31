@@ -37,6 +37,11 @@ TOKEN_COSTS_PER_MILLION = {
         "input": 5.00,
         "output": 25.00,
     },
+    # CBORG list prices (cborg.lbl.gov/models, 2026-10-31); ids like google/claude-opus-5-5
+    "claude-opus": {"input": 4.00, "output": 20.00},
+    "claude-sonnet": {"input": 2.00, "output": 10.00},
+    "claude-haiku": {"input": 0.10, "output": 0.50},
+    "lbl/cborg-coder": {"input": 0.0, "output": 0.0},
     # Gemma 4 Thinking (open model. Free to use, no cost)
     "lbl/gemma-4-thinking": {
         "input": 0.00001,

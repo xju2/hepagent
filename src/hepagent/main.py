@@ -36,7 +36,7 @@ from hepagent.model_providers import (
     parse_model_spec,
 )
 from hepagent.plan.templates import DEFAULT_TEMPLATE
-from hepagent.trajectory import TrajectoryRecorder
+from hepagent.trajectory import CostLimitReached, TrajectoryRecorder
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -270,6 +270,10 @@ async def run_agent_task(
     With `time_budget`, a final answer given while more than 10% of the budget
     (and at least 10 minutes) remains is sent back with the time left, so the
     agent keeps improving instead of quitting early.
+
+    When the recorder's cost limit is hit, no more model calls are made; with a
+    budget, the run then idles until 5 minutes before the deadline so background
+    jobs can keep improving the files they checkpoint.
     """
     deadline = monotonic() + time_budget if time_budget else None
     tool_wrapper = TerminalRunToolWrapper(
@@ -283,15 +287,23 @@ async def run_agent_task(
     run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens))
     proposals = 0
     while True:
-        result = await Runner.run(
-            current_agent,
-            turn_input,
-            context=context,
-            max_turns=max_turns,
-            session=session,
-            hooks=recorder,
-            run_config=run_config,
-        )
+        try:
+            result = await Runner.run(
+                current_agent,
+                turn_input,
+                context=context,
+                max_turns=max_turns,
+                session=session,
+                hooks=recorder,
+                run_config=run_config,
+            )
+        except CostLimitReached as exc:
+            message = f"Cost limit reached: {exc}. Stopped calling the model."
+            typer.echo(message)
+            recorder.write("final_output", content=message)
+            if deadline:
+                await asyncio.sleep(max(0.0, deadline - 300 - monotonic()))
+            return message
         final_output = "" if result.final_output is None else str(result.final_output)
         bash_proposal = _extract_single_bash_command(final_output)
         if bash_proposal is None:
@@ -469,6 +481,11 @@ def run_task(
         "--time-budget",
         help="Wall-clock budget in seconds; an early final answer is sent back with the time left.",
     ),
+    max_cost: float | None = typer.Option(
+        None,
+        "--max-cost",
+        help="Stop calling the model once this many USD are spent (priced by token_costs).",
+    ),
     max_context_tokens: int = typer.Option(
         90_000,
         "--max-context-tokens",
@@ -494,7 +511,11 @@ def run_task(
         mlflow.openai.autolog()
 
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
-    recorder = TrajectoryRecorder(trajectory, runtime["display_model"]) if trajectory else None
+    recorder = (
+        TrajectoryRecorder(trajectory, runtime["display_model"], max_cost)
+        if trajectory or max_cost is not None
+        else None
+    )
     try:
         result = asyncio.run(
             run_agent_task(

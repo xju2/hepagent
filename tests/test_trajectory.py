@@ -2,11 +2,12 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
 from openai.types.responses import ResponseFunctionToolCall
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from agents import Usage
-from hepagent.trajectory import TrajectoryRecorder
+from hepagent.trajectory import CostLimitReached, TrajectoryRecorder
 
 
 def test_recorder_writes_flushed_jsonl_events(tmp_path):
@@ -41,3 +42,13 @@ def test_recorder_writes_flushed_jsonl_events(tmp_path):
     assert llm["cached_tokens"] == 400
     assert llm["cost_usd"] == 1.75 + 15.00
     assert events[3] == {**events[3], "tool": "bash", "output": "out"}
+
+
+def test_recorder_raises_once_cost_limit_reached():
+    rec = TrajectoryRecorder(None, "openai/gpt-5", max_cost=1.0)
+    usage = Usage(requests=1, input_tokens=400_000, output_tokens=0, total_tokens=400_000)
+    response = SimpleNamespace(output=[], usage=usage)
+    asyncio.run(rec.on_llm_end(None, None, response))  # $0.70
+    with pytest.raises(CostLimitReached):
+        asyncio.run(rec.on_llm_end(None, None, response))  # $1.40
+    assert rec.total_cost == pytest.approx(1.40)

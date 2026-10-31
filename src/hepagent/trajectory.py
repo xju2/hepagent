@@ -2,6 +2,8 @@
 
 Each event is flushed as it happens, so a run killed by an external timeout still
 leaves a complete record of what it did and what it cost up to that point.
+With `max_cost`, the response that pushes the total to it raises `CostLimitReached`.
+With no path, only the cost is tracked.
 """
 
 from __future__ import annotations
@@ -15,14 +17,24 @@ from agents import RunHooks, Usage
 from hepagent.token_costs import calculate_cost
 
 
+class CostLimitReached(Exception):
+    pass
+
+
 class TrajectoryRecorder(RunHooks):
-    def __init__(self, path: str | Path, model_name: str):
+    def __init__(self, path: str | Path | None, model_name: str, max_cost: float | None = None):
         self.model_name = model_name
+        self.max_cost = max_cost
+        self.total_cost = 0.0
         self._system_prompt_written = False
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115 - lives for the run
+        self._fh = None
+        if path:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._fh = open(path, "a", encoding="utf-8")  # noqa: SIM115 - lives for the run
 
     def write(self, event: str, **fields: Any) -> None:
+        if self._fh is None:
+            return
         record = {"event": event, "timestamp": datetime.now(UTC).isoformat(), **fields}
         self._fh.write(json.dumps(record, default=str) + "\n")
         self._fh.flush()
@@ -35,6 +47,8 @@ class TrajectoryRecorder(RunHooks):
     async def on_llm_end(self, context, agent, response) -> None:
         usage: Usage = response.usage
         details = usage.input_tokens_details
+        cost = calculate_cost(usage, self.model_name)
+        self.total_cost += cost
         self.write(
             "llm_response",
             model=self.model_name,
@@ -42,11 +56,14 @@ class TrajectoryRecorder(RunHooks):
             input_tokens=usage.input_tokens,
             cached_tokens=getattr(details, "cached_tokens", 0) or 0,
             output_tokens=usage.output_tokens,
-            cost_usd=calculate_cost(usage, self.model_name),
+            cost_usd=cost,
         )
+        if self.max_cost is not None and self.total_cost >= self.max_cost:
+            raise CostLimitReached(f"${self.total_cost:.2f} spent (limit ${self.max_cost:.2f})")
 
     async def on_tool_end(self, context, agent, tool, result) -> None:
         self.write("tool_result", tool=getattr(tool, "name", ""), output=str(result))
 
     def close(self) -> None:
-        self._fh.close()
+        if self._fh:
+            self._fh.close()
