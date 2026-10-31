@@ -4,7 +4,9 @@
 
 - **`physicist` agent** — `--agent physicist` is the scientist agent plus a computational-research playbook (wall-clock budgeting with a per-turn clock, checkpointed deliverables, background jobs, pilots before scaling, escalating past heuristic plateaus).
 - **`hepagent run --trajectory PATH`** — Appends every LLM response (with token counts and cost), tool result and the final output to a JSONL file, flushed per event so a run killed by an external timeout keeps its record.
-- **`hepagent run --command-timeout SEC`** — Kills a single bash command (and its whole process group) after SEC seconds and returns the partial output with exit code 124.
+- **`hepagent run --command-timeout SEC`** — Kills a bash command after SEC seconds and returns the partial output with exit code 124. Only processes still attached to the command's output are killed; jobs it backgrounded with redirected output keep running.
+- **`hepagent run --time-budget SEC`** — A final answer given while more than 10% of the budget (and at least 10 minutes) remains is sent back to the agent with the time left.
+- **Bash tool runs bash** — Commands ran under `/bin/sh` (dash on Debian/Ubuntu), so bash syntax such as `{0..5}` silently misbehaved.
 
 ## [v0.5.0] – 2026-10-29
 

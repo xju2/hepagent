@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from time import monotonic
 
 import click
 import typer
@@ -260,8 +261,15 @@ async def run_agent_task(
     max_command_proposals: int = DEFAULT_MAX_COMMAND_PROPOSALS,
     recorder: TrajectoryRecorder | None = None,
     command_timeout: float | None = None,
+    time_budget: float | None = None,
 ) -> str:
-    """Run one task in plain terminal mode and return the final agent output."""
+    """Run one task in plain terminal mode and return the final agent output.
+
+    With `time_budget`, a final answer given while more than 10% of the budget
+    (and at least 10 minutes) remains is sent back with the time left, so the
+    agent keeps improving instead of quitting early.
+    """
+    deadline = monotonic() + time_budget if time_budget else None
     tool_wrapper = TerminalRunToolWrapper(
         yolo=yolo, non_interactive=non_interactive, command_timeout=command_timeout
     )
@@ -270,7 +278,8 @@ async def run_agent_task(
     if recorder:
         recorder.write("user", content=task_prompt)
 
-    for _ in range(max_command_proposals):
+    proposals = 0
+    while True:
         result = await Runner.run(
             current_agent,
             turn_input,
@@ -282,17 +291,26 @@ async def run_agent_task(
         final_output = "" if result.final_output is None else str(result.final_output)
         bash_proposal = _extract_single_bash_command(final_output)
         if bash_proposal is None:
+            remaining = deadline - monotonic() if deadline else 0
+            if remaining <= max(0.1 * (time_budget or 0), 600):
+                if recorder:
+                    recorder.write("final_output", content=final_output)
+                return final_output
+            feedback = (
+                f"You still have {remaining:.0f} s of your {time_budget:.0f} s budget. "
+                "Do not stop yet: unless the task's target is demonstrably met, keep "
+                "improving the result, and make sure your best result so far is already "
+                "saved to the required output files before any long job."
+            )
             if recorder:
-                recorder.write("final_output", content=final_output)
-            return final_output
-
-        command_result = await tool_wrapper.execute_bash(
-            cmd=bash_proposal.cmd,
-            thought=bash_proposal.thought,
-        )
-        if recorder:
-            recorder.write("tool_result", tool="text_bash_proposal", output=str(command_result))
-        feedback = _build_command_feedback(bash_proposal.cmd, command_result)
+                recorder.write("user", content=feedback)
+        else:
+            feedback = await _run_text_bash_proposal(tool_wrapper, bash_proposal, recorder)
+            proposals += 1
+            if proposals >= max_command_proposals:
+                raise click.ClickException(
+                    f"Max command proposals reached while running task: {max_command_proposals}."
+                )
         if session is not None:
             turn_input = feedback
         else:
@@ -301,9 +319,15 @@ async def run_agent_task(
             turn_input = turn_items
         current_agent = result.last_agent
 
-    raise click.ClickException(
-        f"Max command proposals reached while running task: {max_command_proposals}."
+
+async def _run_text_bash_proposal(tool_wrapper, bash_proposal, recorder) -> str:
+    command_result = await tool_wrapper.execute_bash(
+        cmd=bash_proposal.cmd,
+        thought=bash_proposal.thought,
     )
+    if recorder:
+        recorder.write("tool_result", tool="text_bash_proposal", output=str(command_result))
+    return _build_command_feedback(bash_proposal.cmd, command_result)
 
 
 @app.callback(invoke_without_command=True)
@@ -436,6 +460,11 @@ def run_task(
         "--command-timeout",
         help="Kill any single bash command after this many seconds (default: no limit).",
     ),
+    time_budget: float | None = typer.Option(
+        None,
+        "--time-budget",
+        help="Wall-clock budget in seconds; an early final answer is sent back with the time left.",
+    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
@@ -470,6 +499,7 @@ def run_task(
                 non_interactive=non_interactive,
                 recorder=recorder,
                 command_timeout=command_timeout,
+                time_budget=time_budget,
             )
         )
     finally:

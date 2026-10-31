@@ -35,8 +35,10 @@ def _truncate_output(output: str, limit: int) -> str:
 def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) -> dict:
     """Execute a bash command and return output + return code.
 
-    On timeout the whole process group is killed (so a pipe held open by a child
-    cannot hang the tool) and the partial output is returned with code 124.
+    On timeout every process still holding the output pipe is killed, i.e. the
+    foreground command and anything it started without redirecting its output, and
+    the partial output is returned with code 124. Jobs the command put in the
+    background with their output redirected (`cmd > log 2>&1 &`) keep running.
     """
     config = LocalEnvironmentConfig()
     cwd = cwd or config.cwd or str(Path.cwd())
@@ -59,7 +61,7 @@ def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) 
         output, _ = proc.communicate(timeout=timeout)
         returncode = proc.returncode
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
+        _kill_pipe_holders(proc)
         output, _ = proc.communicate()
         returncode = 124
         output += (
@@ -70,6 +72,28 @@ def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) 
         "output": _truncate_output(output, env_config.output_word_limit),
         "returncode": returncode,
     }
+
+
+def _kill_pipe_holders(proc: subprocess.Popen) -> None:
+    """Kill the processes in `proc`'s group that still hold its stdout pipe."""
+    pipe = f"pipe:[{os.fstat(proc.stdout.fileno()).st_ino}]"
+    holders = []
+    for pid_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            if os.getpgid(int(pid_dir.name)) != proc.pid:
+                continue
+            if any(os.readlink(fd) == pipe for fd in (pid_dir / "fd").iterdir()):
+                holders.append(int(pid_dir.name))
+        except OSError:
+            continue  # exited meanwhile, or not ours to inspect
+    if not holders:  # shortcut: no /proc (e.g. macOS), fall back to the whole group
+        os.killpg(proc.pid, signal.SIGKILL)
+        return
+    for pid in holders:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 TOOL_CANCEL_MESSAGE = """Tool calling is cancelled by user.

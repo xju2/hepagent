@@ -431,3 +431,41 @@ def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     assert "Use either --chat or --disable-session, not both." in normalized_output
     assert chat_calls == []
     assert created_repls == []
+
+
+def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monkeypatch):
+    inputs = []
+    clock = iter([0.0, 100.0, 3000.0])  # start, first answer (time left), second answer (done)
+
+    class FakeResult:
+        final_output = "All done."
+        last_agent = _DummyAgent()
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": self.final_output}]
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, context=None, max_turns=None, session=None, hooks=None):
+            inputs.append(input)
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            time_budget=3600,
+        )
+    )
+
+    assert output == "All done."
+    assert len(inputs) == 2
+    assert "You still have 3500 s of your 3600 s budget" in inputs[1][-1]["content"]
