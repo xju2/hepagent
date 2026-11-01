@@ -13,7 +13,8 @@ def test_masks_only_old_long_outputs():
     for i in range(KEEP_OUTPUTS + 2):
         items += _turn(i, 1000)
     items += _turn(99, 10)
-    out = trim(items, "sys", max_tokens=10**9)
+    assert trim(items, "sys", max_tokens=10**9) == items  # far under budget: untouched
+    out = trim(items, "sys", max_tokens=5000)
     outputs = [it["output"] for it in out if it.get("type") == "function_call_output"]
     assert sum("elided" in o for o in outputs) == 3
     assert outputs[-1] == "x" * 10

@@ -3,8 +3,9 @@
 Applied per call via `RunConfig.call_model_input_filter`, so it changes only what is
 sent; the run's own history (and the `--trajectory` record) stays complete.
 
-1. Observation masking: tool outputs older than the last `KEEP_OUTPUTS` are replaced
-   by a one-line placeholder (as in SWE-agent; cheap and about as good as summaries).
+1. Observation masking: once the request passes `MASK_FRACTION` of `max_tokens`, tool
+   outputs older than the last `KEEP_OUTPUTS` become a one-line placeholder (as in
+   SWE-agent). Masking from the start made a strong model re-read its own files.
 2. If the estimate is still over `max_tokens`, the oldest items after the task prompt
    are dropped, never splitting a tool call from its output.
 """
@@ -16,6 +17,7 @@ import json
 from agents.run import CallModelData, ModelInputData
 
 KEEP_OUTPUTS = 10
+MASK_FRACTION = 0.6
 MASK_ABOVE_CHARS = 300
 # shortcut: crude chars-per-token estimate, low on purpose; use a tokenizer if it misjudges
 CHARS_PER_TOKEN = 3
@@ -31,6 +33,8 @@ def _type(item) -> str | None:
 
 def trim(items: list, instructions: str | None, max_tokens: int) -> list:
     items = list(items)
+    if _tokens(items, instructions) <= MASK_FRACTION * max_tokens:
+        return items
     outputs = [i for i, it in enumerate(items) if _type(it) == "function_call_output"]
     for i in outputs[:-KEEP_OUTPUTS]:
         text = str(items[i].get("output", ""))
