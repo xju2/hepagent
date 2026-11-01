@@ -22,7 +22,7 @@ from hepagent.agents.physicist import create as create_physicist_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.config.env import env_config
-from hepagent.context import input_filter
+from hepagent.context import budget_status, input_filter
 from hepagent.helpers import (
     bootstrap_hepagent_home,
     enable_mlflow_for_tracing,
@@ -284,7 +284,15 @@ async def run_agent_task(
     if recorder:
         recorder.write("user", content=task_prompt)
 
-    run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens))
+    def status():
+        return budget_status(
+            deadline - monotonic() if deadline else None,
+            time_budget,
+            recorder.total_cost if recorder else 0.0,
+            recorder.max_cost if recorder else None,
+        )
+
+    run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens, status))
     proposals = 0
     while True:
         try:

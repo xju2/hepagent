@@ -9,6 +9,7 @@
 - **Context trimming in `hepagent run`** — Once a request passes 60% of `--max-context-tokens`, only the last 10 tool outputs stay verbatim (older ones become a one-line placeholder); if still over `--max-context-tokens` (default 90000), drops the oldest turns after the task prompt. The run's history and trajectory stay complete.
 - **Bash output capped by characters** — The word limit let a single long line (e.g. minified JSON) through whole; output is now also capped at 10 characters per allowed word.
 - **`hepagent run --max-cost USD`** — Stops calling the model once the priced spend reaches USD; with `--time-budget` the run then idles until 5 minutes before the deadline so background jobs keep improving their checkpointed outputs. CBORG Claude and `lbl/cborg-coder` prices added to `token_costs`.
+- **Budget status in `hepagent run`** — With `--time-budget` or `--max-cost`, every model call ends with a short status (time left, model spend); past 75% of either it orders a wrap-up: launch the best long-running method in the background, checkpointing into the final outputs.
 - **Bash tool runs bash** — Commands ran under `/bin/sh` (dash on Debian/Ubuntu), so bash syntax such as `{0..5}` silently misbehaved.
 
 ## [v0.5.0] – 2026-10-29
