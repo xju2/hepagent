@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import hepagent.main as main_module
+from agents.run import ModelInputData
 from agents.tool import ToolContext
 
 
@@ -437,7 +438,8 @@ def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     assert created_repls == []
 
 
-def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monkeypatch):
+def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     inputs = []
     clock = iter([0.0, 100.0, 3000.0])  # start, first answer (time left), second answer (done)
 
@@ -477,7 +479,8 @@ def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monke
     assert "You still have 3500 s of your 3600 s budget" in inputs[1][-1]["content"]
 
 
-def test_run_agent_task_idles_until_deadline_when_cost_limit_hit(monkeypatch):
+def test_run_agent_task_idles_until_deadline_when_cost_limit_hit(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     sleeps = []
     clock = iter([0.0, 1000.0])  # start, after the limit was hit
 
@@ -510,3 +513,47 @@ def test_run_agent_task_idles_until_deadline_when_cost_limit_hit(monkeypatch):
 
     assert output.startswith("Cost limit reached")
     assert sleeps == [3600 - 300 - 1000]
+
+
+def test_run_agent_task_with_budget_adds_longrun_tools_and_status(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "STATE.md").write_text("step 1: done")
+    seen = {}
+    clock = iter([0.0] + [100.0] * 10)
+
+    class FakeResult:
+        final_output = "Done."
+        last_agent = _DummyAgent()
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, run_config=None, **kwargs):
+            seen["tools"] = [t.name for t in agent.tools]
+            data = SimpleNamespace(
+                model_data=ModelInputData(
+                    input=[{"role": "user", "content": "t"}], instructions="s"
+                )
+            )
+            seen["status"] = run_config.call_model_input_filter(data).input[-1]["content"]
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+    asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            time_budget=110,
+        )
+    )
+    assert {"job_start", "job_status", "job_stop", "wait", "keep_best", "delegate"} <= set(
+        seen["tools"]
+    )
+    assert "Time left: 10 s of 110 s." in seen["status"]
+    assert "# RUN STATE" in seen["status"] and "step 1: done" in seen["status"]
+    assert "CHECKPOINT" in seen["status"]

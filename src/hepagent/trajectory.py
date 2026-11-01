@@ -51,6 +51,7 @@ class TrajectoryRecorder(RunHooks):
         self.total_cost += cost
         self.write(
             "llm_response",
+            agent=getattr(agent, "name", None),
             model=self.model_name,
             output=[item.model_dump(exclude_none=True) for item in response.output],
             input_tokens=usage.input_tokens,

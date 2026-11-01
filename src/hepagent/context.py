@@ -7,7 +7,9 @@ sent; the run's own history (and the `--trajectory` record) stays complete.
    outputs older than the last `KEEP_OUTPUTS` become a one-line placeholder (as in
    SWE-agent). Masking from the start made a strong model re-read its own files.
 2. If the estimate is still over `max_tokens`, the oldest items after the task prompt
-   are dropped, never splitting a tool call from its output.
+   are dropped down to `RESET_FRACTION` of it (a context reset: the agent continues
+   from its STATE.md, which the status message carries), never splitting a tool call
+   from its output.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from agents.run import CallModelData, ModelInputData
 
 KEEP_OUTPUTS = 10
 MASK_FRACTION = 0.6
+RESET_FRACTION = 0.5
 MASK_ABOVE_CHARS = 300
 # shortcut: crude chars-per-token estimate, low on purpose; use a tokenizer if it misjudges
 CHARS_PER_TOKEN = 3
@@ -44,9 +47,13 @@ def trim(items: list, instructions: str | None, max_tokens: int) -> list:
                 "output": f"[old output elided ({len(text)} chars); rerun the command if needed]",
             }
 
-    # Keep items[0] (the task prompt); cut a prefix of the rest until it fits.
+    # Keep items[0] (the task prompt); cut a prefix of the rest, deep enough that the
+    # next resets are many calls away.
     cut = 1
-    while cut < len(items) - 1 and _tokens(items[:1] + items[cut:], instructions) > max_tokens:
+    target = max_tokens
+    if _tokens(items, instructions) > max_tokens:
+        target = RESET_FRACTION * max_tokens
+    while cut < len(items) - 1 and _tokens(items[:1] + items[cut:], instructions) > target:
         cut += 1
     # Outputs whose call was cut would be rejected by the API.
     while cut < len(items) and _type(items[cut]) == "function_call_output":
@@ -56,7 +63,7 @@ def trim(items: list, instructions: str | None, max_tokens: int) -> list:
     note = {
         "role": "user",
         "content": f"[{cut - 1} earlier conversation items were dropped to fit the context "
-        "window. Rely on your notes and files for anything from before.]",
+        "window. Continue from your STATE.md and files for anything from before.]",
     }
     return items[:1] + [note] + items[cut:]
 

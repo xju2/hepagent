@@ -29,6 +29,7 @@ from hepagent.helpers import (
     get_env_var,
     get_hepagent_home,
 )
+from hepagent.longrun import LongRun, make_subagent_runner
 from hepagent.model_providers import (
     get_model_provider_settings,
     get_supported_model_providers,
@@ -284,15 +285,89 @@ async def run_agent_task(
     if recorder:
         recorder.write("user", content=task_prompt)
 
-    def status():
+    def budget(until: float | None, total: float | None) -> str | None:
         return budget_status(
-            deadline - monotonic() if deadline else None,
-            time_budget,
+            until - monotonic() if until else None,
+            total,
             recorder.total_cost if recorder else 0.0,
             recorder.max_cost if recorder else None,
         )
 
+    longrun = LongRun(deadline, task_prompt) if time_budget else None
+    if longrun:
+        longrun.approve = _approve_with(tool_wrapper)
+        base_agent = current_agent
+
+        def sub_filter(sub_deadline: float, name: str):
+            def sub_status():
+                span = sub_deadline - (deadline - time_budget)
+                parts = [budget(sub_deadline, span), longrun.status_text(f"{name}/")]
+                return "\n".join(p for p in parts if p)
+
+            return input_filter(max_context_tokens, sub_status)
+
+        longrun.run_subagent = make_subagent_runner(
+            base_agent,
+            longrun,
+            context=context,
+            max_turns=max_turns,
+            hooks=recorder,
+            input_filter_factory=sub_filter,
+        )
+        current_agent = base_agent.clone(tools=[*base_agent.tools, *longrun.tools()])
+
+    def status():
+        parts = [budget(deadline, time_budget)]
+        if longrun:
+            parts.append(longrun.status(1 - (deadline - monotonic()) / time_budget))
+        return "\n\n".join(p for p in parts if p) or None
+
     run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens, status))
+    keeper = asyncio.create_task(longrun.keeper_loop()) if longrun else None
+    try:
+        return await _run_loop(
+            current_agent=current_agent,
+            turn_input=turn_input,
+            context=context,
+            max_turns=max_turns,
+            session=session,
+            recorder=recorder,
+            run_config=run_config,
+            tool_wrapper=tool_wrapper,
+            deadline=deadline,
+            time_budget=time_budget,
+            max_command_proposals=max_command_proposals,
+        )
+    finally:
+        if keeper:
+            keeper.cancel()
+            await asyncio.to_thread(longrun.check_outputs)  # leave the best versions in place
+            for sub in longrun.subagents.values():
+                sub.task.cancel()
+
+
+def _approve_with(tool_wrapper: TerminalRunToolWrapper):
+    async def approve(*, cmd: str, cwd: str = "", thought: str = "") -> bool:
+        tool_wrapper.render_command_proposal(cmd=cmd, cwd=cwd, thought=thought)
+        return await tool_wrapper.approve_command_async()
+
+    return approve
+
+
+async def _run_loop(
+    *,
+    current_agent,
+    turn_input,
+    context,
+    max_turns,
+    session,
+    recorder,
+    run_config,
+    tool_wrapper,
+    deadline,
+    time_budget,
+    max_command_proposals,
+) -> str:
     proposals = 0
     while True:
         try:
