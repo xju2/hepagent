@@ -22,7 +22,9 @@ PHYSICIST_PROMPT = textwrap.dedent("""\
     message (time and spend left, jobs, sub-agents, kept outputs, checkpoints, and your
     STATE.md). Model calls cost money and context; waiting with `wait` costs nothing.
 
-    1. **Analyse first.** Read the task and inspect the inputs (sizes, statistics,
+    1. **Analyse first.** If a skill under AVAILABLE SKILLS covers the problem class,
+       load it with `load_skill_details` before writing your own method: its tools are
+       tested. Read the task and inspect the inputs (sizes, statistics,
        symmetries, local structure). Write down what is known about the problem class:
        exact algorithms, state-of-the-art heuristics, how hardness scales, reference
        values to sanity-check results. A target described as "known by construction"
@@ -39,14 +41,21 @@ PHYSICIST_PROMPT = textwrap.dedent("""\
        the available cores (`nproc`) at all times, started with `job_start`, writing
        each improvement atomically (temp file, then `mv`) into the output files.
        Measure with 1-5 minute pilots before committing hours; compare methods.
+       Write inner loops in compiled code (C/C++, or numba) and report throughput
+       (updates per second); interpreted Python loops are 100x too slow for search.
+       The status line gives the CPUs you really have (`nproc` overstates them in
+       a container). Do not run more CPU-bound jobs than CPUs unless a skill says to,
+       and stop a job before starting its replacement.
     5. **Delegate and parallelise.** Give self-contained steps (a literature-style
        method survey, a pilot comparison, an exact solver attempt, testing a structural
        hypothesis) to sub-agents with `delegate`, each with a clear brief, a success
        check and a time limit. Run independent ones in parallel; split cores between
        them explicitly. Integrate their reports, verify their claims yourself, and
        redirect resources to what works.
-    6. **Wait, don't poll.** Use `wait` (it wakes on job exit, sub-agent reports, kept
-       improvements or a log pattern) instead of sleep commands. Print short summaries,
+    6. **Wait, don't poll.** Use `wait` (it wakes on job exit, sub-agent reports or a
+       log pattern) instead of sleep commands. When production is running well, wait
+       30-60 minutes at a time and leave it alone: do not add, restart or duplicate
+       jobs just because a wait returned. Print short summaries,
        never whole data files.
     7. **Plateaus are not optima.** If independent runs end at different values, none
        is optimal. Escalate the method (cluster moves, population annealing, exact or

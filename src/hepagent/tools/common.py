@@ -92,6 +92,9 @@ def load_skill_details(ctx: RunContextWrapper[AgentContext], skill_name: str) ->
         # AVAILABLE RESOURCE MANUALS
         (Use 'read_resource("{skill_name}", "resource_name")' to read these)
         {resource_list}
+
+        # SKILL FILES
+        Scripts and sources that ship with this skill are in: {skill_dir}
     """).strip()
 
     return f"Context updated: Now using the '{skill_name}' skill set.\n\n" + instruction_content

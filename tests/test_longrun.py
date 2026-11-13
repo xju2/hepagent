@@ -56,6 +56,12 @@ def test_keeper_snapshots_improvements_and_restores_worse_file(tmp_path):
     assert out.read_text() == "3\n"
     assert lr.improvements == 2
 
+    # Registering the same file again keeps the best so far.
+    out.write_text("7\n")
+    cmd = "python3 -c 'import sys; print(float(open(sys.argv[1]).read()))'"
+    assert "restored best 3" in lr.keep(str(out), cmd)
+    assert out.read_text() == "3\n"
+
 
 def test_checkpoints_and_state_in_status(tmp_path):
     lr = _lr(tmp_path)
@@ -117,3 +123,30 @@ _real_sleep = asyncio.sleep
 
 async def _fast_sleep(seconds):
     await _real_sleep(min(seconds, 0.05))
+
+
+def test_job_start_reports_cpus_and_refuses_oversubscription(tmp_path):
+    lr = _lr(tmp_path)
+    lr.cpus = 1
+    assert "1 jobs now run on 1 CPUs" in lr.start_job("a", "sleep 30")
+    assert "2 jobs now run on 1 CPUs" in lr.start_job("b", "sleep 30")
+    assert "Refused: 2 jobs already run on 1 CPUs" in lr.start_job("c", "sleep 30")
+    assert "CPUs available: 1" in lr.status_text()
+    lr.stop("a")
+    lr.jobs["a"].proc.wait(timeout=5)
+    assert "Started job 'c'" in lr.start_job("c", "true")
+    lr.stop("b")
+
+
+def test_available_cpus_is_positive_and_within_affinity():
+    assert 1 <= longrun_module.available_cpus() <= len(longrun_module.os.sched_getaffinity(0))
+
+
+def test_stopping_a_long_running_job_needs_force(tmp_path):
+    lr = LongRun(None, "t", tmp_path)
+    lr.start_job("j", "sleep 60")
+    lr.jobs["j"].started -= 3600  # pretend it has run for an hour
+    assert "NOT stopped" in lr.stop("j")
+    assert lr.jobs["j"].proc.poll() is None
+    assert "Stopped" in lr.stop("j", force=True)
+    lr.jobs["j"].proc.wait(timeout=10)

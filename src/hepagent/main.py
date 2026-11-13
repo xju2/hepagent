@@ -8,7 +8,8 @@ import click
 import typer
 from typer.core import TyperGroup
 
-from agents import Agent, RunConfig, Runner, SQLiteSession, function_tool
+from agents import Agent, RunConfig, Runner, SQLiteSession
+from agents.exceptions import ModelBehaviorError
 from agents.run import DEFAULT_MAX_TURNS
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
 from hepagent.agents.cli_repl import (
@@ -29,7 +30,7 @@ from hepagent.helpers import (
     get_env_var,
     get_hepagent_home,
 )
-from hepagent.longrun import LongRun, make_subagent_runner
+from hepagent.longrun import LongRun, harness_tool, make_subagent_runner
 from hepagent.model_providers import (
     get_model_provider_settings,
     get_supported_model_providers,
@@ -227,7 +228,7 @@ class TerminalRunToolWrapper:
         return result
 
     def _create_bash_tool(self):
-        @function_tool
+        @harness_tool
         async def execute_bash_command_with_terminal_confirmation(
             cmd: str, cwd: str = "", thought: str = ""
         ) -> dict:
@@ -237,7 +238,7 @@ class TerminalRunToolWrapper:
         return execute_bash_command_with_terminal_confirmation
 
     def _create_ask_user_tool(self):
-        @function_tool
+        @harness_tool
         async def ask_user_for_info(prompt: str, thought: str = "") -> str:
             """Collect missing task information from the terminal."""
             if thought:
@@ -354,6 +355,25 @@ def _approve_with(tool_wrapper: TerminalRunToolWrapper):
     return approve
 
 
+MAX_MALFORMED_RESPONSES = 50
+
+
+def _resume_input(exc, turn_input, feedback: str, session):
+    """Input for a fresh `Runner.run` after `exc` aborted one: history so far + feedback."""
+    if session is not None:  # the session already holds the history
+        return feedback
+    items = [{"role": "user", "content": turn_input}] if isinstance(turn_input, str) else []
+    items = items or list(turn_input)
+    if exc.run_data:
+        new = [item.to_input_item() for item in exc.run_data.new_items]
+        answered = {i.get("call_id") for i in new if i.get("type") == "function_call_output"}
+        # A call without an output would be rejected by the API.
+        items += [
+            i for i in new if i.get("type") != "function_call" or i.get("call_id") in answered
+        ]
+    return [*items, {"role": "user", "content": feedback}]
+
+
 async def _run_loop(
     *,
     current_agent,
@@ -369,6 +389,7 @@ async def _run_loop(
     max_command_proposals,
 ) -> str:
     proposals = 0
+    malformed = 0
     while True:
         try:
             result = await Runner.run(
@@ -380,6 +401,20 @@ async def _run_loop(
                 hooks=recorder,
                 run_config=run_config,
             )
+        except ModelBehaviorError as exc:
+            # A hallucinated tool name or broken call must not end hours of work:
+            # resume from the items produced so far and tell the model what went wrong.
+            malformed += 1
+            if malformed > MAX_MALFORMED_RESPONSES:
+                raise
+            feedback = (
+                f"Your last response was rejected: {exc}. Call only the tools you were "
+                "given, by their exact names, with valid JSON arguments."
+            )
+            if recorder:
+                recorder.write("user", content=feedback)
+            turn_input = _resume_input(exc, turn_input, feedback, session)
+            continue
         except CostLimitReached as exc:
             message = f"Cost limit reached: {exc}. Stopped calling the model."
             typer.echo(message)

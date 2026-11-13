@@ -1,7 +1,18 @@
+import asyncio
+import json
+import sys
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any
 
-from openai import AsyncOpenAI, OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from agents import OpenAIChatCompletionsModel
 from hepagent.helpers import get_env_var, load_providers_config
@@ -88,6 +99,63 @@ def parse_model_spec(
     return provider, model_name
 
 
+def _repair_json(text: str) -> str:
+    """Drop up to 3 stray characters where the parser chokes (weak models emit `"]}`)."""
+    for _ in range(3):
+        try:
+            json.loads(text)
+            break
+        except json.JSONDecodeError as exc:
+            text = text[: exc.pos] + text[exc.pos + 1 :]
+    return text
+
+
+def sanitize_tool_calls(output: list) -> None:
+    """Fix tool calls a weak model garbles, which otherwise abort the run or waste the turn:
+    chat-template tokens glued to the tool name and near-valid JSON arguments."""
+    for item in output:
+        if getattr(item, "type", None) != "function_call":
+            continue
+        item.name = item.name.split("<|")[0].strip()
+        if item.arguments:
+            repaired = _repair_json(item.arguments)
+            try:
+                json.loads(repaired)
+                item.arguments = repaired
+            except json.JSONDecodeError:
+                pass  # unrepairable: the SDK reports the bad arguments to the model
+
+
+RETRY_FOR_S = 1800
+RETRY_MAX_DELAY_S = 60
+
+
+class RetryingChatCompletionsModel(OpenAIChatCompletionsModel):
+    """Ride out endpoint outages: one 500 must not end a run with hours of work behind it."""
+
+    async def get_response(self, *args, **kwargs):
+        start, delay = monotonic(), 5.0
+        while True:
+            try:
+                response = await super().get_response(*args, **kwargs)
+                sanitize_tool_calls(response.output)
+                return response
+            except (
+                APIConnectionError,
+                APITimeoutError,
+                InternalServerError,
+                RateLimitError,
+            ) as exc:
+                if monotonic() - start + delay > RETRY_FOR_S:
+                    raise
+                print(
+                    f"[model call failed: {type(exc).__name__}; retrying in {delay:.0f} s]",
+                    file=sys.stderr,
+                )
+                await asyncio.sleep(delay)
+                delay = min(2 * delay, RETRY_MAX_DELAY_S)
+
+
 def get_model_provider(
     model_provider: str = "cborg",
     model_name: str | None = None,
@@ -103,7 +171,7 @@ def get_model_provider(
     if model_name is None:
         model_name = settings.default_model
     client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key)
-    return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
+    return RetryingChatCompletionsModel(model=model_name, openai_client=client)
 
 
 def list_available_models(

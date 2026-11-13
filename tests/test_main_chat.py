@@ -557,3 +557,38 @@ def test_run_agent_task_with_budget_adds_longrun_tools_and_status(monkeypatch, t
     assert "Time left: 10 s of 110 s." in seen["status"]
     assert "# RUN STATE" in seen["status"] and "step 1: done" in seen["status"]
     assert "CHECKPOINT" in seen["status"]
+
+
+def test_run_agent_task_recovers_from_malformed_model_response(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    inputs = []
+
+    class FakeResult:
+        final_output = "All done."
+        last_agent = _DummyAgent()
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, **kwargs):
+            inputs.append(input)
+            if len(inputs) == 1:
+                raise main_module.ModelBehaviorError("Tool bash<|x|> not found")
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+        )
+    )
+
+    assert output == "All done."
+    assert inputs[1][0] == {"role": "user", "content": "start"}
+    assert "Tool bash<|x|> not found" in inputs[1][-1]["content"]

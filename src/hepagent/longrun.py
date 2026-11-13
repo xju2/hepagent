@@ -33,6 +33,8 @@ STATE_MAX_CHARS = 3000
 KEEP_EVERY_S = 60
 SCORE_TIMEOUT_S = 120
 DEADLINE_MARGIN_S = 300
+MAX_JOBS_PER_CPU = 2
+PROTECT_JOB_AFTER_S = 1800
 
 SUBAGENT_PROMPT = """You are sub-agent "{name}", working for an orchestrator agent.
 
@@ -46,6 +48,26 @@ Work in your own directory {workdir} unless the assignment says otherwise, and n
 overwrite the final deliverables unless told to. You have {minutes:.0f} minutes. Verify
 what you claim. Finish with a concise report: what you did, results with numbers,
 file paths, and what remains open."""
+
+
+def tool_error(ctx, error: Exception) -> str:
+    """Tell the model why a tool call failed; newer SDK defaults hide the reason."""
+    return f"The tool call failed: {type(error).__name__}: {error}. Fix the call and try again."
+
+
+harness_tool = function_tool(failure_error_function=tool_error)
+
+
+def available_cpus() -> int:
+    """CPUs this process may really use: `nproc` ignores a container's cgroup quota."""
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            cpus = min(cpus, max(1, round(int(quota) / int(period))))
+    except (OSError, ValueError):
+        pass
+    return cpus or 1
 
 
 def _fmt(seconds: float) -> str:
@@ -105,6 +127,7 @@ class LongRun:
         self.outputs: dict[str, Output] = {}
         self.subagents: dict[str, SubAgent] = {}
         self.improvements = 0
+        self.cpus = available_cpus()
         self._lock = threading.Lock()
         # Set by `tools()`: how to approve commands and how to run a sub-agent.
         self.approve = None
@@ -115,6 +138,12 @@ class LongRun:
         job = self.jobs.get(name)
         if job and job.proc.poll() is None:
             return f"Job {name!r} is still running; stop it or pick another name."
+        running = sum(j.proc.poll() is None for j in self.jobs.values())
+        if running >= MAX_JOBS_PER_CPU * self.cpus:
+            return (
+                f"Refused: {running} jobs already run on {self.cpus} CPUs, so each gets "
+                f"{self.cpus / running:.2f} of a core. Stop a job before starting another."
+            )
         log = self.dir / "jobs" / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.log"
         with open(log, "ab") as fh:
             proc = subprocess.Popen(
@@ -126,15 +155,29 @@ class LongRun:
                 start_new_session=True,
             )
         self.jobs[name] = Job(proc, cmd, log, monotonic())
-        return f"Started job {name!r} (pid {proc.pid}); output goes to {log}."
+        return (
+            f"Started job {name!r} (pid {proc.pid}); output goes to {log}. "
+            f"{running + 1} jobs now run on {self.cpus} CPUs."
+        )
 
-    def stop(self, name: str) -> str:
+    def stop(self, name: str, force: bool = False) -> str:
         if name in self.subagents:
             self.subagents[name].task.cancel()
             return f"Cancelled sub-agent {name!r}."
         job = self.jobs.get(name)
         if job is None:
             return f"No job or sub-agent named {name!r}."
+        ran = monotonic() - job.started
+        if job.proc.poll() is None and ran > PROTECT_JOB_AFTER_S and not force:
+            # Models kill hours-old searches on a plateau to free a CPU; make that a decision.
+            return (
+                f"NOT stopped: job {name!r} has run {_fmt(ran)} and its in-memory state "
+                "would be lost; a restart begins again from scratch. A search that has "
+                "stopped improving for a while is normal, not a reason to stop it. For a "
+                "side experiment, run it alongside with `nice` instead. If the job is "
+                "truly useless (wrong, or its result is certified), call job_stop again "
+                "with force=true."
+            )
         if job.proc.poll() is None:
             try:
                 os.killpg(job.proc.pid, signal.SIGTERM)
@@ -146,7 +189,12 @@ class LongRun:
     def keep(self, path: str, score_cmd: str, higher_is_better: bool = False) -> str:
         p = Path(path).resolve()
         snap = self.dir / "best" / re.sub(r"[^A-Za-z0-9_.-]", "_", str(p))
-        self.outputs[str(p)] = Output(p, score_cmd, higher_is_better, snap)
+        with self._lock:  # check_outputs iterates the registry in another thread
+            old = self.outputs.get(str(p))
+            if old and old.higher_is_better == higher_is_better:
+                old.score_cmd = score_cmd  # re-registering must not forget the best so far
+            else:
+                self.outputs[str(p)] = Output(p, score_cmd, higher_is_better, snap)
         return "\n".join(self.check_outputs()) or f"Registered {p}; not scorable yet."
 
     def _score(self, out: Output, path: Path) -> float | None:
@@ -181,6 +229,8 @@ class LongRun:
                     notes.append(f"{out.path}: new best {score:g} (was {out.best}).")
                     out.best = score
                     self.improvements += 1
+                elif score == out.best:
+                    pass  # unchanged
                 elif out.best is not None and out.snapshot.exists():
                     tmp = out.path.with_name(f".{out.path.name}.restore")
                     shutil.copyfile(out.snapshot, tmp)
@@ -231,7 +281,8 @@ class LongRun:
     # ----- reporting -----
     def status_text(self, prefix: str = "") -> str:
         now = monotonic()
-        lines = []
+        running = sum(j.proc.poll() is None for j in self.jobs.values())
+        lines = [f"CPUs available: {self.cpus} (trust this, not nproc); jobs running: {running}."]
         for name, job in self.jobs.items():
             if not name.startswith(prefix):
                 continue
@@ -247,7 +298,7 @@ class LongRun:
                 lines.append(f"sub-agent {name}: done. Report:\n{sub.result[:3000]}")
         for out in self.outputs.values():
             lines.append(f"kept {out.path}: best {out.best}, current {out.current}")
-        return "\n".join(lines) or "No jobs, sub-agents or kept outputs."
+        return "\n".join(lines)
 
     def checkpoints(self, time_frac: float) -> list[str]:
         """Phase checkpoints the harness enforces by reminding every call."""
@@ -292,7 +343,6 @@ class LongRun:
         if self.deadline:
             end = min(end, self.deadline - DEADLINE_MARGIN_S)
         exited = {n for n, j in self.jobs.items() if j.proc.poll() is not None}
-        improvements = self.improvements
         offsets = {n: j.log.stat().st_size for n, j in self.jobs.items() if j.log.exists()}
         pattern = re.compile(log_pattern) if log_pattern else None
         reason = "time is up"
@@ -307,9 +357,6 @@ class LongRun:
                 for n in subs:
                     self.subagents[n].seen = True
                 reason = f"finished: {', '.join(done + subs)}"
-                break
-            if self.improvements > improvements:
-                reason = "a kept output improved"
                 break
             if pattern and (hit := self._log_match(pattern, offsets, job)):
                 reason = f"log match in {hit}"
@@ -340,7 +387,7 @@ class LongRun:
         prefixed by its own name."""
         lr = self
 
-        @function_tool
+        @harness_tool
         async def job_start(name: str, cmd: str, cwd: str = "", thought: str = "") -> str:
             """Start a long-running shell command as a tracked background job.
 
@@ -351,27 +398,31 @@ class LongRun:
                 return "Rejected by the user."
             return lr.start_job(prefix + name, cmd, cwd)
 
-        @function_tool
+        @harness_tool
         def job_status() -> str:
             """Show every job and sub-agent (state, run time, last log lines) and kept outputs."""
             return lr.status_text(prefix)
 
-        @function_tool
-        def job_stop(name: str) -> str:
-            """Stop a background job (its whole process group) or cancel a sub-agent."""
-            return lr.stop(name if name in lr.subagents else prefix + name)
+        @harness_tool
+        def job_stop(name: str, force: bool = False) -> str:
+            """Stop a background job (its whole process group) or cancel a sub-agent.
 
-        @function_tool
+            A job that has run for more than 30 minutes is only stopped with force=true.
+            """
+            return lr.stop(name if name in lr.subagents else prefix + name, force)
+
+        @harness_tool
         async def wait(minutes: float, job: str = "", log_pattern: str = "") -> str:
             """Sleep without using the model until something happens, then report status.
 
             Wakes early when a job (or only `job`, if given) exits, a sub-agent finishes,
-            a kept output improves, or a new log line matches the regex `log_pattern`.
-            Waiting is free; prefer it over polling with sleep commands.
+            or a new log line matches the regex `log_pattern`. Improvements of kept
+            outputs do not wake it; they are in the status you get back.
+            Waiting is free; prefer long waits over polling with sleep commands.
             """
             return await lr.wait(minutes, prefix + job if job else "", log_pattern)
 
-        @function_tool
+        @harness_tool
         async def keep_best(path: str, score_cmd: str, higher_is_better: bool = False) -> str:
             """Guard a deliverable file: keep its best version and restore it if overwritten.
 
@@ -384,8 +435,8 @@ class LongRun:
         tools = [job_start, job_status, job_stop, wait, keep_best]
         if orchestrator:
 
-            @function_tool
-            def delegate(name: str, brief: str, minutes: float) -> str:
+            @harness_tool
+            async def delegate(name: str, brief: str, minutes: float) -> str:
                 """Start a sub-agent on a self-contained, verifiable sub-task; returns at once.
 
                 The sub-agent has the same tools (except delegate), its own conversation
