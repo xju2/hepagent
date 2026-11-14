@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import hepagent.main as main_module
+from agents.run import ModelInputData
 from agents.tool import ToolContext
 
 
@@ -237,7 +238,9 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None):
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
             calls.append(
                 {
                     "input": input,
@@ -250,7 +253,7 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
                 return FakeResult("THOUGHT: inspect\n```bash\necho hi\n```")
             return FakeResult("Done.")
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         executed.append({"cmd": cmd, "cwd": cwd})
         return {"output": "hi\n", "returncode": 0}
 
@@ -279,9 +282,10 @@ def test_run_agent_task_executes_text_bash_block_and_continues(monkeypatch):
         "max_turns": 3,
         "session": None,
     }
-    assert "The bash command proposed in your previous response has completed." in calls[1][
-        "input"
-    ][-1]["content"]
+    assert (
+        "The bash command proposed in your previous response has completed."
+        in calls[1]["input"][-1]["content"]
+    )
 
 
 def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
@@ -297,11 +301,13 @@ def test_run_agent_task_uses_separate_command_proposal_budget(monkeypatch):
 
     class FakeRunner:
         @staticmethod
-        async def run(agent, input, context=None, max_turns=None, session=None):
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
             calls.append(max_turns)
             return FakeResult()
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         executed.append(cmd)
         return {"output": "again\n", "returncode": 0}
 
@@ -430,3 +436,184 @@ def test_repl_command_rejects_chat_with_disable_session(monkeypatch):
     assert "Use either --chat or --disable-session, not both." in normalized_output
     assert chat_calls == []
     assert created_repls == []
+
+
+def test_run_agent_task_sends_early_final_answer_back_while_budget_remains(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    inputs = []
+    # start, then per run: deadline check, run timeout, answer; first with time left, then done
+    clock = iter([0.0] + [100.0] * 3 + [3000.0] * 3)
+
+    class FakeResult:
+        final_output = "All done."
+        last_agent = _DummyAgent()
+
+        def to_input_list(self):
+            return [{"role": "assistant", "content": self.final_output}]
+
+    class FakeRunner:
+        @staticmethod
+        async def run(
+            agent, input, context=None, max_turns=None, session=None, hooks=None, run_config=None
+        ):
+            inputs.append(input)
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            time_budget=3600,
+        )
+    )
+
+    assert output == "All done."
+    assert len(inputs) == 2
+    assert "You still have 3500 s of your 3600 s budget" in inputs[1][-1]["content"]
+
+
+def test_run_agent_task_idles_until_deadline_when_cost_limit_hit(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    sleeps = []
+    clock = iter([0.0, 0.0, 0.0, 1000.0])  # start, deadline check, run timeout, limit hit
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, **kwargs):
+            raise main_module.CostLimitReached("$5.00 spent (limit $5.00)")
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(main_module.asyncio, "sleep", fake_sleep)
+
+    recorder = main_module.TrajectoryRecorder(None, "m", max_cost=5)
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            recorder=recorder,
+            time_budget=3600,
+        )
+    )
+
+    assert output.startswith("Cost limit reached")
+    assert sleeps == [3600 - 300 - 1000]
+
+
+def test_run_agent_task_with_budget_adds_longrun_tools_and_status(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "STATE.md").write_text("step 1: done")
+    seen = {}
+    clock = iter([0.0] + [100.0] * 10)
+
+    class FakeResult:
+        final_output = "Done."
+        last_agent = _DummyAgent()
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, run_config=None, **kwargs):
+            seen["tools"] = [t.name for t in agent.tools]
+            data = SimpleNamespace(
+                model_data=ModelInputData(
+                    input=[{"role": "user", "content": "t"}], instructions="s"
+                )
+            )
+            seen["status"] = run_config.call_model_input_filter(data).input[-1]["content"]
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    monkeypatch.setattr(main_module, "monotonic", lambda: next(clock))
+    asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            time_budget=110,
+        )
+    )
+    assert {"job_start", "job_status", "job_stop", "wait", "keep_best", "delegate"} <= set(
+        seen["tools"]
+    )
+    assert "Time left: 10 s of 110 s." in seen["status"]
+    assert "# RUN STATE" in seen["status"] and "step 1: done" in seen["status"]
+    assert "CHECKPOINT" in seen["status"]
+
+
+def test_run_agent_task_recovers_from_malformed_model_response(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    inputs = []
+
+    class FakeResult:
+        final_output = "All done."
+        last_agent = _DummyAgent()
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, **kwargs):
+            inputs.append(input)
+            if len(inputs) == 1:
+                raise main_module.ModelBehaviorError("Tool bash<|x|> not found")
+            return FakeResult()
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+        )
+    )
+
+    assert output == "All done."
+    assert inputs[1][0] == {"role": "user", "content": "start"}
+    assert "Tool bash<|x|> not found" in inputs[1][-1]["content"]
+
+
+def test_run_agent_task_stops_a_run_at_the_time_budget(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    class FakeRunner:
+        @staticmethod
+        async def run(agent, input, **kwargs):
+            await asyncio.sleep(30)  # a run that keeps calling tools past the deadline
+
+    monkeypatch.setattr(main_module, "Runner", FakeRunner)
+    output = asyncio.run(
+        main_module.run_agent_task(
+            agent=_DummyAgent(),
+            task_prompt="start",
+            context=main_module.AgentContext(agent_name="physicist"),
+            max_turns=5,
+            session=None,
+            yolo=False,
+            non_interactive=True,
+            time_budget=0.2,
+        )
+    )
+    assert output.startswith("Time budget used up")

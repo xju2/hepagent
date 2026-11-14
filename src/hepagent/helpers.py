@@ -69,19 +69,27 @@ def get_repo_root() -> pathlib.Path:
     return current.parent  # Fallback
 
 
+def get_bundled_agents_dir() -> pathlib.Path:
+    """The registry shipped with the code: repo `.agents`, or the wheel's copy of its skills."""
+    repo_agents = get_repo_root() / ".agents"
+    if repo_agents.exists():
+        return repo_agents
+    return pathlib.Path(__file__).resolve().parent / "_agents"
+
+
 def get_agent_dir() -> pathlib.Path:
     """Returns the active agents directory.
 
     Preference order:
     1) ~/.hepagent/agents when present.
-    2) repo-root .agents (dev/source checkout fallback).
+    2) the bundled registry (repo-root .agents, or the skills shipped in the wheel).
     3) create ~/.hepagent/agents as a minimal fallback.
     """
     user_agents = get_hepagent_home() / "agents"
     if user_agents.exists():
         return user_agents
 
-    repo_agents = get_repo_root() / ".agents"
+    repo_agents = get_bundled_agents_dir()
     if repo_agents.exists():
         return repo_agents
 
@@ -146,7 +154,7 @@ def bootstrap_hepagent_home() -> None:
 
     # --- agents/ directory from repo root (dev install) ---
     agents_dest = home / "agents"
-    repo_agents = get_repo_root() / ".agents"
+    repo_agents = get_bundled_agents_dir()
     if not agents_dest.exists():
         if repo_agents.exists():
             # In a source/dev environment, copy the bundled .agents directory.

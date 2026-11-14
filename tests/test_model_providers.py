@@ -163,3 +163,51 @@ def test_get_model_provider_ollama_returns_model_object():
         mock_client_cls.return_value = MagicMock()
         model = get_model_provider(model_provider="ollama")
     assert isinstance(model, OpenAIChatCompletionsModel)
+
+
+def test_model_call_retries_transient_errors(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import httpx
+    from openai import APIConnectionError
+
+    from agents import OpenAIChatCompletionsModel
+    from hepagent import model_providers as mp
+
+    calls = []
+
+    async def flaky(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise APIConnectionError(request=httpx.Request("POST", "http://x"))
+        return SimpleNamespace(output=[])
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(OpenAIChatCompletionsModel, "get_response", flaky)
+    monkeypatch.setattr(mp.asyncio, "sleep", no_sleep)
+    model = mp.RetryingChatCompletionsModel(model="m", openai_client=object())
+    assert asyncio.run(model.get_response()).output == []
+    assert len(calls) == 3
+
+    calls.clear()
+    monkeypatch.setattr(mp, "RETRY_FOR_S", 0)
+    with pytest.raises(APIConnectionError):
+        asyncio.run(model.get_response())
+
+
+def test_sanitize_tool_calls_repairs_name_and_arguments():
+    from types import SimpleNamespace
+
+    from hepagent.model_providers import sanitize_tool_calls
+
+    call = SimpleNamespace(
+        type="function_call", name="run_bash<|channel|>commentary", arguments='{"cmd": "ls"]}'
+    )
+    hopeless = SimpleNamespace(type="function_call", name="run_bash", arguments="not json at all")
+    sanitize_tool_calls([call, hopeless, SimpleNamespace(type="message")])
+    assert call.name == "run_bash"
+    assert call.arguments == '{"cmd": "ls"}'
+    assert hopeless.arguments == "not json at all"

@@ -23,3 +23,8 @@ base_url = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 api_key_default = "ollama"
 default_model = "gemma4:e4b"
+
+[providers.nrp]
+base_url = "https://ellm.nrp-nautilus.io/v1"
+api_key_env = "NRP_API_KEY"
+default_model = "glm-5"

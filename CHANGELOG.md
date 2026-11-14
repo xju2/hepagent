@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+- **`physicist` agent** — `--agent physicist` is the scientist agent plus a computational-research playbook (wall-clock budgeting with a per-turn clock, checkpointed deliverables, background jobs, pilots before scaling, escalating past heuristic plateaus).
+- **`hepagent run --trajectory PATH`** — Appends every LLM response (with token counts and cost), tool result and the final output to a JSONL file, flushed per event so a run killed by an external timeout keeps its record.
+- **`hepagent run --command-timeout SEC`** — Kills a bash command after SEC seconds and returns the partial output with exit code 124. Only processes still attached to the command's output are killed; jobs it backgrounded with redirected output keep running.
+- **`hepagent run --time-budget SEC`** — A final answer given while more than 10% of the budget (and at least 10 minutes) remains is sent back to the agent with the time left.
+- **Context trimming in `hepagent run`** — Once a request passes 60% of `--max-context-tokens`, only the last 10 tool outputs stay verbatim (older ones become a one-line placeholder); if still over `--max-context-tokens` (default 90000), drops the oldest turns after the task prompt. The run's history and trajectory stay complete.
+- **Bash output capped by characters** — The word limit let a single long line (e.g. minified JSON) through whole; output is now also capped at 10 characters per allowed word.
+- **`hepagent run --max-cost USD`** — Stops calling the model once the priced spend reaches USD; with `--time-budget` the run then idles until 5 minutes before the deadline so background jobs keep improving their checkpointed outputs. CBORG Claude and `lbl/cborg-coder` prices added to `token_costs`.
+- **Budget status in `hepagent run`** — With `--time-budget` or `--max-cost`, every model call ends with a short status (time left, model spend); past 75% of either it orders a wrap-up: launch the best long-running method in the background, checkpointing into the final outputs.
+- **Long-run harness for `hepagent run --time-budget`** (`hepagent.longrun`) — Adds tools `job_start`/`job_status`/`job_stop` (tracked background jobs with logs), `wait` (sleeps without model calls until a job exits, a sub-agent reports, a kept output improves or a log line matches), `keep_best` (scores a deliverable every minute, snapshots the best version and restores it over a worse or broken file) and `delegate` (parallel sub-agents with their own brief, directory, conversation and time limit). Every call's status carries jobs, sub-agents, kept scores, phase checkpoints (valid guarded outputs by 15% of the time, something running from 30%) and the agent's `STATE.md`; on context overflow the oldest turns are cut to half the limit and the agent continues from `STATE.md`.
+- **Physicist agent orchestrates** — Its playbook now covers analysing the task, planning verifiable steps in `STATE.md`, guarding deliverables with `keep_best`, keeping production jobs running, delegating parallel sub-tasks and waiting instead of polling.
+- **Bash tool runs bash** — Commands ran under `/bin/sh` (dash on Debian/Ubuntu), so bash syntax such as `{0..5}` silently misbehaved.
+
 ## [v0.5.0] – 2026-10-29
 
 ### Overview

@@ -6,6 +6,8 @@ https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/agents/de
 from __future__ import annotations
 
 import os
+import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -24,33 +26,79 @@ class LocalEnvironmentConfig(BaseModel):
 
 def _truncate_output(output: str, limit: int) -> str:
     words = output.split()
-    if len(words) <= limit:
-        return output
-    omitted = len(words) - limit
-    return " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
+    if len(words) > limit:
+        omitted = len(words) - limit
+        output = " ".join(words[:limit]) + f"\n\n[output truncated: omitted {omitted} words]"
+    # A single long line (e.g. minified JSON) is one "word"; cap characters too.
+    max_chars = limit * 10
+    if len(output) > max_chars:
+        omitted = len(output) - max_chars
+        output = output[:max_chars] + f"\n\n[output truncated: omitted {omitted} characters]"
+    return output
 
 
-def execute_bash_command(cmd: str, cwd: str = "") -> dict:
-    """Execute a bash command and return output + return code."""
+def execute_bash_command(cmd: str, cwd: str = "", timeout: float | None = None) -> dict:
+    """Execute a bash command and return output + return code.
+
+    On timeout every process still holding the output pipe is killed, i.e. the
+    foreground command and anything it started without redirecting its output, and
+    the partial output is returned with code 124. Jobs the command put in the
+    background with their output redirected (`cmd > log 2>&1 &`) keep running.
+    """
     config = LocalEnvironmentConfig()
     cwd = cwd or config.cwd or str(Path.cwd())
+    timeout = timeout or config.timeout
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         shell=True,
+        executable=shutil.which("bash") or None,  # the tool promises bash; /bin/sh may be dash
         text=True,
         cwd=cwd,
         env=os.environ | config.env,
-        timeout=config.timeout,
         encoding="utf-8",
         errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired:
+        _kill_pipe_holders(proc)
+        output, _ = proc.communicate()
+        returncode = 124
+        output += (
+            f"\n[command killed after {timeout:g} s timeout. Run long jobs in the background "
+            "(`setsid nohup CMD > LOG 2>&1 &`) and poll LOG instead.]"
+        )
     return {
-        "output": _truncate_output(result.stdout, env_config.output_word_limit),
-        "returncode": result.returncode,
+        "output": _truncate_output(output, env_config.output_word_limit),
+        "returncode": returncode,
     }
+
+
+def _kill_pipe_holders(proc: subprocess.Popen) -> None:
+    """Kill the processes in `proc`'s group that still hold its stdout pipe."""
+    pipe = f"pipe:[{os.fstat(proc.stdout.fileno()).st_ino}]"
+    holders = []
+    for pid_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            if os.getpgid(int(pid_dir.name)) != proc.pid:
+                continue
+            if any(os.readlink(fd) == pipe for fd in (pid_dir / "fd").iterdir()):
+                holders.append(int(pid_dir.name))
+        except OSError:
+            continue  # exited meanwhile, or not ours to inspect
+    if not holders:  # shortcut: no /proc (e.g. macOS), fall back to the whole group
+        os.killpg(proc.pid, signal.SIGKILL)
+        return
+    for pid in holders:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 TOOL_CANCEL_MESSAGE = """Tool calling is cancelled by user.

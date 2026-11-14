@@ -58,6 +58,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/hepagent"]
 
+# Skills ship with the wheel so installed agents have them (see helpers.get_bundled_agents_dir).
+[tool.hatch.build.targets.wheel.force-include]
+".agents/skills" = "hepagent/_agents/skills"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

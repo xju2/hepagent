@@ -400,7 +400,7 @@ def test_bash_tool_executes_command_in_worker_thread(monkeypatch):
     rendered = []
     command_result = {"output": "done", "returncode": 0}
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         calls.append(("execute", cmd, cwd))
         return command_result
 
@@ -1000,7 +1000,7 @@ def test_run_turn_executes_text_emitted_bash_block_and_continues_session(monkeyp
             text = command_text if len(runner_calls) == 1 else final_text
             return FakeResult(agent, input, text)
 
-    def fake_execute_bash_command(cmd, cwd=""):
+    def fake_execute_bash_command(cmd, cwd="", timeout=None):
         executed.append({"cmd": cmd, "cwd": cwd})
         return {"output": "hi\n", "returncode": 0}
 

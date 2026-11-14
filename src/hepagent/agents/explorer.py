@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from agents import Agent, Runner, function_tool
 from hepagent.model_providers import get_model_provider
+from hepagent.trajectory import CostLimitReached, current_recorder
 
 
 @dataclass(frozen=True)
@@ -125,7 +126,9 @@ async def _run_specialist(
         model=get_model_provider(model_provider=model_provider, model_name=model_name),
         tools=[],
     )
-    result = await Runner.run(agent, _specialist_prompt(question, interests, specialist))
+    result = await Runner.run(
+        agent, _specialist_prompt(question, interests, specialist), hooks=current_recorder.get()
+    )
     return specialist.name, str(result.final_output)
 
 
@@ -156,6 +159,8 @@ async def run_specialist_panel(
     )
     results: list[tuple[str, str]] = []
     for specialist_name, result in zip(specialist_names, gathered_results, strict=True):
+        if isinstance(result, CostLimitReached):
+            raise result  # a spending cap ends the run, not just this specialist
         if isinstance(result, Exception):
             results.append(
                 (

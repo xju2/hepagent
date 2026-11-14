@@ -94,6 +94,9 @@ hepagent run --agent "scientist" --yolo "your task here"
 Fully automated mode for terminal-bench style evaluation:
 ```bash
 hepagent run --agent "scientist" --non-interactive "your task here"
+# Benchmark-style run: budget-aware agent, per-command cap, JSONL trajectory with token costs
+hepagent run --agent physicist --non-interactive --max-turn 1000 --command-timeout 1800 \
+  --trajectory trajectory.jsonl "your task here"
 ```
 
 `hepagent run` is the non-interactive task interface: it accepts one task prompt, executes

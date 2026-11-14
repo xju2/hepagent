@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from time import monotonic
 
 import click
 import typer
 from typer.core import TyperGroup
 
-from agents import Agent, Runner, SQLiteSession, function_tool
+from agents import Agent, RunConfig, Runner, SQLiteSession
+from agents.exceptions import ModelBehaviorError
 from agents.run import DEFAULT_MAX_TURNS
+from agents.tool import FunctionTool
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
 from hepagent.agents.cli_repl import (
     CliRepl,
@@ -17,15 +20,18 @@ from hepagent.agents.cli_repl import (
 )
 from hepagent.agents.common import AgentContext
 from hepagent.agents.explorer import create as create_explorer_agent
+from hepagent.agents.physicist import create as create_physicist_agent
 from hepagent.agents.role import create as create_role_agent, create_role_cfg
 from hepagent.agents.skilled import create as create_skilled_agent
 from hepagent.config.env import env_config
+from hepagent.context import budget_status, input_filter
 from hepagent.helpers import (
     bootstrap_hepagent_home,
     enable_mlflow_for_tracing,
     get_env_var,
     get_hepagent_home,
 )
+from hepagent.longrun import LongRun, harness_tool, make_subagent_runner
 from hepagent.model_providers import (
     get_model_provider_settings,
     get_supported_model_providers,
@@ -33,6 +39,8 @@ from hepagent.model_providers import (
     parse_model_spec,
 )
 from hepagent.plan.templates import DEFAULT_TEMPLATE
+from hepagent.trajectory import CostLimitReached, TrajectoryRecorder, current_recorder
+from hepagent.web.tools import LONG_BLOCKING_TOOL_NAMES, offload_blocking_tool
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -80,6 +88,7 @@ def get_available_agents() -> dict[str, str]:
     agents = {
         "explorer": "Research-direction explorer with parallel specialist sub-agents.",
         "scientist": "Skilled Agent",
+        "physicist": "Skilled Agent with a budgeted computational-research playbook.",
     }
     for role_name, role_cfg in _available_role_agents().items():
         agents[role_name] = role_cfg.description
@@ -96,6 +105,8 @@ def create_app_agent(
     normalized = agent_name.lower()
     if normalized == "explorer":
         return create_explorer_agent(model_provider=model_provider, model_name=model_name)
+    if normalized == "physicist":
+        return create_physicist_agent(model_provider=model_provider, model_name=model_name)
     if normalized in _available_role_agents():
         return create_role_agent(
             role_name=normalized,
@@ -134,9 +145,16 @@ def build_runtime(
 class TerminalRunToolWrapper:
     """Wrap interactive tools for the headless `hepagent run` command."""
 
-    def __init__(self, *, yolo: bool = False, non_interactive: bool = False):
+    def __init__(
+        self,
+        *,
+        yolo: bool = False,
+        non_interactive: bool = False,
+        command_timeout: float | None = None,
+    ):
         self.yolo = yolo
         self.non_interactive = non_interactive
+        self.command_timeout = command_timeout
         self.last_rejection_reason: str | None = None
 
     def wrap_tools(self, tools: list[object]) -> list[object]:
@@ -147,6 +165,9 @@ class TerminalRunToolWrapper:
                 wrapped.append(self._create_bash_tool())
             elif "ask_user_for_info" in name:
                 wrapped.append(self._create_ask_user_tool())
+            elif name in LONG_BLOCKING_TOOL_NAMES and isinstance(tool, FunctionTool):
+                # Sync waits would stall delegates, the keeper and timeouts on the shared loop.
+                wrapped.append(offload_blocking_tool(tool))
             else:
                 wrapped.append(tool)
         return wrapped
@@ -205,12 +226,14 @@ class TerminalRunToolWrapper:
             reason = self.last_rejection_reason or "No reason provided"
             return {"output": TOOL_CANCEL_MESSAGE.format(reason=reason), "returncode": 1}
 
-        result = await asyncio.to_thread(execute_bash_command, cmd, cwd=cwd)
+        result = await asyncio.to_thread(
+            execute_bash_command, cmd, cwd=cwd, timeout=self.command_timeout
+        )
         self.render_tool_result(result)
         return result
 
     def _create_bash_tool(self):
-        @function_tool
+        @harness_tool
         async def execute_bash_command_with_terminal_confirmation(
             cmd: str, cwd: str = "", thought: str = ""
         ) -> dict:
@@ -220,7 +243,7 @@ class TerminalRunToolWrapper:
         return execute_bash_command_with_terminal_confirmation
 
     def _create_ask_user_tool(self):
-        @function_tool
+        @harness_tool
         async def ask_user_for_info(prompt: str, thought: str = "") -> str:
             """Collect missing task information from the terminal."""
             if thought:
@@ -244,30 +267,198 @@ async def run_agent_task(
     yolo: bool,
     non_interactive: bool = False,
     max_command_proposals: int = DEFAULT_MAX_COMMAND_PROPOSALS,
+    recorder: TrajectoryRecorder | None = None,
+    command_timeout: float | None = None,
+    time_budget: float | None = None,
+    max_context_tokens: int = 90_000,
 ) -> str:
-    """Run one task in plain terminal mode and return the final agent output."""
-    tool_wrapper = TerminalRunToolWrapper(yolo=yolo, non_interactive=non_interactive)
+    """Run one task in plain terminal mode and return the final agent output.
+
+    With `time_budget`, a final answer given while more than 10% of the budget
+    (and at least 10 minutes) remains is sent back with the time left, so the
+    agent keeps improving instead of quitting early.
+
+    When the recorder's cost limit is hit, no more model calls are made; with a
+    budget, the run then idles until 5 minutes before the deadline so background
+    jobs can keep improving the files they checkpoint.
+    """
+    deadline = monotonic() + time_budget if time_budget else None
+    current_recorder.set(recorder)
+    tool_wrapper = TerminalRunToolWrapper(
+        yolo=yolo, non_interactive=non_interactive, command_timeout=command_timeout
+    )
     current_agent = tool_wrapper.wrap_agent(agent)
     turn_input: object = task_prompt
+    if recorder:
+        recorder.write("user", content=task_prompt)
 
-    for _ in range(max_command_proposals):
-        result = await Runner.run(
-            current_agent,
-            turn_input,
+    def budget(until: float | None, total: float | None) -> str | None:
+        return budget_status(
+            until - monotonic() if until else None,
+            total,
+            recorder.total_cost if recorder else 0.0,
+            recorder.max_cost if recorder else None,
+        )
+
+    longrun = LongRun(deadline, task_prompt) if time_budget else None
+    if longrun:
+        longrun.approve = _approve_with(tool_wrapper)
+        base_agent = current_agent
+
+        def sub_filter(sub_deadline: float, name: str):
+            def sub_status():
+                span = sub_deadline - (deadline - time_budget)
+                parts = [budget(sub_deadline, span), longrun.status_text(f"{name}/")]
+                return "\n".join(p for p in parts if p)
+
+            return input_filter(max_context_tokens, sub_status)
+
+        longrun.run_subagent = make_subagent_runner(
+            base_agent,
+            longrun,
+            context=context,
+            max_turns=max_turns,
+            hooks=recorder,
+            input_filter_factory=sub_filter,
+        )
+        current_agent = base_agent.clone(tools=[*base_agent.tools, *longrun.tools()])
+
+    def status():
+        parts = [budget(deadline, time_budget)]
+        if longrun:
+            parts.append(longrun.status(1 - (deadline - monotonic()) / time_budget))
+        return "\n\n".join(p for p in parts if p) or None
+
+    run_config = RunConfig(call_model_input_filter=input_filter(max_context_tokens, status))
+    keeper = asyncio.create_task(longrun.keeper_loop()) if longrun else None
+    try:
+        return await _run_loop(
+            current_agent=current_agent,
+            turn_input=turn_input,
             context=context,
             max_turns=max_turns,
             session=session,
+            recorder=recorder,
+            run_config=run_config,
+            tool_wrapper=tool_wrapper,
+            deadline=deadline,
+            time_budget=time_budget,
+            max_command_proposals=max_command_proposals,
         )
+    finally:
+        if keeper:
+            keeper.cancel()
+            await asyncio.to_thread(longrun.check_outputs)  # leave the best versions in place
+            for sub in longrun.subagents.values():
+                sub.task.cancel()
+
+
+def _approve_with(tool_wrapper: TerminalRunToolWrapper):
+    async def approve(*, cmd: str, cwd: str = "", thought: str = "") -> bool:
+        tool_wrapper.render_command_proposal(cmd=cmd, cwd=cwd, thought=thought)
+        return await tool_wrapper.approve_command_async()
+
+    return approve
+
+
+MAX_MALFORMED_RESPONSES = 50
+
+
+def _resume_input(exc, turn_input, feedback: str, session):
+    """Input for a fresh `Runner.run` after `exc` aborted one: history so far + feedback."""
+    if session is not None:  # the session already holds the history
+        return feedback
+    items = [{"role": "user", "content": turn_input}] if isinstance(turn_input, str) else []
+    items = items or list(turn_input)
+    if exc.run_data:
+        new = [item.to_input_item() for item in exc.run_data.new_items]
+        answered = {i.get("call_id") for i in new if i.get("type") == "function_call_output"}
+        # A call without an output would be rejected by the API.
+        items += [
+            i for i in new if i.get("type") != "function_call" or i.get("call_id") in answered
+        ]
+    return [*items, {"role": "user", "content": feedback}]
+
+
+async def _run_loop(
+    *,
+    current_agent,
+    turn_input,
+    context,
+    max_turns,
+    session,
+    recorder,
+    run_config,
+    tool_wrapper,
+    deadline,
+    time_budget,
+    max_command_proposals,
+) -> str:
+    proposals = 0
+    malformed = 0
+    while True:
+        # Tool calls and text-command proposals keep a run going; stop them at the deadline.
+        if deadline is not None and monotonic() >= deadline:
+            return _time_up(recorder)
+        try:
+            result = await asyncio.wait_for(
+                Runner.run(
+                    current_agent,
+                    turn_input,
+                    context=context,
+                    max_turns=max_turns,
+                    session=session,
+                    hooks=recorder,
+                    run_config=run_config,
+                ),
+                deadline - monotonic() if deadline is not None else None,
+            )
+        except TimeoutError:
+            return _time_up(recorder)
+        except ModelBehaviorError as exc:
+            # A hallucinated tool name or broken call must not end hours of work:
+            # resume from the items produced so far and tell the model what went wrong.
+            malformed += 1
+            if malformed > MAX_MALFORMED_RESPONSES:
+                raise
+            feedback = (
+                f"Your last response was rejected: {exc}. Call only the tools you were "
+                "given, by their exact names, with valid JSON arguments."
+            )
+            if recorder:
+                recorder.write("user", content=feedback)
+            turn_input = _resume_input(exc, turn_input, feedback, session)
+            continue
+        except CostLimitReached as exc:
+            message = f"Cost limit reached: {exc}. Stopped calling the model."
+            typer.echo(message)
+            recorder.write("final_output", content=message)
+            if deadline:
+                await asyncio.sleep(max(0.0, deadline - 300 - monotonic()))
+            return message
         final_output = "" if result.final_output is None else str(result.final_output)
         bash_proposal = _extract_single_bash_command(final_output)
         if bash_proposal is None:
-            return final_output
-
-        command_result = await tool_wrapper.execute_bash(
-            cmd=bash_proposal.cmd,
-            thought=bash_proposal.thought,
-        )
-        feedback = _build_command_feedback(bash_proposal.cmd, command_result)
+            remaining = deadline - monotonic() if deadline else 0
+            if remaining <= max(0.1 * (time_budget or 0), 600):
+                if recorder:
+                    recorder.write("final_output", content=final_output)
+                return final_output
+            feedback = (
+                f"You still have {remaining:.0f} s of your {time_budget:.0f} s budget. "
+                "Do not stop yet: unless the task's target is demonstrably met, keep "
+                "improving the result, and make sure your best result so far is already "
+                "saved to the required output files before any long job."
+            )
+            if recorder:
+                recorder.write("user", content=feedback)
+        else:
+            feedback = await _run_text_bash_proposal(tool_wrapper, bash_proposal, recorder)
+            proposals += 1
+            if proposals >= max_command_proposals:
+                raise click.ClickException(
+                    f"Max command proposals reached while running task: {max_command_proposals}."
+                )
         if session is not None:
             turn_input = feedback
         else:
@@ -276,9 +467,23 @@ async def run_agent_task(
             turn_input = turn_items
         current_agent = result.last_agent
 
-    raise click.ClickException(
-        f"Max command proposals reached while running task: {max_command_proposals}."
+
+def _time_up(recorder) -> str:
+    message = "Time budget used up. Stopped calling the model."
+    typer.echo(message)
+    if recorder:
+        recorder.write("final_output", content=message)
+    return message
+
+
+async def _run_text_bash_proposal(tool_wrapper, bash_proposal, recorder) -> str:
+    command_result = await tool_wrapper.execute_bash(
+        cmd=bash_proposal.cmd,
+        thought=bash_proposal.thought,
     )
+    if recorder:
+        recorder.write("tool_result", tool="text_bash_proposal", output=str(command_result))
+    return _build_command_feedback(bash_proposal.cmd, command_result)
 
 
 @app.callback(invoke_without_command=True)
@@ -401,6 +606,31 @@ def run_task(
         "--chat",
         help="Conversation id for persistent SQLite chat history.",
     ),
+    trajectory: str | None = typer.Option(
+        None,
+        "--trajectory",
+        help="Append every LLM response, tool result and its token cost to this JSONL file.",
+    ),
+    command_timeout: float | None = typer.Option(
+        None,
+        "--command-timeout",
+        help="Kill any single bash command after this many seconds (default: no limit).",
+    ),
+    time_budget: float | None = typer.Option(
+        None,
+        "--time-budget",
+        help="Wall-clock budget in seconds; an early final answer is sent back with the time left.",
+    ),
+    max_cost: float | None = typer.Option(
+        None,
+        "--max-cost",
+        help="Stop calling the model once this many USD are spent (priced by token_costs).",
+    ),
+    max_context_tokens: int = typer.Option(
+        90_000,
+        "--max-context-tokens",
+        help="Trim old tool outputs, then the oldest turns, so each request stays under this size.",
+    ),
 ) -> None:
     """Run HepAgent with a task prompt."""
     options = ctx.obj or {}
@@ -421,18 +651,31 @@ def run_task(
         mlflow.openai.autolog()
 
     runtime = build_runtime(agent_name=agent_name, model=model, chat=chat)
-    result = asyncio.run(
-        run_agent_task(
-            agent=runtime["agent"],
-            task_prompt=task_prompt,
-            context=runtime["context"],
-            max_turns=max_turns,
-            max_command_proposals=max_command_proposals,
-            session=runtime["session"],
-            yolo=yolo,
-            non_interactive=non_interactive,
-        )
+    recorder = (
+        TrajectoryRecorder(trajectory, runtime["display_model"], max_cost)
+        if trajectory or max_cost is not None
+        else None
     )
+    try:
+        result = asyncio.run(
+            run_agent_task(
+                agent=runtime["agent"],
+                task_prompt=task_prompt,
+                context=runtime["context"],
+                max_turns=max_turns,
+                max_command_proposals=max_command_proposals,
+                session=runtime["session"],
+                yolo=yolo,
+                non_interactive=non_interactive,
+                recorder=recorder,
+                command_timeout=command_timeout,
+                time_budget=time_budget,
+                max_context_tokens=max_context_tokens,
+            )
+        )
+    finally:
+        if recorder:
+            recorder.close()
     if result:
         typer.echo(result)
 
@@ -580,6 +823,7 @@ def list_agents() -> None:
     """List available run modes and role agents."""
     typer.echo("Built-in run modes:")
     typer.echo("\tscientist -> skilled research agent")
+    typer.echo("\tphysicist -> scientist + budgeted computational-research playbook")
     typer.echo("\texplorer -> research-direction explorer")
     typer.echo("\tshell -> --shell/-s")
     typer.echo("\tshell_describer -> --describe/-d")
