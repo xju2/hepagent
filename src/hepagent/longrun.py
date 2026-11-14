@@ -15,6 +15,7 @@ find. This module gives the agent:
 from __future__ import annotations
 
 import asyncio
+import filecmp
 import os
 import re
 import shlex
@@ -22,7 +23,7 @@ import shutil
 import signal
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import monotonic
 
@@ -68,6 +69,13 @@ def available_cpus() -> int:
     except (OSError, ValueError):
         pass
     return cpus or 1
+
+
+def _same(a: Path, b: Path) -> bool:
+    try:
+        return filecmp.cmp(a, b, shallow=False)
+    except OSError:
+        return False
 
 
 def _fmt(seconds: float) -> str:
@@ -232,6 +240,11 @@ class LongRun:
                 elif score == out.best:
                     pass  # unchanged
                 elif out.best is not None and out.snapshot.exists():
+                    if out.path.exists() and not _same(out.path, probe):
+                        # shortcut: a write between this check and the restore can still be
+                        # lost; coordinate with writers (versioned files) if that bites.
+                        notes.append(f"{out.path}: changed while scoring; rechecking later.")
+                        continue
                     tmp = out.path.with_name(f".{out.path.name}.restore")
                     shutil.copyfile(out.snapshot, tmp)
                     os.replace(tmp, out.path)
@@ -430,6 +443,15 @@ class LongRun:
             replaces `{path}`, or is appended). It must print the score as its last line
             and exit 0 only if the file is valid. Lower is better unless higher_is_better.
             """
+            known = lr.outputs.get(str(Path(path).resolve()))
+            if (
+                lr.approve
+                and (known is None or known.score_cmd != score_cmd)
+                and not await lr.approve(
+                    cmd=score_cmd, thought=f"Score command for {path}, rerun every minute."
+                )
+            ):
+                return "Rejected by the user."
             return await asyncio.to_thread(lr.keep, path, score_cmd, higher_is_better)
 
         tools = [job_start, job_status, job_stop, wait, keep_best]
@@ -462,7 +484,8 @@ def make_subagent_runner(
         result = await Runner.run(
             agent,
             prompt,
-            context=context,
+            # Own context: a skill one delegate loads must not switch the others' skill.
+            context=replace(context, active_skill=None),
             max_turns=max_turns,
             hooks=hooks,
             run_config=RunConfig(call_model_input_filter=input_filter_factory(deadline, name)),

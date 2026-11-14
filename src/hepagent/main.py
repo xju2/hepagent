@@ -11,6 +11,7 @@ from typer.core import TyperGroup
 from agents import Agent, RunConfig, Runner, SQLiteSession
 from agents.exceptions import ModelBehaviorError
 from agents.run import DEFAULT_MAX_TURNS
+from agents.tool import FunctionTool
 from hepagent.agents.bash import TOOL_CANCEL_MESSAGE, execute_bash_command
 from hepagent.agents.cli_repl import (
     CliRepl,
@@ -38,7 +39,8 @@ from hepagent.model_providers import (
     parse_model_spec,
 )
 from hepagent.plan.templates import DEFAULT_TEMPLATE
-from hepagent.trajectory import CostLimitReached, TrajectoryRecorder
+from hepagent.trajectory import CostLimitReached, TrajectoryRecorder, current_recorder
+from hepagent.web.tools import LONG_BLOCKING_TOOL_NAMES, offload_blocking_tool
 
 
 class DefaultToRunGroup(TyperGroup):
@@ -163,6 +165,9 @@ class TerminalRunToolWrapper:
                 wrapped.append(self._create_bash_tool())
             elif "ask_user_for_info" in name:
                 wrapped.append(self._create_ask_user_tool())
+            elif name in LONG_BLOCKING_TOOL_NAMES and isinstance(tool, FunctionTool):
+                # Sync waits would stall delegates, the keeper and timeouts on the shared loop.
+                wrapped.append(offload_blocking_tool(tool))
             else:
                 wrapped.append(tool)
         return wrapped
@@ -278,6 +283,7 @@ async def run_agent_task(
     jobs can keep improving the files they checkpoint.
     """
     deadline = monotonic() + time_budget if time_budget else None
+    current_recorder.set(recorder)
     tool_wrapper = TerminalRunToolWrapper(
         yolo=yolo, non_interactive=non_interactive, command_timeout=command_timeout
     )
@@ -391,16 +397,24 @@ async def _run_loop(
     proposals = 0
     malformed = 0
     while True:
+        # Tool calls and text-command proposals keep a run going; stop them at the deadline.
+        if deadline is not None and monotonic() >= deadline:
+            return _time_up(recorder)
         try:
-            result = await Runner.run(
-                current_agent,
-                turn_input,
-                context=context,
-                max_turns=max_turns,
-                session=session,
-                hooks=recorder,
-                run_config=run_config,
+            result = await asyncio.wait_for(
+                Runner.run(
+                    current_agent,
+                    turn_input,
+                    context=context,
+                    max_turns=max_turns,
+                    session=session,
+                    hooks=recorder,
+                    run_config=run_config,
+                ),
+                deadline - monotonic() if deadline is not None else None,
             )
+        except TimeoutError:
+            return _time_up(recorder)
         except ModelBehaviorError as exc:
             # A hallucinated tool name or broken call must not end hours of work:
             # resume from the items produced so far and tell the model what went wrong.
@@ -452,6 +466,14 @@ async def _run_loop(
             turn_items.append({"role": "user", "content": feedback})
             turn_input = turn_items
         current_agent = result.last_agent
+
+
+def _time_up(recorder) -> str:
+    message = "Time budget used up. Stopped calling the model."
+    typer.echo(message)
+    if recorder:
+        recorder.write("final_output", content=message)
+    return message
 
 
 async def _run_text_bash_proposal(tool_wrapper, bash_proposal, recorder) -> str:

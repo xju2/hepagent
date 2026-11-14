@@ -9,6 +9,7 @@ With no path, only the cost is tracked.
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,12 @@ from hepagent.token_costs import calculate_cost
 
 class CostLimitReached(Exception):
     pass
+
+
+# The run's recorder, for nested `Runner.run` calls inside tools (explorer specialists).
+current_recorder: ContextVar[TrajectoryRecorder | None] = ContextVar(
+    "current_recorder", default=None
+)
 
 
 class TrajectoryRecorder(RunHooks):
@@ -39,7 +46,13 @@ class TrajectoryRecorder(RunHooks):
         self._fh.write(json.dumps(record, default=str) + "\n")
         self._fh.flush()
 
+    def check_cost(self) -> None:
+        if self.max_cost is not None and self.total_cost >= self.max_cost:
+            raise CostLimitReached(f"${self.total_cost:.2f} spent (limit ${self.max_cost:.2f})")
+
     async def on_llm_start(self, context, agent, system_prompt, input_items) -> None:
+        # Delegates and specialists share this recorder; refuse a request once any spent the cap.
+        self.check_cost()
         if not self._system_prompt_written and system_prompt:
             self._system_prompt_written = True
             self.write("system_prompt", content=system_prompt)
@@ -59,8 +72,7 @@ class TrajectoryRecorder(RunHooks):
             output_tokens=usage.output_tokens,
             cost_usd=cost,
         )
-        if self.max_cost is not None and self.total_cost >= self.max_cost:
-            raise CostLimitReached(f"${self.total_cost:.2f} spent (limit ${self.max_cost:.2f})")
+        self.check_cost()
 
     async def on_tool_end(self, context, agent, tool, result) -> None:
         self.write("tool_result", tool=getattr(tool, "name", ""), output=str(result))

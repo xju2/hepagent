@@ -1,4 +1,5 @@
 import asyncio
+import json
 from time import monotonic
 
 import hepagent.longrun as longrun_module
@@ -150,3 +151,38 @@ def test_stopping_a_long_running_job_needs_force(tmp_path):
     assert lr.jobs["j"].proc.poll() is None
     assert "Stopped" in lr.stop("j", force=True)
     lr.jobs["j"].proc.wait(timeout=10)
+
+
+def test_keeper_does_not_restore_over_file_changed_while_scoring(tmp_path):
+    lr = _lr(tmp_path)
+    out = tmp_path / "result.txt"
+    out.write_text("5\n")
+    cmd = "python3 -c 'import sys; print(float(open(sys.argv[1]).read()))'"
+    lr.keep(str(out), cmd)
+    out.write_text("9\n")
+    real_score = lr._score
+
+    def score_while_job_writes(o, path):
+        out.write_text("1\n")  # a job publishes a better result mid-check
+        return real_score(o, path)
+
+    lr._score = score_while_job_writes
+    assert any("changed while scoring" in n for n in lr.check_outputs())
+    assert out.read_text() == "1\n"
+
+
+def test_keep_best_asks_approval_for_score_cmd(tmp_path):
+    lr = _lr(tmp_path)
+    asked = []
+
+    async def reject(**kw):
+        asked.append(kw["cmd"])
+        return False
+
+    lr.approve = reject
+    keep_best = next(t for t in lr.tools() if t.name == "keep_best")
+    out = tmp_path / "r.txt"
+    out.write_text("1\n")
+    args = json.dumps({"path": str(out), "score_cmd": "cat"})
+    assert asyncio.run(keep_best.on_invoke_tool(None, args)) == "Rejected by the user."
+    assert asked == ["cat"] and not lr.outputs

@@ -58,3 +58,18 @@ def test_input_filter_appends_status_as_last_message():
     assert out.instructions == "sys"
     assert out.input == [*items, {"role": "user", "content": "# BUDGET\nTime left: 1 s of 2 s."}]
     assert items == [{"role": "user", "content": "task"}]
+
+
+def test_cut_between_parallel_calls_drops_orphaned_output():
+    call = {"type": "function_call", "name": "bash", "arguments": "{}"}
+    items = [
+        {"role": "user", "content": "task"},
+        {"role": "user", "content": "x" * 3000},
+        {**call, "call_id": "a"},
+        {**call, "call_id": "b"},
+        {"type": "function_call_output", "call_id": "a", "output": "A"},
+        {"type": "function_call_output", "call_id": "b", "output": "B"},
+    ]
+    out = trim(items, None, max_tokens=300)
+    calls = {it["call_id"] for it in out if it.get("type") == "function_call"}
+    assert all(it["call_id"] in calls for it in out if it.get("type") == "function_call_output")

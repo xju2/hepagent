@@ -52,3 +52,6 @@ def test_recorder_raises_once_cost_limit_reached():
     with pytest.raises(CostLimitReached):
         asyncio.run(rec.on_llm_end(None, None, response))  # $1.40
     assert rec.total_cost == pytest.approx(1.40)
+    # A delegate sharing the recorder must not start another paid request.
+    with pytest.raises(CostLimitReached):
+        asyncio.run(rec.on_llm_start(None, None, "sys", []))

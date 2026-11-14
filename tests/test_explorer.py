@@ -57,7 +57,7 @@ async def test_run_specialist_panel_runs_selected_agents(monkeypatch):
             self.model = model
             self.tools = tools
 
-    async def fake_run(agent, prompt):
+    async def fake_run(agent, prompt, hooks=None):
         calls.append((agent.name, prompt))
         return SimpleNamespace(final_output=f"memo from {agent.name}")
 

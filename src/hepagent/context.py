@@ -60,12 +60,16 @@ def trim(items: list, instructions: str | None, max_tokens: int) -> list:
         cut += 1
     if cut == 1:
         return items
+    kept = items[cut:]
+    # Parallel calls: an output can follow a later call, so drop every orphaned output.
+    calls = {it.get("call_id") for it in kept if _type(it) == "function_call"}
+    kept = [it for it in kept if _type(it) != "function_call_output" or it.get("call_id") in calls]
     note = {
         "role": "user",
         "content": f"[{cut - 1} earlier conversation items were dropped to fit the context "
         "window. Continue from your STATE.md and files for anything from before.]",
     }
-    return items[:1] + [note] + items[cut:]
+    return items[:1] + [note] + kept
 
 
 WRAP_UP_AT = 0.75

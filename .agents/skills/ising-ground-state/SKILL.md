@@ -9,7 +9,12 @@ description: Find ground states (lowest-energy spin configurations) of Ising spi
 parallel tempering with two replicas per temperature, Houdayer isoenergetic cluster
 moves at the colder half of the ladder, and a zero-temperature polish of each record.
 It works on any sparse graph with integer couplings (multiply real couplings by a
-common factor and round). QUBO and MaxCut map to this form by `x = (1 + s) / 2`.
+common factor and round). MaxCut maps directly: `J_ij = -w_ij`. A general QUBO maps by
+`x = (1 + s) / 2`, which also creates linear terms `h_i s_i` (from diagonal `Q_ii` and
+from each off-diagonal pair) that this pairwise-only solver cannot take. Add an
+auxiliary reference spin `s_N` (so `N+1` sites) and encode each energy term `+h_i s_i`
+as the coupling `J_{i,N} = -h_i`; decode the answer as `s_i * s_N`, since flipping every
+spin leaves the energy unchanged. Dropping the linear terms changes the optimum.
 
 Do not write your own annealer first. Use this one, and spend your effort on running
 it well and on analysing the instance.
